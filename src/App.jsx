@@ -12213,12 +12213,110 @@ function CertTypeForm({ S, initial, busy, err, onSave, onCancel }) {
     </div>
   );
 }
+/* ADD FROM THE STANDARD LIST — the global master list (standard_cert_types: SFFMA / TCFP / Texas EMS / cards), read
+   directly through its authenticated SELECT policy. Each pick goes through add_standard_cert_type, which COPIES the
+   standard into this department's catalog (is_dept_admin()-gated, my_department_id()-scoped); the copy is then an
+   ordinary cert type (Edit / Delete as usual). Names already in the catalog show as added; the RPC's clash ("already
+   in your catalog") is surfaced per item, never swallowed. */
+const STD_TRACKS = [["sffma", "SFFMA"], ["tcfp", "TCFP"], ["ems", "Texas EMS"], ["cards", "Cards"]];
+const certNameKey = (n) => (n || "").trim().toLowerCase();
+function StandardCertPicker({ S, types, reload, notify, onClose }) {
+  const [std, setStd] = useState(null);                  // null = not loaded yet
+  const [loadErr, setLoadErr] = useState("");
+  const [picked, setPicked] = useState(() => new Set()); // standard ids
+  const [openTracks, setOpenTracks] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState({});              // standard id → the RPC's message
+  useEditorOpen(picked.size > 0);                        // a half-made selection: a roster refresh must not drop it
+  async function load() {
+    setLoadErr("");
+    const { data, error } = await supabase.from("standard_cert_types").select("id, track, name, never_expires, category, sort_order").order("sort_order");
+    if (error || !Array.isArray(data)) { setLoadErr(error?.message || "Couldn't load the standard list."); return; }   // keep whatever we had
+    setStd(data);
+  }
+  useEffect(() => { load(); }, []);
+  const have = new Set(types.map((t) => certNameKey(t.name)));
+  const pickedNames = new Set((std || []).filter((s) => picked.has(s.id)).map((s) => certNameKey(s.name)));
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleTrack = (k) => setOpenTracks((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  async function addPicked() {
+    const list = (std || []).filter((s) => picked.has(s.id));
+    if (!list.length) return;
+    setBusy(true); setFailed({});
+    const bad = {}; let ok = 0;
+    for (const s of list) {                              // one at a time, so each clash lands on its own row
+      const { error } = await supabase.rpc("add_standard_cert_type", { p_standard_id: s.id });
+      if (error) bad[s.id] = error.message || "Couldn't add it.";
+      else ok += 1;
+    }
+    const r = await reload();
+    setBusy(false);
+    setFailed(bad);
+    setPicked(new Set(Object.keys(bad)));                // keep only the ones that didn't go in
+    const nBad = Object.keys(bad).length;
+    if (r.error) notify({ kind: "error", title: `${ok ? `Added ${ok}` : "Nothing added"} — but couldn't refresh the list`, text: "Reload to see the change.", details: r.error.message });
+    else if (nBad) notify({ kind: "error", title: ok ? `Added ${ok}, ${nBad} not added` : `${nBad} not added`, text: "The reason is shown on each one below." });
+    else { notify({ kind: "success", text: `Added ${ok} cert type${ok === 1 ? "" : "s"} from the standard list.` }); onClose(); }
+  }
+  return (
+    <div style={{ ...FS.cardNoir, padding: "13px 14px", marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13.5, color: FIRE.textPrimary }}>Add from the standard list</div>
+      <div style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.45 }}>Pick the Texas certifications your department tracks. Each one is copied into your catalog — you can still edit or delete it afterwards.</div>
+      {loadErr && <div role="alert" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.redText }}>{loadErr}
+        <button style={{ ...FS.btn, padding: "4px 8px", fontSize: 12 }} onClick={load}><RefreshCw size={13} color={FIRE.btnIcon} /> Retry</button></div>}
+      {!std && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading the standard list…</div>}
+      {std && STD_TRACKS.map(([track, label]) => {
+        const list = std.filter((s) => s.track === track);
+        if (!list.length) return null;
+        const isOpen = openTracks.has(track);
+        const nPicked = list.filter((s) => picked.has(s.id)).length;
+        const nHave = list.filter((s) => have.has(certNameKey(s.name))).length;
+        return (
+          <div key={track}>
+            <button type="button" onClick={() => toggleTrack(track)} aria-expanded={isOpen}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", borderBottom: `1px solid ${FIRE.lineNoir}`, padding: "8px 0", cursor: "pointer", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 11, letterSpacing: ".09em", textTransform: "uppercase", color: FIRE.textSecondary, textAlign: "left" }}>
+              <ChevronRight size={13} style={{ transform: isOpen ? "rotate(90deg)" : "none" }} />
+              {label}<span style={{ color: FIRE.textMuted, ...FS.num }}>{list.length}</span>
+              <span style={{ marginLeft: "auto", textTransform: "none", letterSpacing: 0, fontWeight: 600, ...FS.num, color: nPicked ? FIRE.textPrimary : FIRE.textMuted }}>
+                {nPicked ? `${nPicked} selected` : nHave ? `${nHave} added` : ""}
+              </span>
+            </button>
+            {isOpen && list.map((s) => {
+              const added = have.has(certNameKey(s.name));
+              const sameName = !picked.has(s.id) && pickedNames.has(certNameKey(s.name));   // e.g. "Fire Inspector" is in SFFMA and TCFP
+              const off = added || sameName || busy;
+              return (
+                <div key={s.id} style={{ borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0 8px 4px", cursor: off ? "default" : "pointer", opacity: added || sameName ? 0.55 : 1 }}>
+                    <input type="checkbox" checked={added || picked.has(s.id)} disabled={off} onChange={() => toggle(s.id)} />
+                    <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{s.name}</span>
+                    {added ? <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.textMuted }}>In your catalog</span>
+                      : sameName ? <span style={{ fontSize: 11.5, fontWeight: 700, color: FIRE.textMuted }}>Same name selected</span>
+                      : <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: s.never_expires ? FIRE.greenText : FIRE.textSecondary }}>
+                          {s.never_expires ? <><CheckCircle2 size={13} /> Doesn't expire</> : <><Clock size={13} /> Expires</>}
+                        </span>}
+                  </label>
+                  {failed[s.id] && <div role="alert" style={{ fontSize: 12, color: FIRE.redText, padding: "0 0 8px 30px" }}>{failed[s.id]}</div>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button style={{ ...FS.btnPrimary, opacity: busy || !picked.size ? 0.7 : 1 }} disabled={busy || !picked.size} onClick={addPicked}>
+          {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {picked.size ? `Add ${picked.size} to catalog` : "Add to catalog"}</button>
+        <button style={FS.btn} disabled={busy} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+}
 function CertTypesPanel({ S, role, notify }) {
   const { types, reload } = React.useContext(CertTypesCtx);
   const canManageTypes = isDeptAdmin(role);              // set_cert_type / delete_cert_type: is_dept_admin() (DA / PA)
   const canDeleteShared = useCanDeleteShared();          // the typed-phrase delete gate (DA / PA — the same set)
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(null);          // null = no form; "new" = add; else the type row being edited
+  const [editing, setEditing] = useState(null);          // null = no form; "new" = add; "standard" = the standard-list picker; else the type row being edited
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (!canManageTypes) return null;
@@ -12252,6 +12350,7 @@ function CertTypesPanel({ S, role, notify }) {
         <CardHead icon={Award} title="Cert types" style={{ marginBottom: 0, width: "auto" }} />
         <span style={{ fontSize: 12, color: FIRE.textMuted }}>{types.length ? `${types.length} in your catalog` : "No types yet"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {open && <button style={FS.btn} onClick={() => startEdit("standard")} disabled={busy}><Award size={14} color={FIRE.btnIcon} /> Add from the standard list</button>}
           {open && <button style={FS.btn} onClick={() => startEdit("new")} disabled={busy}><Plus size={14} color={FIRE.btnIcon} /> Add cert type</button>}
           <button style={FS.btn} onClick={() => { setOpen((v) => !v); setEditing(null); }}>{open ? "Hide" : "Manage"} <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none" }} /></button>
         </div>
@@ -12259,7 +12358,8 @@ function CertTypesPanel({ S, role, notify }) {
       {open && (<>
         <div style={{ fontSize: 12, color: FIRE.textSecondary, margin: "8px 0 4px", lineHeight: 1.45 }}>Define each certification once — mark the ones that don't expire — then attach it to a member's cert (on their file) so it reads the same everywhere.</div>
         {editing === "new" && <CertTypeForm S={S} busy={busy} err={err} onSave={save} onCancel={() => setEditing(null)} />}
-        {types.length === 0 && editing !== "new" && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No cert types yet — add your first one.</div>}
+        {editing === "standard" && <StandardCertPicker S={S} types={types} reload={reload} notify={notify} onClose={() => setEditing(null)} />}
+        {types.length === 0 && !editing && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "10px 0" }}>No cert types yet — add your first one, or pick from the standard list.</div>}
         {CERT_CATS.map(([cat, catLabel]) => {
           const list = types.filter((t) => t.category === cat);
           if (!list.length) return null;

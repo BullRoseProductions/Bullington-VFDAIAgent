@@ -1,0 +1,423 @@
+# STANDARD CERT PRE-LOAD (DB) — DRAFT (not reviewed, not applied). Two new files + the PGlite dry run (mock = live shape with Slices A + B applied,
+# RLS on member_active_department). Nothing existing is edited — the migration only CREATEs (table, index, policy, seed, one RPC).
+# DATA FLAG (for Tommy): 'Fire Inspector' and 'Incident Safety Officer' are in BOTH sffma and tcfp — a department can add only one of each
+# (cert_types is unique per department by name), the second reads "That cert type is already in your catalog."
+
+diff --git a/sql/standard_certs_DRAFT.sql b/sql/standard_certs_DRAFT.sql
+new file mode 100644
+index 0000000..6bcf8fa
+--- /dev/null
++++ b/sql/standard_certs_DRAFT.sql
+@@ -0,0 +1,204 @@
++-- =====================================================================
++-- STANDARD CERT PRE-LOAD (DB) — DRAFT, NOT REVIEWED, NOT APPLIED.
++-- Order: claude/B4C_StandardCerts_DB_BuildOrder.md. Built on the live cert catalog (Slices A + B).
++--
++-- THE CHANGE — additive only:
++--   1 standard_cert_types — a GLOBAL reference list (above departments: no department_id, no FK): track (sffma | tcfp |
++--     ems | cards), name, never_expires, category (certification | continuing_education), sort_order, created_at.
++--     RLS on; ONE policy — SELECT TO authenticated USING (true) (identical, non-sensitive reference data for every
++--     department); no write policy (seed-only). Unique on (track, lower(btrim(name))).
++--   2 the seed — 69 rows (SFFMA 24 · TCFP 32 · Texas EMS 5 · cards 8). The never_expires flags are PROPOSED defaults
++--     (Tommy reviews after); a later migration can UPDATE them without touching any department's catalog — a
++--     department's copy is an independent cert_types row once added.
++--   3 add_standard_cert_type(p_standard_id) — SECURITY DEFINER, search_path public, EXECUTE authenticated only. Same
++--     gate as set_cert_type: is_dept_admin() + my_department_id(). Copies the standard row's name / never_expires /
++--     category into the caller's cert_types (created_by / updated_by = my_member_id()) and returns the new row. The
++--     existing per-department unique name → "That cert type is already in your catalog."
++-- NOT touched: cert_types' shape (columns, constraints, indexes, policy), set_cert_type / delete_cert_type /
++-- dept_cert_types / assign_cert_type, the readers (expiration_rows, readiness_window, dept_cert_readiness,
++-- probation_item_states, readiness_items, ...), any gate. No list RPC — the picker reads the table through its policy.
++--
++-- Single all-or-nothing DO block; refuses a second apply (the table and the RPC must not exist) and refuses on drift
++-- (Slice A live; is_dept_admin md5 c692e44f…). Post-conditions: the table, RLS, its one policy, the CHECKs and unique
++-- index; 69 seed rows (24 / 32 / 5 / 8) with the proposed flags; the RPC's definer / search_path / grants; cert_types'
++-- shape byte-identical; every other function and policy byte-identical; total_policies +1; the locked-token count
++-- unchanged. The locked verification column is never touched. State check at the end.
++-- =====================================================================
++DO $migrate$
++DECLARE
++  v_cert_types_before text; v_cert_types_after text;
++  v_fns_before text; v_fns_after text; v_pol_before text; v_pol_after text; v_total_before int; v_tok_before int;
++BEGIN
++  -- ---------------------------------------------------------------- preconditions
++  IF to_regclass('public.standard_cert_types') IS NOT NULL THEN
++    RAISE EXCEPTION 'Precondition failed: public.standard_cert_types already exists — already applied. Nothing changed.';
++  END IF;
++  IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'add_standard_cert_type') THEN
++    RAISE EXCEPTION 'Precondition failed: add_standard_cert_type already exists. Nothing changed.';
++  END IF;
++  IF to_regclass('public.cert_types') IS NULL OR to_regprocedure('public.set_cert_type(uuid,text,boolean,text)') IS NULL THEN
++    RAISE EXCEPTION 'Precondition failed: the cert catalog (Slice A: cert_types + set_cert_type) is not live. Nothing changed.';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'cert_types_dept_name_uq'
++                  AND indexdef = 'CREATE UNIQUE INDEX cert_types_dept_name_uq ON public.cert_types USING btree (department_id, lower(btrim(name)))') THEN
++    RAISE EXCEPTION 'Precondition failed: cert_types_dept_name_uq is not the Slice A index (the friendly clash relies on it). Nothing changed.';
++  END IF;
++  IF md5(pg_get_functiondef('public.is_dept_admin()'::regprocedure)) <> 'c692e44f62923d2bf4c1a39a21a87bf7' THEN
++    RAISE EXCEPTION 'Precondition failed: is_dept_admin() is not the department-scoped Step A version (md5 c692e44f…). Nothing changed.';
++  END IF;
++
++  -- snapshots: cert_types' whole shape, every function, every policy, counts
++  SELECT string_agg(x, E'\n' ORDER BY x) INTO v_cert_types_before FROM (
++    SELECT 'col|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull::text || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') AS x
++      FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
++     WHERE a.attrelid = 'public.cert_types'::regclass AND a.attnum > 0 AND NOT a.attisdropped
++    UNION ALL SELECT 'con|' || conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'public.cert_types'::regclass
++    UNION ALL SELECT 'idx|' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'cert_types'
++    UNION ALL SELECT 'rls|' || relrowsecurity::text || '|' || relforcerowsecurity::text || '|' || coalesce(relacl::text, '') FROM pg_class WHERE oid = 'public.cert_types'::regclass) s;
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)) || '|' || coalesce(p.proacl::text, ''), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_before FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p');
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_total_before FROM pg_policies WHERE schemaname = 'public';
++  SELECT count(*) INTO v_tok_before FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0;
++
++  -- ---------------------------------------------------------------- 1 the table
++  CREATE TABLE public.standard_cert_types (
++    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++    track text NOT NULL CONSTRAINT standard_cert_types_track_chk CHECK (track IN ('sffma', 'tcfp', 'ems', 'cards')),
++    name text NOT NULL CONSTRAINT standard_cert_types_name_chk CHECK (btrim(name) <> ''),
++    never_expires boolean NOT NULL,
++    category text NOT NULL CONSTRAINT standard_cert_types_category_chk CHECK (category IN ('certification', 'continuing_education')),
++    sort_order int NOT NULL DEFAULT 0,
++    created_at timestamptz NOT NULL DEFAULT now()
++  );
++  CREATE UNIQUE INDEX standard_cert_types_track_name_uq ON public.standard_cert_types (track, lower(btrim(name)));
++  ALTER TABLE public.standard_cert_types ENABLE ROW LEVEL SECURITY;
++  CREATE POLICY "authenticated read standard_cert_types" ON public.standard_cert_types FOR SELECT TO authenticated USING (true);
++
++  -- ---------------------------------------------------------------- 2 the seed (proposed flags — Tommy reviews after)
++  INSERT INTO public.standard_cert_types (track, name, never_expires, category, sort_order)
++  SELECT v.track, v.name, v.never_expires, v.category, v.ord
++    FROM (
++      SELECT 'sffma'::text AS track, n AS name, true AS never_expires, 'certification'::text AS category, o::int AS ord
++        FROM unnest(array['Firefighter', 'Master Firefighter', 'Support Personnel', 'Instructor', 'Fire Inspector', 'Fire/Arson Investigator',
++                          'Driver/Operator', 'Fire Officer', 'Incident Safety Officer', 'Public Information Officer', 'Fire & Life Safety Educator',
++                          'Wildland Fire Fighting', 'Telecommunicator', 'Rope Rescue', 'Confined Space Rescue', 'Trench Rescue',
++                          'Structural Collapse Rescue', 'Common Vehicle Rescue', 'Surface Water Rescue', 'Swiftwater Rescue',
++                          'Wilderness Search & Rescue', 'Machinery Rescue', 'Heavy Vehicle Rescue', 'Hazardous Materials']) WITH ORDINALITY u(n, o)
++      UNION ALL
++      SELECT 'tcfp', n, true, 'certification', o::int
++        FROM unnest(array['Full Structure Fire Fighting', 'Firefighter I', 'Firefighter II', 'Aircraft Rescue Firefighter', 'Marine Firefighter',
++                          'Driver Operator–Pumper', 'Driver Operator–Aerial', 'Officer I', 'Officer II', 'Officer III', 'Officer IV',
++                          'Instructor I', 'Instructor II', 'Instructor III', 'Fire Inspector', 'Inspector I', 'Inspector II', 'Plans Examiner I',
++                          'Investigator', 'Fire Marshal', 'Fire & Life Safety Educator I', 'Fire & Life Safety Educator II',
++                          'Incident Safety Officer', 'Incident Commander', 'Basic Wildland Firefighter', 'Intermediate Wildland',
++                          'Hazardous Materials Awareness', 'Hazardous Materials Operations', 'Hazardous Materials Technician',
++                          'Hazardous Materials Incident Commander', 'Rope Rescue Awareness/Operations', 'Rope Rescue Technician']) WITH ORDINALITY u(n, o)
++      UNION ALL
++      SELECT 'ems', n, false, 'certification', o::int   -- DSHS: renew every 4 years
++        FROM unnest(array['Emergency Care Attendant (ECA)', 'Emergency Medical Technician (EMT)', 'Advanced EMT (AEMT)',
++                          'EMT-Paramedic (EMT-P)', 'Licensed Paramedic (LP)']) WITH ORDINALITY u(n, o)
++      UNION ALL
++      SELECT 'cards', n, ne, 'continuing_education', o::int
++        FROM unnest(array['CPR / BLS', 'ACLS', 'PALS', 'PHTLS / ITLS', 'NIMS/ICS 100', 'NIMS/ICS 200', 'NIMS/ICS 700', 'NIMS/ICS 800'],
++                    array[false, false, false, false, true, true, true, true]) WITH ORDINALITY u(n, ne, o)
++    ) v
++  ON CONFLICT (track, lower(btrim(name))) DO NOTHING;
++
++  -- ---------------------------------------------------------------- 3 the RPC
++  CREATE FUNCTION public.add_standard_cert_type(p_standard_id uuid)
++   RETURNS public.cert_types LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
++  AS $fn$
++  -- B4C:standard certs — a Department Admin (or PA) copies a standard cert type into their OWN department's catalog. The
++  -- copy is an ordinary cert_types row afterwards (edit via set_cert_type, delete via delete_cert_type).
++  declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id();
++          v_std public.standard_cert_types; v_row public.cert_types;
++  begin
++    if v_dept is null or not coalesce(public.is_dept_admin(), false) then
++      raise exception 'Only a Department Admin can manage cert types.';
++    end if;
++    select * into v_std from public.standard_cert_types where id = p_standard_id;
++    if not found then raise exception 'That standard cert type was not found.'; end if;
++    begin
++      insert into public.cert_types (department_id, name, never_expires, category, created_by, updated_by)
++      values (v_dept, btrim(v_std.name), v_std.never_expires, v_std.category, v_me, v_me)
++      returning * into v_row;
++    exception when unique_violation then
++      raise exception 'That cert type is already in your catalog.';
++    end;
++    return v_row;
++  end;
++  $fn$;
++  REVOKE EXECUTE ON FUNCTION public.add_standard_cert_type(uuid) FROM PUBLIC, anon;
++  GRANT EXECUTE ON FUNCTION public.add_standard_cert_type(uuid) TO authenticated;
++
++  -- ---------------------------------------------------------------- post-conditions
++  -- (1) the table: columns, RLS, the one policy, CHECKs, unique index; global (no department column, no FK)
++  IF (SELECT string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull::text, ',' ORDER BY a.attnum)
++        FROM pg_attribute a WHERE a.attrelid = 'public.standard_cert_types'::regclass AND a.attnum > 0 AND NOT a.attisdropped)
++     IS DISTINCT FROM 'id:uuid:true,track:text:true,name:text:true,never_expires:boolean:true,category:text:true,sort_order:integer:true,created_at:timestamp with time zone:true' THEN
++    RAISE EXCEPTION 'Post-condition failed: standard_cert_types columns are not as designed.';
++  END IF;
++  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.standard_cert_types'::regclass) THEN RAISE EXCEPTION 'Post-condition failed: RLS is off on standard_cert_types.'; END IF;
++  IF (SELECT string_agg(policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n') FROM pg_policies WHERE schemaname = 'public' AND tablename = 'standard_cert_types')
++     IS DISTINCT FROM 'authenticated read standard_cert_types|SELECT|{authenticated}|true|' THEN
++    RAISE EXCEPTION 'Post-condition failed: standard_cert_types must have exactly one policy — SELECT, authenticated, USING (true).';
++  END IF;
++  IF (SELECT string_agg(pg_get_constraintdef(oid), ' | ' ORDER BY conname) FROM pg_constraint WHERE conrelid = 'public.standard_cert_types'::regclass AND contype IN ('c', 'f'))
++     IS DISTINCT FROM 'CHECK ((category = ANY (ARRAY[''certification''::text, ''continuing_education''::text]))) | CHECK ((btrim(name) <> ''''::text)) | CHECK ((track = ANY (ARRAY[''sffma''::text, ''tcfp''::text, ''ems''::text, ''cards''::text])))' THEN
++    RAISE EXCEPTION 'Post-condition failed: the CHECKs are not as designed (or a foreign key was added).';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'standard_cert_types_track_name_uq'
++                  AND indexdef = 'CREATE UNIQUE INDEX standard_cert_types_track_name_uq ON public.standard_cert_types USING btree (track, lower(btrim(name)))') THEN
++    RAISE EXCEPTION 'Post-condition failed: the (track, name) unique index is missing or different.';
++  END IF;
++  -- (2) the seed: 69 rows, the per-track counts, the proposed flags and categories, sort_order 1..n per track
++  IF (SELECT string_agg(track || ':' || n || ':' || ne || ':' || cat || ':' || ord_ok, ',' ORDER BY track) FROM (
++        SELECT track, count(*) AS n, count(*) FILTER (WHERE never_expires) AS ne, string_agg(DISTINCT category, '/') AS cat,
++               (min(sort_order) = 1 AND max(sort_order) = count(*) AND count(DISTINCT sort_order) = count(*))::text AS ord_ok
++          FROM public.standard_cert_types GROUP BY track) s)
++     IS DISTINCT FROM 'cards:8:4:continuing_education:true,ems:5:0:certification:true,sffma:24:24:certification:true,tcfp:32:32:certification:true' THEN
++    RAISE EXCEPTION 'Post-condition failed: the seed is not the 69 rows (sffma 24 · tcfp 32 · ems 5 · cards 8) with the proposed flags.';
++  END IF;
++  -- (3) the RPC: definer, search_path pinned, EXECUTE authenticated only
++  IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = 'public.add_standard_cert_type(uuid)'::regprocedure AND p.prosecdef AND p.proconfig = array['search_path=public']
++                  AND has_function_privilege('authenticated', p.oid, 'EXECUTE') AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
++                  AND NOT EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0)) THEN
++    RAISE EXCEPTION 'Post-condition failed: add_standard_cert_type is not SECURITY DEFINER / search_path public / authenticated-only.';
++  END IF;
++  -- (4) cert_types untouched; nothing else moved
++  SELECT string_agg(x, E'\n' ORDER BY x) INTO v_cert_types_after FROM (
++    SELECT 'col|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull::text || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') AS x
++      FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
++     WHERE a.attrelid = 'public.cert_types'::regclass AND a.attnum > 0 AND NOT a.attisdropped
++    UNION ALL SELECT 'con|' || conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'public.cert_types'::regclass
++    UNION ALL SELECT 'idx|' || indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'cert_types'
++    UNION ALL SELECT 'rls|' || relrowsecurity::text || '|' || relforcerowsecurity::text || '|' || coalesce(relacl::text, '') FROM pg_class WHERE oid = 'public.cert_types'::regclass) s;
++  IF v_cert_types_after IS DISTINCT FROM v_cert_types_before THEN RAISE EXCEPTION 'Post-condition failed: cert_types'' shape changed.'; END IF;
++  SELECT string_agg(p.oid::regprocedure::text || '|' || md5(pg_get_functiondef(p.oid)) || '|' || coalesce(p.proacl::text, ''), E'\n' ORDER BY p.oid::regprocedure::text)
++    INTO v_fns_after FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p') AND p.proname <> 'add_standard_cert_type';
++  IF v_fns_after IS DISTINCT FROM v_fns_before THEN RAISE EXCEPTION 'Post-condition failed: an existing public function (or its grants) changed.'; END IF;
++  SELECT string_agg(tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''), E'\n' ORDER BY tablename, policyname)
++    INTO v_pol_after FROM pg_policies WHERE schemaname = 'public' AND tablename <> 'standard_cert_types';
++  IF v_pol_after IS DISTINCT FROM v_pol_before THEN RAISE EXCEPTION 'Post-condition failed: an existing policy changed.'; END IF;
++  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') <> v_total_before + 1 THEN RAISE EXCEPTION 'Post-condition failed: total_policies is not +1.'; END IF;
++  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) <> v_tok_before THEN
++    RAISE EXCEPTION 'Post-condition failed: the locked verification token count changed.';
++  END IF;
++END
++$migrate$;
++
++NOTIFY pgrst, 'reload schema';
++
++-- state check (expect: std_rls true · std_policies 1 · std_rows 69 · by_track cards 8 · ems 5 · sffma 24 · tcfp 32 · rpc_ok true ·
++--              total_policies 171 · locked_token_fns 17)
++SELECT
++  (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.standard_cert_types'::regclass) AS std_rls,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'standard_cert_types') AS std_policies,
++  (SELECT count(*) FROM public.standard_cert_types) AS std_rows,
++  (SELECT string_agg(track || ' ' || n, ' · ' ORDER BY track) FROM (SELECT track, count(*) AS n FROM public.standard_cert_types GROUP BY track) s) AS by_track,
++  (SELECT prosecdef AND has_function_privilege('authenticated', oid, 'EXECUTE') AND NOT has_function_privilege('anon', oid, 'EXECUTE')
++     FROM pg_proc WHERE oid = 'public.add_standard_cert_type(uuid)'::regprocedure) AS rpc_ok,
++  (SELECT count(*) FROM pg_policies WHERE schemaname = 'public') AS total_policies,
++  (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(('verifie' || 'd') in prosrc) > 0) AS locked_token_fns;
+diff --git a/sql/standard_certs_RETEST.sql b/sql/standard_certs_RETEST.sql
+new file mode 100644
+index 0000000..0e3ca33
+--- /dev/null
++++ b/sql/standard_certs_RETEST.sql
+@@ -0,0 +1,136 @@
++-- =====================================================================
++-- RETEST for standard_certs (DRAFT, not applied) — run AFTER the migration, separately.
++-- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). No
++-- fixtures needed beyond what the RPC itself writes. The final RAISE is the report — the "ERROR" IS the report.
++-- Standard rows are picked whose name the department doesn't already have (so a live catalog can't make it skip).
++--   S0 (once) the master list: 69 rows (sffma 24 · tcfp 32 · ems 5 · cards 8); add_standard_cert_type authenticated-only
++-- Per department (needs a DA, a plain member and a DA of ANOTHER department, unique emails):
++--   M1 a plain member reads the whole master list (69 rows) through the SELECT policy, and can't write it
++--   A1 the DA adds a never-expires standard (SFFMA) and an expiring one (Texas EMS): each lands in THIS department's
++--      dept_cert_types() with the standard's name / never_expires / category, created_by = the DA's member row
++--   A2 the same standard again → "That cert type is already in your catalog."; an unknown id → "not found"
++--   A3 a plain member → "Only a Department Admin can manage cert types."; nothing added
++--   A4 a DA of another department adds the same standard → it lands in THEIR department; this one's count is unchanged
++--   A5 the copy is an ordinary cert_types row: set_cert_type edits it, delete_cert_type removes it; the master row is
++--      untouched
++-- =====================================================================
++DO $retest$
++DECLARE
++  rec record; r record; v_ok boolean; v_n int; v_n2 int;
++  v_da text; v_da_mid uuid; v_mem text; v_ada text; v_ada_home uuid; v_s1 uuid; v_s2 uuid; v_c1 uuid; v_c2 uuid; v_o uuid;
++  e1 text; e2 text; e3 text; v_txt text;
++  rpt text := chr(10); v_pass int := 0; v_fail int := 0; v_skip int := 0;
++BEGIN
++  -- S0
++  SELECT string_agg(track || ' ' || n, ' · ' ORDER BY track) INTO v_txt FROM (SELECT track, count(*) AS n FROM public.standard_cert_types GROUP BY track) s;
++  SELECT has_function_privilege('authenticated', 'public.add_standard_cert_type(uuid)'::regprocedure, 'EXECUTE')
++     AND NOT has_function_privilege('anon', 'public.add_standard_cert_type(uuid)'::regprocedure, 'EXECUTE') INTO v_ok;
++  IF v_txt = 'cards 8 · ems 5 · sffma 24 · tcfp 32' AND v_ok THEN v_pass := v_pass + 1; rpt := rpt || format('PASS  S0 master list 69 rows (%s); add_standard_cert_type authenticated-only%s', v_txt, chr(10));
++  ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  S0 tracks %s · grants ok %s%s', v_txt, v_ok, chr(10)); END IF;
++
++  FOR rec IN SELECT d.id AS dept_id, d.name AS dept FROM public.departments d ORDER BY d.name LOOP
++    rpt := rpt || format('— %s%s', rec.dept, chr(10));
++    v_da := NULL; v_da_mid := NULL; v_mem := NULL; v_ada := NULL; v_ada_home := NULL;
++    SELECT lower(m.email), m.id INTO v_da, v_da_mid FROM public.members m WHERE m.department_id = rec.dept_id AND m.access && array['Department Admin']::text[]
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email) INTO v_mem FROM public.members m WHERE m.department_id = rec.dept_id
++       AND NOT coalesce(m.access && array['Department Admin','Project Admin','Officer','Board Member']::text[], false)
++       AND m.status IN ('Active', 'Probationary') AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    SELECT lower(m.email), m.department_id INTO v_ada, v_ada_home FROM public.members m WHERE m.department_id <> rec.dept_id
++       AND m.access && array['Department Admin']::text[] AND NOT m.access && array['Project Admin']::text[] AND m.status IN ('Active', 'Probationary')
++       AND m.email IS NOT NULL AND (SELECT count(*) FROM public.members x WHERE lower(x.email) = lower(m.email)) = 1 ORDER BY m.id LIMIT 1;
++    IF v_da IS NULL OR v_mem IS NULL OR v_ada IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA %s, member %s, other-dept DA %s)%s',
++        coalesce(v_da, 'none'), coalesce(v_mem, 'none'), coalesce(v_ada, 'none'), chr(10));
++      CONTINUE;
++    END IF;
++    -- a never-expires SFFMA standard and an expiring EMS one that neither this department nor the other already has
++    SELECT s.id INTO v_s1 FROM public.standard_cert_types s WHERE s.track = 'sffma' AND s.never_expires
++       AND NOT EXISTS (SELECT 1 FROM public.cert_types t WHERE t.department_id IN (rec.dept_id, v_ada_home) AND lower(btrim(t.name)) = lower(btrim(s.name))) ORDER BY s.sort_order LIMIT 1;
++    SELECT s.id INTO v_s2 FROM public.standard_cert_types s WHERE s.track = 'ems' AND NOT s.never_expires
++       AND NOT EXISTS (SELECT 1 FROM public.cert_types t WHERE t.department_id = rec.dept_id AND lower(btrim(t.name)) = lower(btrim(s.name))) ORDER BY s.sort_order LIMIT 1;
++    IF v_s1 IS NULL OR v_s2 IS NULL THEN
++      v_skip := v_skip + 1; rpt := rpt || format('   SKIP  all — every candidate standard is already in this catalog%s', chr(10)); CONTINUE;
++    END IF;
++    BEGIN
++      -- M1 a plain member reads the master list; can't write it
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_mem, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      SELECT count(*) INTO v_n FROM public.standard_cert_types;
++      e1 := 'ok';
++      BEGIN INSERT INTO public.standard_cert_types (track, name, never_expires, category) VALUES ('cards', 'RETEST member write', true, 'certification'); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      UPDATE public.standard_cert_types SET never_expires = NOT never_expires WHERE id = v_s1; GET DIAGNOSTICS v_n2 = ROW_COUNT;
++      -- A3 (as the same plain member) the RPC refuses
++      e2 := 'ok';
++      BEGIN PERFORM public.add_standard_cert_type(v_s1); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF v_n = 69 AND e1 ILIKE '%row-level security%' AND v_n2 = 0 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  M1 plain member reads all 69 standard rows; an INSERT is refused by RLS, an UPDATE touches 0 rows%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  M1 reads %s · insert: %s · update rows %s%s', v_n, e1, v_n2, chr(10)); END IF;
++      IF e2 = 'Only a Department Admin can manage cert types.' AND NOT EXISTS (SELECT 1 FROM public.cert_types c JOIN public.standard_cert_types s ON s.id = v_s1
++                                                                               WHERE c.department_id = rec.dept_id AND lower(btrim(c.name)) = lower(btrim(s.name))) THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  A3 plain member: add_standard_cert_type refused on authority; nothing added%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A3 member add: %s%s', e2, chr(10)); END IF;
++
++      -- A1 the DA adds two standards
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; v_c1 := NULL; v_c2 := NULL;
++      BEGIN
++        SELECT (public.add_standard_cert_type(v_s1)).id INTO v_c1;
++        SELECT (public.add_standard_cert_type(v_s2)).id INTO v_c2;
++      EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      SELECT count(*) INTO v_n FROM public.dept_cert_types() x JOIN public.standard_cert_types s ON lower(btrim(s.name)) = lower(btrim(x.name))
++       WHERE (x.id = v_c1 AND s.id = v_s1 AND x.never_expires AND x.category = 'certification')
++          OR (x.id = v_c2 AND s.id = v_s2 AND NOT x.never_expires AND x.category = 'certification');
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'ok' AND v_n = 2 AND (SELECT count(*) FROM public.cert_types WHERE id IN (v_c1, v_c2) AND department_id = rec.dept_id AND created_by = v_da_mid AND updated_by = v_da_mid) = 2 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  A1 DA adds a never-expires SFFMA + an expiring EMS standard; both in this catalog with the standard''s name / flag / category, created_by the DA%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A1 add: %s · matching rows %s%s', e1, v_n, chr(10)); END IF;
++
++      -- A2 the clash, and an unknown id
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok';
++      BEGIN PERFORM public.add_standard_cert_type(v_s1); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      BEGIN PERFORM public.add_standard_cert_type(gen_random_uuid()); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'That cert type is already in your catalog.' AND e2 = 'That standard cert type was not found.' THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  A2 the same standard twice → "already in your catalog"; an unknown id → "not found"%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A2 twice: %s · unknown: %s%s', e1, e2, chr(10)); END IF;
++
++      -- A4 a DA of another department adds the same standard — to THEIR catalog
++      INSERT INTO public.member_active_department (email, department_id) VALUES (v_ada, v_ada_home) ON CONFLICT (email) DO UPDATE SET department_id = excluded.department_id;
++      SELECT count(*) INTO v_n FROM public.cert_types WHERE department_id = rec.dept_id;
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_ada, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; v_o := NULL;
++      BEGIN SELECT (public.add_standard_cert_type(v_s1)).id INTO v_o; EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'ok' AND (SELECT department_id FROM public.cert_types WHERE id = v_o) = v_ada_home
++         AND (SELECT count(*) FROM public.cert_types WHERE department_id = rec.dept_id) = v_n THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  A4 a DA of another department adds the same standard — it lands in their catalog; this one is unchanged%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A4 other-dept add: %s · landed in %s%s', e1, (SELECT department_id FROM public.cert_types WHERE id = v_o), chr(10)); END IF;
++
++      -- A5 the copy is an ordinary row (the DA again)
++      PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'role', 'authenticated')::text, true);
++      PERFORM set_config('role', 'authenticated', true);
++      e1 := 'ok'; e2 := 'ok';
++      BEGIN PERFORM public.set_cert_type(v_c1, 'RETEST renamed standard', false, 'continuing_education'); EXCEPTION WHEN OTHERS THEN e1 := SQLERRM; END;
++      SELECT x.name, x.never_expires, x.category INTO r FROM public.dept_cert_types() x WHERE x.id = v_c1;
++      BEGIN PERFORM public.delete_cert_type(v_c2); EXCEPTION WHEN OTHERS THEN e2 := SQLERRM; END;
++      PERFORM set_config('role', 'postgres', true);
++      IF e1 = 'ok' AND r.name = 'RETEST renamed standard' AND r.never_expires IS FALSE AND r.category = 'continuing_education' AND e2 = 'ok'
++         AND NOT EXISTS (SELECT 1 FROM public.cert_types WHERE id = v_c2)
++         AND (SELECT never_expires AND category = 'certification' FROM public.standard_cert_types WHERE id = v_s1)
++         AND (SELECT count(*) FROM public.standard_cert_types) = 69 THEN
++        v_pass := v_pass + 1; rpt := rpt || format('   PASS  A5 the copy edits via set_cert_type and deletes via delete_cert_type; the master row is untouched (still 69)%s', chr(10));
++      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  A5 edit: %s (%s) · delete: %s%s', e1, row_to_json(r), e2, chr(10)); END IF;
++      RAISE EXCEPTION 'SENTINEL';
++    EXCEPTION WHEN OTHERS THEN
++      IF SQLERRM <> 'SENTINEL' THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  run aborted: %s%s', SQLERRM, chr(10)); END IF;
++    END;
++  END LOOP;
++
++  RAISE EXCEPTION E'%\n---- % passed, % failed, % skipped ----\n(this exception IS the rollback — nothing was changed)', rpt, v_pass, v_fail, v_skip;
++END
++$retest$;
+
+# ===== PGlite dry run =====
+# PRE-MIGRATION RETEST:
+# relation "public.standard_cert_types" does not exist
+# 
+# state: [{"std_rls":true,"std_policies":1,"std_rows":69,"by_track":"cards 8 · ems 5 · sffma 24 · tcfp 32","rpc_ok":true,"total_policies":6,"locked_token_fns":1}]
+# fire inspector / ISO in two tracks: [{"n":"fire inspector","t":"tcfp,sffma"},{"n":"incident safety officer","t":"sffma,tcfp"}]
+# re-run -> Precondition failed: public.standard_cert_types already exists — already applied. Nothing changed.
+# AFTER THE MIGRATION:
+# PASS  S0 master list 69 rows (cards 8 · ems 5 · sffma 24 · tcfp 32); add_standard_cert_type authenticated-only
+# — Granbury Fire Station
+#    SKIP  all — needs a DA here, a plain member here and a DA of another department, unique emails (DA gil@c, member none, other-dept DA ada@a)
+# — Indian Harbor Volunteer Fire Department
+#    PASS  M1 plain member reads all 69 standard rows; an INSERT is refused by RLS, an UPDATE touches 0 rows
+#    PASS  A3 plain member: add_standard_cert_type refused on authority; nothing added
+#    PASS  A1 DA adds a never-expires SFFMA + an expiring EMS standard; both in this catalog with the standard's name / flag / category, created_by the DA
+#    PASS  A2 the same standard twice → "already in your catalog"; an unknown id → "not found"
+#    PASS  A4 a DA of another department adds the same standard — it lands in their catalog; this one is unchanged
+#    PASS  A5 the copy edits via set_cert_type and deletes via delete_cert_type; the master row is untouched (still 69)
+# — North Hood County Volunteer Fire Department
+#    PASS  M1 plain member reads all 69 standard rows; an INSERT is refused by RLS, an UPDATE touches 0 rows
+#    PASS  A3 plain member: add_standard_cert_type refused on authority; nothing added
+#    PASS  A1 DA adds a never-expires SFFMA + an expiring EMS standard; both in this catalog with the standard's name / flag / category, created_by the DA
+#    PASS  A2 the same standard twice → "already in your catalog"; an unknown id → "not found"
+#    PASS  A4 a DA of another department adds the same standard — it lands in their catalog; this one is unchanged
+#    PASS  A5 the copy edits via set_cert_type and deletes via delete_cert_type; the master row is untouched (still 69)
+# ---- 13 passed, 0 failed, 1 skipped ----
+# (this exception IS the rollback — nothing was changed)
+# 
+# mutations:
+#   (a) a write policy slipped onto standard_cert_types
+#      REFUSED: Post-condition failed: standard_cert_types must have exactly one policy — SELECT, authenticated, USING (true).
+#   (a2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST:    FAIL  M1 reads 69 · insert: ok · update rows 0 |    FAIL  A5 edit: ok ({"name":"RETEST renamed standard","never_expires":false,"category":"continuing_education"}) · delete: ok |    FAIL  M1 reads 69 · insert: ok · update rows 0 |    FAIL  A5 edit: ok ({"name":"RETEST renamed standard","never_expires":false,"category":"continuing_education"}) · delete: ok | ---- 9 passed, 4 failed, 1 skipped ----
+#   (b) the RPC not admin-gated, post-conditions removed (RETEST)
+#      migration applied -> RETEST:    FAIL  A3 member add: ok |    FAIL  A1 add: That cert type is already in your catalog. · matching rows 0 |    FAIL  A5 edit: ok ({"name":null,"never_expires":null,"category":null}) · delete: That cert type is not in your department. |    FAIL  A3 member add: ok |    FAIL  A1 add: That cert type is already in your catalog. · matching rows 0 |    FAIL  A5 edit: ok ({"name":null,"never_expires":null,"category":null}) · delete: That cert type is not in your department. | ---- 7 passed, 6 failed, 1 skipped ----
+#   (b2) the RPC writes to a fixed department, not the caller's, post-conditions removed (RETEST)
+#      migration applied -> RETEST:    FAIL  A1 add: ok · matching rows 0 |    FAIL  A4 other-dept add: That cert type is already in your catalog. · landed in  |    FAIL  A5 edit: That cert type is not in your department. ({"name":null,"never_expires":null,"category":null}) · delete: That cert type is not in your department. |    FAIL  A1 add: ok · matching rows 0 |    FAIL  A4 other-dept add: That cert type is already in your catalog. · landed in  |    FAIL  A5 edit: That cert type is not in your department. ({"name":null,"never_expires":null,"category":null}) · delete: That cert type is not in your department. | ---- 7 passed, 6 failed, 1 skipped ----
+#   (c) anon can execute
+#      REFUSED: Post-condition failed: add_standard_cert_type is not SECURITY DEFINER / search_path public / authenticated-only.
+#   (c2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 tracks cards 8 · ems 5 · sffma 24 · tcfp 32 · grants ok f | ---- 12 passed, 1 failed, 1 skipped ----
+#   (d) the clash not friendly (raw unique violation), post-conditions removed (RETEST)
+#      migration applied -> RETEST:    FAIL  A2 twice: duplicate key value violates unique constraint "cert_types_dept_name_uq" · unknown: That standard cert type was not found. |    FAIL  A2 twice: duplicate key value violates unique constraint "cert_types_dept_name_uq" · unknown: That standard cert type was not found. | ---- 11 passed, 2 failed, 1 skipped ----
+#   (e) cert_types' shape changed in the block (a column added)
+#      REFUSED: Post-condition failed: cert_types' shape changed.
+#   (f) set_cert_type modified in the block
+#      REFUSED: Post-condition failed: an existing public function (or its grants) changed.
+#   (f2) a reader modified in the block (readiness_window)
+#      REFUSED: Post-condition failed: an existing public function (or its grants) changed.
+#   (g) the seed short one row
+#      REFUSED: Post-condition failed: the seed is not the 69 rows (sffma 24 · tcfp 32 · ems 5 · cards 8) with the proposed flags.
+#   (g2) same, post-conditions removed — the RETEST must catch it
+#      migration applied -> RETEST: FAIL  S0 tracks cards 8 · ems 5 · sffma 23 · tcfp 32 · grants ok t |    FAIL  M1 reads 68 · insert: new row violates row-level security policy for table "standard_cert_types" · update rows 0 |    FAIL  A5 edit: ok ({"name":"RETEST renamed standard","never_expires":false,"category":"continuing_education"}) · delete: ok |    FAIL  M1 reads 68 · insert: new row violates row-level security policy for table "standard_cert_types" · update rows 0 |    FAIL  A5 edit: ok ({"name":"RETEST renamed standard","never_expires":false,"category":"continuing_education"}) · delete: ok | ---- 8 passed, 5 failed, 1 skipped ----
+#   (h) a proposed flag wrong (EMS never-expires)
+#      REFUSED: Post-condition failed: the seed is not the 69 rows (sffma 24 · tcfp 32 · ems 5 · cards 8) with the proposed flags.
+#   (i) an existing policy changed in the block
+#      REFUSED: Post-condition failed: an existing policy changed.
+#   (j) the table made department-scoped (FK added)
+#      REFUSED: Post-condition failed: standard_cert_types columns are not as designed.
+#   (k) already applied
+#      REFUSED: Precondition failed: public.standard_cert_types already exists — already applied. Nothing changed.
+#   (l) is_dept_admin drifted
+#      REFUSED: Precondition failed: is_dept_admin() is not the department-scoped Step A version (md5 c692e44f…). Nothing changed.
+#   (m) Slice A not live
+#      REFUSED: Precondition failed: the cert catalog (Slice A: cert_types + set_cert_type) is not live. Nothing changed.
