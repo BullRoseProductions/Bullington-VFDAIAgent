@@ -21364,6 +21364,7 @@ function rdSortMembers(list) {
    set_readiness_requirement() call; the database refuses anyone else, and its message is shown. Stale rows keep the
    database's label — "(inactive)" / "(no longer requires a signature)" / "(removed)" — so they can be unticked. */
 function RdSetup({ notify, onChanged }) {
+  const { types: certTypes } = React.useContext(CertTypesCtx);   // the department's cert catalog (dept_cert_types(), loaded app-wide)
   const [open, setOpen] = useState(false);
   const [reqs, setReqs] = useState(null);
   const [types, setTypes] = useState(null);
@@ -21388,6 +21389,10 @@ function RdSetup({ notify, onChanged }) {
       ...(types || []).filter((t) => t.active).map((t) => ["qualification_type", t.id, t.name]),
       ...(reqs || []).filter((r) => r.kind === "qualification_type" && r.required && !(types || []).some((t) => t.active && t.id === r.ref_id)).map((r) => ["qualification_type", r.ref_id, r.label]),
     ] },
+    { group: "Cert types", items: [
+      ...certTypes.map((t) => ["cert_type", t.id, t.name]),
+      ...(reqs || []).filter((r) => r.kind === "cert_type" && r.required && !certTypes.some((t) => t.id === r.ref_id)).map((r) => ["cert_type", r.ref_id, r.label]),
+    ] },
     { group: "Documents (Read & Sign)", items: [
       ...(docs || []).filter((d) => d.requires_ack && d.current_version > 0).map((d) => ["document", d.series_id, d.title || "Untitled document"]),
       ...(reqs || []).filter((r) => r.kind === "document" && r.required && !(docs || []).some((d) => d.requires_ack && d.current_version > 0 && d.series_id === r.ref_id)).map((r) => ["document", r.ref_id, r.label]),
@@ -21406,13 +21411,13 @@ function RdSetup({ notify, onChanged }) {
     <QualSection icon={Pencil} label="Readiness standard" color={FIRE.textSecondary} right={<button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, textTransform: "none", letterSpacing: 0 }} onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Set up"}</button>} />
     {open && (
       <Card padding="10px 14px" style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 8 }}>Tick what every active and probationary member must have to read <b>Ready</b>. An expiring credential still counts and shows as a renewal due. Certs show on scorecards but don't count — to require one, set it up as a qualification.</div>
+        <div style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.5, marginBottom: 8 }}>Tick what every active and probationary member must have to read <b>Ready</b>. An expiring credential still counts and shows as a renewal due. Certs can be required directly — tick a cert type below. A current or never-expires cert satisfies it; an expired or undated one does not.</div>
         {err && !reqs ? <div style={{ fontSize: 12.5, color: FIRE.amberText, padding: "6px 0" }}>Couldn't load the standard. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setTick((t) => t + 1)}>Retry</button></div>
           : reqs === null ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "6px 0" }}>Loading…</div>
           : opts.map((g) => (
             <div key={g.group} style={{ marginTop: 8 }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 2 }}>{g.group}</div>
-              {g.items.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "4px 0" }}>{g.group === "Qualifications" ? "No qualifications set up yet." : "No documents collect signatures yet."}</div>
+              {g.items.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "4px 0" }}>{g.group === "Qualifications" ? "No qualifications set up yet." : g.group === "Cert types" ? <>No cert types yet — add them in <b>Cert Types</b> (Roster → Certifications).</> : "No documents collect signatures yet."}</div>
                 : g.items.map(([kind, ref, label]) => {
                   const r = rowOf(kind, ref);
                   const on = !!r?.required;
