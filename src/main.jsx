@@ -81,9 +81,18 @@ function Root() {
     return () => detach();
   }, []);
 
+  /* BOUNDED LAUNCH. If the initial getSession() ever stalls (slow / odd network at cold launch), the app would sit on
+     the near-blank "Loading…" screen forever. After 5s we stop waiting and fall through to <Login/> (it needs no
+     network to paint). Nothing is lost: a late resolution below still sets the session, and onAuthStateChange still
+     lands a signed-in user in <App/>. A rejected getSession() falls through the same way. */
   useEffect(() => {
+    const launchFallback = setTimeout(() => setReady(true), 5000);
     supabase.auth.getSession().then(({ data }) => {
+      clearTimeout(launchFallback);
       setSession(data.session);
+      setReady(true);
+    }, () => {
+      clearTimeout(launchFallback);
       setReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
@@ -92,7 +101,7 @@ function Root() {
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(s);
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { clearTimeout(launchFallback); sub.subscription.unsubscribe(); };
   }, []);
 
   /* THE SET-PASSWORD GATE. An invited member arrives by magic link, which establishes a real
