@@ -11,6 +11,18 @@
  */
 export const EXPIRING_MONTHS = 3;
 
+/* A cert expiry ("YYYY-MM") that means a real month: the shape, a month 01–12 and a plausible year (>= 1900). The shape
+ * alone let garbage through — "0000-00" (seen live) read as EXPIRED and rendered "expired undefined 0"; "2026-13" was
+ * accepted on save. Anything that fails is NO DATE ("No expiration date"), never expired. One rule for every reader:
+ * certStatus / expPhrase / the save validators / the cert sort (App.jsx) and the assistant's certStatus (api/assistant.js).
+ * The SQL readers are hardened to the same rule in lockstep. */
+export function validExpYM(exp) {
+  const m = /^(\d{4})-(\d{2})$/.exec(typeof exp === "string" ? exp : "");
+  if (!m) return false;
+  const y = Number(m[1]), mo = Number(m[2]);
+  return y >= 1900 && mo >= 1 && mo <= 12;
+}
+
 // "YYYY-MM…" -> a month index (y*12 + m). Anything else -> NaN.
 export function monthIndex(ymd) {
   const m = /^(\d{4})-(\d{2})/.exec(String(ymd || ""));

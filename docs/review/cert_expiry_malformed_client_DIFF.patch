@@ -1,0 +1,111 @@
+diff --git a/api/assistant.js b/api/assistant.js
+index cb5cb92..d553523 100644
+--- a/api/assistant.js
++++ b/api/assistant.js
+@@ -18,6 +18,7 @@
+ import { createClient } from "@supabase/supabase-js";
+ import { cors } from "./_cors.js";
+ import { requireUser } from "./_auth.js";
++import { validExpYM } from "../shared/expiry.js";
+ 
+ const MODEL = "claude-sonnet-4-6";
+ const MAX_TOOL_ROUNDS = 5;           // a question that needs more than this is answered with what it has
+@@ -68,7 +69,7 @@ export function hoursTotals(shifts) {
+ }
+ // certStatus (App.jsx): exp "YYYY-MM"; the expiry month itself is EXPIRING, before it EXPIRED, within 3 months EXPIRING.
+ export function certStatus(exp, now = new Date()) {
+-  if (!/^\d{4}-\d{2}$/.test(String(exp || ""))) return "no date";
++  if (!validExpYM(String(exp || ""))) return "no date";   // shape + month 01–12 + year >= 1900 — same rule as the app (shared/expiry.js)
+   const [y, m] = String(exp).split("-").map(Number);
+   const [ty, tm] = todayCT(now).split("-").map(Number);
+   const diff = y * 12 + m - (ty * 12 + tm);
+diff --git a/shared/expiry.js b/shared/expiry.js
+index 615e02c..ee7e218 100644
+--- a/shared/expiry.js
++++ b/shared/expiry.js
+@@ -11,6 +11,18 @@
+  */
+ export const EXPIRING_MONTHS = 3;
+ 
++/* A cert expiry ("YYYY-MM") that means a real month: the shape, a month 01–12 and a plausible year (>= 1900). The shape
++ * alone let garbage through — "0000-00" (seen live) read as EXPIRED and rendered "expired undefined 0"; "2026-13" was
++ * accepted on save. Anything that fails is NO DATE ("No expiration date"), never expired. One rule for every reader:
++ * certStatus / expPhrase / the save validators / the cert sort (App.jsx) and the assistant's certStatus (api/assistant.js).
++ * The SQL readers are hardened to the same rule in lockstep. */
++export function validExpYM(exp) {
++  const m = /^(\d{4})-(\d{2})$/.exec(typeof exp === "string" ? exp : "");
++  if (!m) return false;
++  const y = Number(m[1]), mo = Number(m[2]);
++  return y >= 1900 && mo >= 1 && mo <= 12;
++}
++
+ // "YYYY-MM…" -> a month index (y*12 + m). Anything else -> NaN.
+ export function monthIndex(ymd) {
+   const m = /^(\d{4})-(\d{2})/.exec(String(ymd || ""));
+diff --git a/src/App.jsx b/src/App.jsx
+index 6d20446..230c3f1 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -394,7 +394,7 @@ import {
+   hasAny, isLeader, isDeptAdmin, isBoard, canManage, isTrainingLeader,
+ } from "../shared/roles.js";
+ import { isDoneThisPeriod, weekStartKey } from "../shared/duty-period.js";
+-import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK } from "../shared/expiry.js";
++import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK, validExpYM } from "../shared/expiry.js";
+ // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
+ // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
+ // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
+@@ -4656,7 +4656,7 @@ function CertProposals({ S, notify }) {
+   async function submit() {
+     if (!name.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name." }); return; }
+     const e = exp.trim();
+-    if (e && !/^\d{4}-\d{2}$/.test(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
++    if (e && !validExpYM(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+     if (!file) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
+     if (!ids?.memberId || !ids?.deptId) { notify({ kind: "error", title: "No member profile", text: "We couldn't find your member profile." }); return; }
+     const { data: { user } } = await supabase.auth.getUser();
+@@ -11020,7 +11020,7 @@ function certStatus(exp, neverExpires = false) {
+   // coverage / compliance / report test keyed on rank (=== 2, 1 || 2, < 2, === 0) counts it exactly like a current cert,
+   // so none of that math changes; only the label and colour differ. The type wins over any old exp (as expiration_rows).
+   if (neverExpires) return { label: "NO EXPIRY", color: "#2E7D52", rank: 2 };
+-  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
++  if (!validExpYM(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };   // shape + month 01–12 + year >= 1900 (shared/expiry.js)
+   const [y, m] = exp.split("-").map(Number);
+   const diff = (y * 12 + m) - nowYM();
+   if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
+@@ -11127,7 +11127,7 @@ const CLASSES = [
+ ];
+ function expPhrase(exp, neverExpires = false) {
+   if (neverExpires) return "Doesn't expire";   // its catalog type never expires — not a missing date
+-  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return "No expiration date";
++  if (!validExpYM(exp)) return "No expiration date";   // a garbage month ("0000-00", "2026-13") is no date — never "expired undefined 0"
+   const [y, m] = exp.split("-").map(Number);
+   const d = (y * 12 + m) - nowYM();
+   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
+@@ -11752,7 +11752,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+     const name = draft.name.trim();
+     if (!name) { notify({ kind: "error", title: "Name can't be empty", text: "Enter a name for the certification." }); return; }
+     const expTrim = draft.exp.trim();
+-    if (expTrim && !/^\d{4}-\d{2}$/.test(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
++    if (expTrim && !validExpYM(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+     setBusyId(c.id);
+     const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null });
+     setBusyId(null);
+@@ -12114,7 +12114,7 @@ function ProposeCert({ S, role, member, notify }) {
+   async function propose() {
+     if (!cName.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name before submitting." }); return; }
+     const exp = cExp.trim();
+-    if (exp && !/^\d{4}-\d{2}$/.test(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
++    if (exp && !validExpYM(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+     if (!cFile) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
+     setBusy(true);
+     const { data: { user } } = await supabase.auth.getUser();
+@@ -12505,7 +12505,7 @@ function RosterCerts({ S, members, role, notify }) {
+   const [sortBy, setSortBy] = useState("soonest");   // soonest (status, then expiry) | member | cert
+   const [showAllRows, setShowAllRows] = useState(false);
+   const ROW_CAP = 10;
+-  const expKey = (r) => (/^\d{4}-\d{2}$/.test(r.exp || "") ? r.exp : "9999-99");
++  const expKey = (r) => (validExpYM(r.exp) ? r.exp : "9999-99");   // a garbage date sorts with the undated
+   const sorted = visible.slice().sort((a, b) => sortBy === "member" ? a.member.localeCompare(b.member)
+     : sortBy === "cert" ? (a.cert || "").localeCompare(b.cert || "")
+     : (a.st.rank === 3 ? 1.5 : a.st.rank) - (b.st.rank === 3 ? 1.5 : b.st.rank) || expKey(a).localeCompare(expKey(b)));
