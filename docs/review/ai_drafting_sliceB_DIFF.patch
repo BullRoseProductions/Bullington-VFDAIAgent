@@ -1,0 +1,355 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 5c95879..6d20446 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -23497,7 +23497,331 @@ function PlanSummary({ regs, nameById, compact }) {
+     </div>
+   );
+ }
+-function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback }) {
++/* ---------------- TRAINING PLANS (AI Drafting Slice B) ----------------
++   The Training page's "Training Plans" view (b4c_trainingplans_noir.html): an AI builder for any topic, the department's
++   reusable plan library (drill_plans), the awaiting-review / approval view, and attach-to-session. Every write is a Slice A
++   RPC — set_drill_plan / approve_drill_plan / unapprove_drill_plan / delete_drill_plan / attach_drill_plan_to_session —
++   all is_canmanage_ops()-gated server-side; the controls are gated on the client twin, CANMANAGE_OPS_ROLES (DA / Officer).
++   Any member reads the library (dept_drill_plans()). The inline "Draft with AI" planner (AIDrillPlanner) is unchanged.
++
++   DRILL_PLAN_SYSTEM is the inline planner's system prompt, verbatim (a test pins the two equal) — the builder reuses the
++   same generation; only the user message carries this form. drillPlanToContent maps that generator's plan object onto
++   the five drill_plans.content keys Slice A's attach serializer and the plan viewer read. */
++const DRILL_PLAN_SYSTEM = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"objectives\":string[],\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
++const strList = (a) => (Array.isArray(a) ? a.filter((x) => x != null && String(x).trim() !== "").map((x) => String(x)) : []);
++function drillPlanToContent(plan) {
++  const p = plan || {};
++  return {
++    summary: typeof p.summary === "string" ? p.summary : "",
++    objectives: strList(p.objectives),
++    run_of_show: (Array.isArray(p.steps) ? p.steps : []).filter((s) => s && typeof s === "object").map((s) => ({
++      t: String(s.title || "Step") + (s.minutes ? ` — ${s.minutes} min` : ""),
++      d: strList(s.actions).join("; ") || (typeof s.detail === "string" ? s.detail : ""),
++    })),
++    materials: strList(p.equipment),
++    safety: strList(p.safetyNotes),
++  };
++}
++const TP_TYPES = ["Hands-on drill", "Classroom", "Tabletop", "Skills check"];
++const TP_DURATIONS = [["30", "~30 min"], ["60", "~1 hour"], ["90", "~90 min"], ["120", "~2 hours"], ["180", "~3 hours"]];
++const TP_LEVELS = ["New / probationary", "Intermediate", "Experienced", "Mixed crew"];
++const TP_SEEDS = ["SCBA air management", "Hose deployment & streams", "Ground ladders", "RIT / Mayday", "Search & rescue (VEIS)", "Tanker shuttle / rural water", "Pump operations & drafting", "Live fire (NFPA 1403)", "EMS airway", "Extrication"];
++const tpDur = (m) => (!m ? "" : m % 60 === 0 ? `${m / 60} hr${m === 60 ? "" : "s"}` : m > 60 ? `${Math.floor(m / 60)} hr ${m % 60} min` : `${m} min`);
++const tpDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
++const tpLabel = { fontSize: 10, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: FIRE.textMuted };
++const tpSecLab = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" };
++const tpPsl = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 };
++const tpLines = (a) => (a || []).join("\n");
++const tpSplit = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
++
++/* Edit a library plan: the documented content keys as plain text (one item per line; a run-of-show line is
++   "step | details"). Unknown content keys are carried through untouched. */
++function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel }) {
++  const c = p.content || {};
++  const [f, setF] = useState({
++    title: p.title || "", category: p.category || "", duration: p.duration_min ? String(p.duration_min) : "", audience: p.audience || "",
++    summary: c.summary || "", objectives: tpLines(c.objectives), run: (c.run_of_show || []).map((s) => (s && typeof s === "object" ? `${s.t || ""}${s.d ? ` | ${s.d}` : ""}` : String(s))).join("\n"),
++    materials: tpLines(c.materials), safety: tpLines(c.safety),
++  });
++  useEditorOpen(true);   // a half-edited plan: a roster refresh must not drop it
++  const up = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
++  const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
++  const area = (k, t, h = 70) => <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl(t)}<textarea style={{ ...FS.input, minHeight: h, resize: "vertical" }} value={f[k]} onChange={up(k)} /></label>;
++  function save() {
++    const dur = f.duration.trim() === "" ? null : Number(f.duration);
++    onSave({
++      title: f.title, category: f.category, duration_min: dur, audience: f.audience,
++      content: { ...c, summary: f.summary.trim(), objectives: tpSplit(f.objectives), materials: tpSplit(f.materials), safety: tpSplit(f.safety),
++        run_of_show: tpSplit(f.run).map((l) => { const i = l.indexOf("|"); return i < 0 ? { t: l, d: "" } : { t: l.slice(0, i).trim(), d: l.slice(i + 1).trim() }; }) },
++    });
++  }
++  return (
++    <div style={{ ...NOIR_INSET, padding: 14, marginTop: 12 }}>
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: 10 }}>
++        <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl("Title")}<input style={FS.input} value={f.title} onChange={up("title")} /></label>
++        <label style={S.field}>{lbl("Category")}<select style={FS.input} value={f.category} onChange={up("category")}><option value="">No category</option>
++          {[...new Set([...(categories || []).map((x) => x.name), ...(f.category ? [f.category] : [])])].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
++        <label style={S.field}>{lbl("Duration (minutes)")}<input style={FS.input} inputMode="numeric" value={f.duration} onChange={up("duration")} /></label>
++        <label style={S.field}>{lbl("Who it's for")}<input style={FS.input} value={f.audience} onChange={up("audience")} placeholder="e.g. Mixed crew · 8 members" /></label>
++        {area("summary", "Summary", 60)}
++        {area("objectives", "Objectives — one per line")}
++        {area("run", "Run of show — one step per line, \"step | details\"", 90)}
++        {area("materials", "Materials & apparatus — one per line")}
++        {area("safety", "Safety — one per line")}
++      </div>
++      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
++        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Save changes</button>
++        <button style={FS.btn} disabled={busy} onClick={onCancel}>Cancel</button>
++      </div>
++    </div>
++  );
++}
++
++function TrainingPlans({ S, role, sessions, loadSessions, members, notify, dept, categories, viewToggle }) {
++  const canWrite = hasAny(role, CANMANAGE_OPS_ROLES);   // set / approve / unapprove / delete / attach: is_canmanage_ops() (DA / Officer)
++  const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
++  const [loadErr, setLoadErr] = useState("");
++  const [form, setForm] = useState({ topic: "", type: TP_TYPES[0], duration: "120", category: "", members: "", level: "Mixed crew", standard: "", focus: "" });
++  const [drafting, setDrafting] = useState(false);
++  const [draftErr, setDraftErr] = useState("");
++  const [selId, setSelId] = useState(null);
++  const [q, setQ] = useState("");
++  const [catFilter, setCatFilter] = useState("");
++  const [busy, setBusy] = useState(null);               // the action in flight
++  const [editing, setEditing] = useState(false);
++  const [attachOpen, setAttachOpen] = useState(false);
++  const [attachSess, setAttachSess] = useState("");
++  const [lastAttached, setLastAttached] = useState(null);   // the session_plans row attach returned — opens in the real plan viewer
++  const featRef = useRef(null), topicRef = useRef(null);
++  const { setViewPlan, mounts } = usePlanViewer(S, notify, dept);
++  useEditorOpen(!!form.topic.trim() || !!form.focus.trim());
++  const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || null;
++  const colorOf = (cat) => (categories || []).find((x) => x.name === cat)?.color || FIRE.textMuted2;
++  const up = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
++
++  async function load() {
++    const { data, error } = await supabase.rpc("dept_drill_plans");
++    if (error || !Array.isArray(data)) { setLoadErr(error?.message || "Couldn't load the plan library."); return { error: error || new Error("no data") }; }
++    setLoadErr(""); setPlans(data); return { error: null };
++  }
++  useEffect(() => { load(); }, []);
++  useReconnect(() => { if (loadErr) load(); });
++
++  const list = plans || [];
++  const sel = list.find((p) => p.id === selId) || list.find((p) => p.status === "draft") || null;
++  const cats = [...new Set(list.map((p) => p.category).filter(Boolean))].sort();
++  const shown = list.filter((p) => (!catFilter || p.category === catFilter) && (!q.trim() || `${p.title} ${p.category || ""} ${p.audience || ""}`.toLowerCase().includes(q.trim().toLowerCase())));
++  const select = (id) => { setSelId(id); setEditing(false); setAttachOpen(false); setLastAttached(null); setTimeout(() => featRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
++  const refresh = async (okText) => { const r = await load(); if (r.error) notify({ kind: "error", title: "Saved — but couldn't refresh the library", text: "Reload to see the change.", details: r.error.message }); else if (okText) notify({ kind: "success", text: okText }); };
++
++  async function draft() {
++    const topic = form.topic.trim();
++    if (!topic) { setDraftErr("Give it a topic or drill to plan."); topicRef.current?.focus(); return; }
++    setDrafting(true); setDraftErr("");
++    const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Topic: ${topic}\nTraining type: ${form.type}\nTime: ${form.duration} minutes\n${form.category ? `Category: ${form.category}\n` : ""}${form.members.trim() ? `Members expected: ${form.members.trim()}\n` : ""}Skill level: ${form.level}${form.standard.trim() ? `\nStandard / SOG to align with: ${form.standard.trim()}` : ""}${form.focus.trim() ? `\nFocus & notes: ${form.focus.trim()}` : ""}`;
++    let plan = null;
++    try {
++      const t = (await callClaude(DRILL_PLAN_SYSTEM, user)).replace(/```json|```/g, "").trim();
++      try { plan = JSON.parse(t); } catch { const m = t.match(/\{[\s\S]*\}/); plan = m ? JSON.parse(m[0]) : null; }
++      if (!plan || typeof plan !== "object") throw new Error("parse");
++    } catch { setDrafting(false); setDraftErr("Couldn't generate a plan just now. Check the connection and try again."); return; }
++    const audience = [form.level, form.members.trim() ? `${form.members.trim()} members` : ""].filter(Boolean).join(" · ");
++    const dur = Number(plan.durationMin) > 0 ? Math.round(Number(plan.durationMin)) : Number(form.duration) || null;
++    const { data, error } = await supabase.rpc("set_drill_plan", { p_id: null, p_title: topic, p_category: form.category || null, p_duration_min: dur, p_audience: audience || null, p_content: drillPlanToContent(plan), p_source: "ai" });
++    setDrafting(false);
++    if (error) { setDraftErr(error.message || "Couldn't save the drafted plan."); return; }
++    setForm((f) => ({ ...f, topic: "", standard: "", focus: "" }));
++    await refresh("Drafted — it's in your library as a draft, awaiting review.");
++    if (data?.id) select(data.id);
++  }
++  async function act(kind, rpc, args, okText) {
++    setBusy(kind);
++    const { data, error } = await supabase.rpc(rpc, args);
++    setBusy(null);
++    if (error) { notify({ kind: "error", title: "Couldn't update the plan", text: error.message || "Please try again." }); return { error }; }
++    await refresh(okText);
++    return { data };
++  }
++  async function saveEdit(p, v) {
++    if (!v.title.trim()) { notify({ kind: "error", title: "A plan needs a title" }); return; }
++    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Duration must be a positive number of minutes" }); return; }
++    const r = await act("edit", "set_drill_plan", { p_id: p.id, p_title: v.title.trim(), p_category: v.category || null, p_duration_min: v.duration_min, p_audience: v.audience.trim() || null, p_content: v.content, p_source: p.source }, "Plan updated.");
++    if (!r.error) setEditing(false);
++  }
++  async function attach(p) {
++    const s = (sessions || []).find((x) => String(x.id) === String(attachSess));
++    if (!s) { notify({ kind: "error", title: "Pick a session", text: "Choose which session to attach this plan to." }); return; }
++    const r = await act("attach", "attach_drill_plan_to_session", { p_plan_id: p.id, p_session_id: s.id }, `Attached to ${s.title}.`);
++    if (!r.error) { setAttachOpen(false); setAttachSess(""); setLastAttached(r.data || null); loadSessions && loadSessions(); }
++  }
++  async function remove(p) {
++    if (!(await confirmDestructive({ noun: "drill plan", name: p.title,
++      impact: p.attached_sessions ? `${p.attached_sessions} session${p.attached_sessions === 1 ? " has" : "s have"} it attached — they keep their copy of the plan; it's only unlinked from the library.` : "It isn't attached to any session." }))) return;
++    const r = await act("delete", "delete_drill_plan", { p_id: p.id }, "Plan deleted. Attached sessions keep their copy.");
++    if (!r.error) { setSelId(null); setEditing(false); loadSessions && loadSessions(); }
++  }
++
++  const field = (label, el, wide) => <label style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: wide ? "1 / -1" : undefined }}><span style={tpLabel}>{label}</span>{el}</label>;
++  const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : "Draft"} tone="warn" />;
++  const upcoming = (sessions || []).filter((s) => !s.done).sort(sessSort);
++
++  return (
++    <PageShell band watermark="PLANS" above={<>{viewToggle}{mounts}</>} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
++      sub="Build a plan for any topic with AI — save it, reuse it, and attach it to any session."
++      actions={canWrite ? <button style={FS.btnPrimary} onClick={() => { topicRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); topicRef.current?.focus(); }}><Sparkles size={14} /> Draft with AI</button> : null}>
++      <NoirSkin>
++        {canWrite && (
++          <div style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.red}55`, borderRadius: 16, background: `radial-gradient(120% 140% at 10% 0%, ${FIRE.red}24, transparent 50%), ${FIRE.cardNoir}`, padding: "20px 22px", marginBottom: 18 }}>
++            <div style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, marginBottom: 4 }}><Sparkles size={19} color={FIRE.redBright} /> Draft a training plan with AI</div>
++            <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14 }}>Tell it what you want to train on — any topic, not just what's next on the calendar.</div>
++            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12, margin: "4px 0 14px" }}>
++              {field("Topic / drill", <input ref={topicRef} style={FS.input} value={form.topic} onChange={up("topic")} placeholder="e.g. Tanker shuttle for a rural water supply" />, true)}
++              {field("Type", <select style={FS.input} value={form.type} onChange={up("type")}>{TP_TYPES.map((t) => <option key={t}>{t}</option>)}</select>)}
++              {field("Duration", <select style={FS.input} value={form.duration} onChange={up("duration")}>{TP_DURATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
++              {field("Category", <select style={FS.input} value={form.category} onChange={up("category")}><option value="">No category</option>{(categories || []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}</select>)}
++              {field("Members expected", <input style={FS.input} inputMode="numeric" value={form.members} onChange={up("members")} placeholder="8" />)}
++              {field("Skill level", <select style={FS.input} value={form.level} onChange={up("level")}>{TP_LEVELS.map((t) => <option key={t}>{t}</option>)}</select>)}
++              {field("Standard / SOG (optional)", <input style={FS.input} value={form.standard} onChange={up("standard")} placeholder="ISO rural PPC…" />)}
++              {field("Focus & notes (optional)", <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={form.focus} onChange={up("focus")} placeholder="props available, specific objectives, what to emphasize or avoid…" />, true)}
++            </div>
++            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
++              <button style={{ ...FS.btnPrimary, padding: "11px 20px", fontSize: 13, opacity: drafting ? 0.7 : 1 }} onClick={draft} disabled={drafting}>{drafting ? <><Loader2 size={15} className="spin" /> Drafting…</> : <><Sparkles size={15} /> Draft plan</>}</button>
++              <span style={{ fontSize: 11, color: FIRE.textMuted }}>Or start from a common drill:</span>
++            </div>
++            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
++              {TP_SEEDS.map((sd) => <button key={sd} type="button" onClick={() => setForm((f) => ({ ...f, topic: sd }))} style={{ fontSize: 11.5, fontWeight: 600, color: form.topic === sd ? FIRE.textPrimary : FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${form.topic === sd ? FIRE.redBright : FIRE.lineNoir}`, borderRadius: 999, padding: "7px 13px", cursor: "pointer", fontFamily: "inherit" }}>{sd}</button>)}
++            </div>
++            {draftErr && <div role="alert" style={NOIR_ERR}>{draftErr}</div>}
++            <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 14, display: "flex", alignItems: "center", gap: 7 }}><ShieldCheck size={13} color={FIRE.amberText} /> AI drafts the plan — a qualified officer reviews and approves it before it's used. Always verify against your SOGs.</div>
++          </div>
++        )}
++
++        <div style={tpSecLab}><BookOpen size={16} color={FIRE.redBright} />Your plan library
++          {plans && <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12, ...FS.num }}>{list.length}</span>}
++          <span style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
++            <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}><Search size={13} color={FIRE.textMuted} style={{ position: "absolute", left: 10, pointerEvents: "none" }} />
++              <input style={{ ...FS.input, padding: "7px 10px 7px 29px", fontSize: 12, width: 190 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search plans…" aria-label="Search plans" /></span>
++            <select style={{ ...FS.input, padding: "7px 10px", fontSize: 12, width: "auto" }} value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Filter by category"><option value="">All categories</option>{cats.map((c) => <option key={c} value={c}>{c}</option>)}</select>
++          </span>
++        </div>
++        {loadErr && <div role="alert" style={{ ...NOIR_ERR, marginTop: 0, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>{plans ? "Couldn't refresh the library — showing what was loaded." : loadErr}
++          <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }} onClick={load}><RefreshCw size={13} color={FIRE.btnIcon} /> Retry</button></div>}
++        {!plans && !loadErr && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "8px 0 20px", display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading the plan library…</div>}
++        {plans && list.length === 0 && <div style={{ ...FS.cardNoir, padding: "18px 16px", marginBottom: 20, fontSize: 13, color: FIRE.textMuted }}>No plans in the library yet.{canWrite ? " Draft your first one above." : " Your officers' plans will show here."}</div>}
++        {plans && list.length > 0 && shown.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted, padding: "6px 0 20px" }}>No plans match that search.</div>}
++        {shown.length > 0 && (
++          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 1fr))", gap: 13, marginBottom: 20 }}>
++            {shown.map((p) => {
++              const on = sel && sel.id === p.id;
++              const nObj = (p.content?.objectives || []).length;
++              const who = p.status === "approved" ? nameOf(p.approved_by) : nameOf(p.created_by);
++              return (
++                <button key={p.id} type="button" onClick={() => select(p.id)} aria-pressed={on}
++                  style={{ ...FS.cardNoir, textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 13, padding: "15px 16px", border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, display: "block", width: "100%" }}>
++                  <div style={{ display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 9 }}>
++                    <span style={{ width: 10, height: 10, borderRadius: 3, marginTop: 4, flexShrink: 0, background: colorOf(p.category) }} />
++                    <span style={{ fontWeight: 600, fontSize: 14, color: FIRE.textPrimary, lineHeight: 1.2, overflowWrap: "anywhere", flex: 1 }}>{p.title}</span>
++                    {statusPill(p)}
++                  </div>
++                  <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 10, ...FS.num }}>{[p.category || "No category", `${nObj} objective${nObj === 1 ? "" : "s"}`, tpDur(p.duration_min)].filter(Boolean).join(" · ")}</div>
++                  <div style={{ borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 10, display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: FIRE.textMuted }}>
++                    <span style={{ color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.status === "approved" ? `Approved${who ? ` by ${who}` : ""} · ${tpDate(p.approved_at)}` : `${p.source === "ai" ? "AI draft" : "Draft"}${who ? ` · ${who}` : ""} · ${tpDate(p.created_at)}`}</span>
++                    <span style={{ marginLeft: "auto", color: p.attached_sessions ? FIRE.redText : FIRE.textMuted, fontWeight: 600, flexShrink: 0, ...FS.num }}>{p.attached_sessions ? `Attached to ${p.attached_sessions} session${p.attached_sessions === 1 ? "" : "s"}` : "Not attached"}</span>
++                  </div>
++                </button>
++              );
++            })}
++          </div>
++        )}
++
++        {sel && (
++          <div ref={featRef}>
++            <div style={tpSecLab}><ClipboardList size={16} color={FIRE.redBright} />{sel.status === "draft" ? "Awaiting review" : "Approved plan"}
++              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>{sel.status === "draft" ? (sel.source === "ai" ? "AI-drafted · needs an officer's approval" : "Draft · needs an officer's approval") : `Approved${nameOf(sel.approved_by) ? ` by ${nameOf(sel.approved_by)}` : ""} · ${tpDate(sel.approved_at)}`}</span></div>
++            <div style={{ border: `1px solid ${sel.status === "draft" ? `${FIRE.amberText}59` : FIRE.lineNoir}`, borderRadius: 14, background: FIRE.cardNoir, padding: "18px 20px", marginBottom: 20 }}>
++              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 5, flexWrap: "wrap" }}>
++                <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{sel.title}</div>
++                {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={sel.source === "ai" ? "Draft · AI" : "Draft"} tone="warn" />}
++                {canWrite && !editing && (
++                  <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
++                    <button style={FS.btn} disabled={!!busy} onClick={() => { setEditing(true); setAttachOpen(false); }}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>
++                    <button style={FS.btn} disabled={!!busy} onClick={() => setAttachOpen((v) => !v)} aria-expanded={attachOpen}><Calendar size={14} color={FIRE.btnIcon} /> Attach to session</button>
++                    {sel.status === "draft"
++                      ? <button style={{ ...FS.btnPrimary, opacity: busy === "approve" ? 0.7 : 1 }} disabled={!!busy} onClick={() => act("approve", "approve_drill_plan", { p_id: sel.id }, "Plan approved.")}>{busy === "approve" ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />} Approve plan</button>
++                      : <button style={FS.btn} disabled={!!busy} onClick={() => act("unapprove", "unapprove_drill_plan", { p_id: sel.id }, "Back to draft.")}>{busy === "unapprove" ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} color={FIRE.btnIcon} />} Back to draft</button>}
++                    <button style={{ ...FS.btn, color: FIRE.deleteRed }} disabled={!!busy} onClick={() => remove(sel)}><Trash2 size={14} /> Delete</button>
++                  </div>
++                )}
++              </div>
++              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${sel.source === "ai" ? "drafted with AI" : "written"}${nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
++              {attachOpen && canWrite && (
++                <div style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
++                  <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Attach to session</span>
++                    <select style={FS.input} value={attachSess} onChange={(e) => setAttachSess(e.target.value)}><option value="">Choose a session…</option>
++                      {upcoming.map((s) => <option key={s.id} value={s.id}>{s.title} · {fmtSess(s)}</option>)}</select></label>
++                  <button style={{ ...FS.btnPrimary, opacity: busy === "attach" ? 0.7 : 1 }} disabled={!attachSess || !!busy} onClick={() => attach(sel)}>{busy === "attach" ? <Loader2 size={14} className="spin" /> : <Calendar size={14} />} Attach</button>
++                  {upcoming.length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, width: "100%" }}>No upcoming sessions — schedule one on the Schedule view first.</div>}
++                </div>
++              )}
++              {lastAttached && (
++                <div style={{ ...NOIR_INSET, padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12.5, color: FIRE.textSecondary }}>
++                  <CheckCircle2 size={15} color={FIRE.greenText} /> Attached — it shows on the session like any saved plan.
++                  <button style={{ ...FS.btn, marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => setViewPlan({ ...lastAttached, kind: "ai" })}><Eye size={14} color={FIRE.btnIcon} /> View as attached</button>
++                </div>
++              )}
++              {editing ? <DrillPlanEditForm S={S} p={sel} categories={categories} busy={busy === "edit"} onSave={(v) => saveEdit(sel, v)} onCancel={() => setEditing(false)} /> : (() => {
++                const c = sel.content || {};
++                const objectives = strList(c.objectives), materials = strList(c.materials), safety = strList(c.safety);
++                const run = (Array.isArray(c.run_of_show) ? c.run_of_show : []).map((s) => (s && typeof s === "object" ? s : { t: String(s), d: "" }));
++                return (<>
++                  {c.summary && <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.55, marginBottom: 16 }}>{c.summary}</div>}
++                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 22 }}>
++                    <div>
++                      <div style={tpPsl}>Objectives</div>
++                      {objectives.length ? objectives.map((o, i) => (
++                        <div key={i} style={{ display: "flex", gap: 9, padding: "6px 0", fontSize: 12.5, color: FIRE.textSecondary }}>
++                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: FIRE.textPrimary, ...FS.num }}>{i + 1}</span>{o}</div>
++                      )) : <div style={{ fontSize: 12, color: FIRE.textMuted }}>None listed.</div>}
++                      <div style={{ ...tpPsl, marginTop: 16 }}>Materials &amp; apparatus</div>
++                      {materials.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 4 }}>{materials.map((m, i) => <span key={i} style={{ fontSize: 11, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 7, padding: "5px 10px" }}>{m}</span>)}</div>
++                        : <div style={{ fontSize: 12, color: FIRE.textMuted }}>None listed.</div>}
++                      <div style={{ ...tpPsl, marginTop: 16 }}>Safety</div>
++                      {safety.length ? safety.map((x, i) => <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 12.5, color: FIRE.textSecondary }}><AlertTriangle size={13} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 2 }} />{x}</div>)
++                        : <div style={{ fontSize: 12, color: FIRE.textMuted }}>None listed.</div>}
++                    </div>
++                    <div>
++                      <div style={tpPsl}>Run of show</div>
++                      {run.length ? run.map((s, i) => (
++                        <div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: i === run.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, fontSize: 12 }}>
++                          <span style={{ width: 22, color: FIRE.redText, fontWeight: 600, flexShrink: 0, fontSize: 11, ...FS.num }}>{i + 1}</span>
++                          <span style={{ minWidth: 0 }}><span style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{s.t}</span>{s.d && <span style={{ display: "block", color: FIRE.textSecondary, marginTop: 2 }}>{s.d}</span>}</span>
++                        </div>
++                      )) : <div style={{ fontSize: 12, color: FIRE.textMuted }}>No steps listed.</div>}
++                    </div>
++                  </div>
++                </>);
++              })()}
++            </div>
++          </div>
++        )}
++      </NoirSkin>
++    </PageShell>
++  );
++}
++
++/* The Training page: the mock's Schedule | Training Plans toggle over the two views. The schedule stays mounted while
++   Plans is shown (its month, open panels and edit modes survive a round trip); Plans mounts on first open. */
++function Training(props) {
++  const [view, setView] = useState("schedule");
++  const [plansSeen, setPlansSeen] = useState(false);
++  const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); }} style={{ marginBottom: 12 }} />;
++  return (<>
++    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} viewToggle={toggle} /></div>
++    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} /></div>}
++  </>);
++}
++
++function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle }) {
+   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+ 
+   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
+@@ -24033,7 +24357,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+     const R = 58, C = 2 * Math.PI * R;
+ 
+     return (
+-      <PageShell band watermark="TRAIN" above={<>{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
++      <PageShell band watermark="TRAIN" above={<>{viewToggle}{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
+         sub="What's coming up, where you stand, and what to catch up on."
+         actions={totalRecorded > 0 ? (
+           <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
+@@ -24177,7 +24501,7 @@ function Training({ S, role, plan, setPlan, loadPlans, sessions, setSessions, lo
+ 
+   return (
+     <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
+-      watermark="TRAIN" above={sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}
++      watermark="TRAIN" above={<>{viewToggle}{sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}</>}
+       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
+       <NoirSkin>
+       {/* Moved from the member view (2026-10-13): it addresses officers ("open a session and set its length"),
