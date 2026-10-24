@@ -1,0 +1,109 @@
+dept_cert_readiness(): live 6a55033101e75f1a9c088aaa8bf3e861 · here 6a55033101e75f1a9c088aaa8bf3e861
+pa_department_radar(): live 5093693f4b8941f22a4b4a47263ee1ec · here 5093693f4b8941f22a4b4a47263ee1ec
+my_department_rollup(): live f46794ccdcd94451ff71f1fa404acefe · here f46794ccdcd94451ff71f1fa404acefe
+expiration_rows(uuid,uuid): live 4ccf41b4f5d87c1d45ada59a2b91686f · here 4ccf41b4f5d87c1d45ada59a2b91686f
+probation_item_states(uuid,uuid): live 677b005d7543c35d5c926ca9798e67d6 · here 677b005d7543c35d5c926ca9798e67d6
+update_cert(uuid,text,text): live 232cd2f1b6aaf51ec2ec7bf9560f7870 · here 232cd2f1b6aaf51ec2ec7bf9560f7870
+approve_cert_submission(uuid): live 01c1c75c16f24b3fd6209808955f5bd0 · here 01c1c75c16f24b3fd6209808955f5bd0
+valid_exp_ym(text): reviewed 51b8cde1… · here 51b8cde1
+
+TYPE-GAP PROBE BEFORE (the radar + rollup count the never-expires type's old date as EXPIRED):
+  North Hood — readiness expired 0 · no_expiry 1 | Boater's rollup current 1 · expired 1 | PA radar expired 1
+TYPE-GAP PROBE AFTER (+ a no_expiry cert): expired 0 everywhere; the type + the flag read no_expiry / current:
+  North Hood — readiness expired 0 · no_expiry 2 | Boater's rollup current 3 · expired 0 | PA radar expired 0
+
+RETEST BEFORE (must fail): function public.cert_never_expires(boolean, unknown, unknown) does not exist
+
+APPLY — state: [{"columns_ok":true,"checks_ok":true,"helper_ok":true,"update_cert_args":5,"update_cert_old_gone":true,"grants_ok":true,"no_expiry_sites":"dept_cert_readiness() 1 · expiration_rows(uuid,uuid) 1 · my_department_rollup() 5 · pa_department_radar() 2 · probation_item_states(uuid,uuid) 1","update_cert_md5":"88ae9180","helper_md5":"7c4083b5","existing_defaults":0,"certs_total":7,"total_policies":7,"locked_token_fns":1}]
+re-run -> Precondition failed: achieved_on / no_expiry / cert_never_expires() already exist — already applied. Nothing changed.
+grants: update_cert {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} · cert_never_expires {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+
+RETEST AFTER:
+24 passed, 0 failed, 0 skipped
+PASS  S0 columns + CHECKs; cert_never_expires() rule (flag OR same-department type — another department's type doesn't count); update_cert 5-arg only, definer, authenticated (no anon); the 8 reviewed md5s
+PASS  S1 the CHECKs refuse a no_expiry cert with an exp, and an achieved_on of '0000-00'
+PASS  L1 live: every cert no_expiry false / achieved_on NULL; expiration_rows no_expiry exactly for effective never-expires (all 7 rostered certs agree)
+— B4C Demo Department
+   PASS  N1 readiness no_expiry +3 (flag · type · both, once) / expired +1 (the real one) / no_date +2; rollup dept expired +1, mine current +3 / expired +1 — no error
+   PASS  N1 radar: expired +1 (the real one only; the type's old date no longer counts), expiring 0 — no error
+   PASS  N1 expiration_rows: flag / type / both no_expiry, the real expired one expired
+   PASS  N2 probation: missing, then current from a no_expiry cert alone
+   PASS  U1 update_cert: 3-arg legacy unchanged; no_expiry clears the date; a date means expires; earned set / kept / cleared; future / after-expiry / '0000-00' / bad exp refused
+   PASS  A1 approve: "doesn't expire" lands with no date; earned future / after-expiry / '0000-00' cleared; valid kept
+   PASS  P1 a plain member's own proposal persists no_expiry + achieved_on through the existing INSERT policy
+— Indian Harbor Volunteer Fire Department
+   PASS  N1 readiness no_expiry +3 (flag · type · both, once) / expired +1 (the real one) / no_date +2; rollup dept expired +1, mine current +3 / expired +1 — no error
+   PASS  N1 radar: expired +1 (the real one only; the type's old date no longer counts), expiring 0 — no error
+   PASS  N1 expiration_rows: flag / type / both no_expiry, the real expired one expired
+   PASS  N2 probation: missing, then current from a no_expiry cert alone
+   PASS  U1 update_cert: 3-arg legacy unchanged; no_expiry clears the date; a date means expires; earned set / kept / cleared; future / after-expiry / '0000-00' / bad exp refused
+   PASS  A1 approve: "doesn't expire" lands with no date; earned future / after-expiry / '0000-00' cleared; valid kept
+   PASS  P1 a plain member's own proposal persists no_expiry + achieved_on through the existing INSERT policy
+— North Hood County Volunteer Fire Department
+   PASS  N1 readiness no_expiry +3 (flag · type · both, once) / expired +1 (the real one) / no_date +2; rollup dept expired +1, mine current +3 / expired +1 — no error
+   PASS  N1 radar: expired +1 (the real one only; the type's old date no longer counts), expiring 0 — no error
+   PASS  N1 expiration_rows: flag / type / both no_expiry, the real expired one expired
+   PASS  N2 probation: missing, then current from a no_expiry cert alone
+   PASS  U1 update_cert: 3-arg legacy unchanged; no_expiry clears the date; a date means expires; earned set / kept / cleared; future / after-expiry / '0000-00' / bad exp refused
+   PASS  A1 approve: "doesn't expire" lands with no date; earned future / after-expiry / '0000-00' cleared; valid kept
+   PASS  P1 a plain member's own proposal persists no_expiry + achieved_on through the existing INSERT policy
+rolled back: certs rows byte-identical true; cert_types 0 (0); submissions 1 (1)
+named 3-arg call (today's client): {"exp":"2029-01","no_expiry":false,"achieved_on":null}
+
+mutations (each must be REFUSED, or with post-conditions stripped caught by the RETEST):
+  (a) readiness: the flag not ORed in
+     REFUSED: Post-condition failed: public.dept_cert_readiness() does not match its reviewed md5.
+  (a2) same, post-conditions stripped
+     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  N1 readiness Δ no_expiry 2 expired 1 no_date 3 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 3 expiring 0 expired 1 | FAIL  N1 readiness Δ no_expiry 2 expired 1 no_date 3 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 3 expiring 0 expired 1 | FAIL  N1 readiness Δ no_expiry 2 expired 1 no_date 3 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 3 expiring 0 expired 1
+  (b) radar: the type / flag exclusion missing
+     REFUSED: Post-condition failed: public.pa_department_radar() does not match its reviewed md5.
+  (b2) same, post-conditions stripped
+     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  N1 radar Δ expired 2 expiring 0 | FAIL  N1 radar Δ expired 2 expiring 0 | FAIL  N1 radar Δ expired 2 expiring 0
+  (c) rollup: my_certs_current without never-expires
+     REFUSED: Post-condition failed: public.my_department_rollup() does not match its reviewed md5.
+  (c2) same, post-conditions stripped
+     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  N1 readiness Δ no_expiry 3 expired 1 no_date 2 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 0 expiring 0 expired 1 | FAIL  N1 readiness Δ no_expiry 3 expired 1 no_date 2 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 0 expiring 0 expired 1 | FAIL  N1 readiness Δ no_expiry 3 expired 1 no_date 2 expiring 0 current 0 · rollup Δ dept expired 1 expiring 0 · mine current 0 expiring 0 expired 1
+  (d) CHECK no_expiry -> exp NULL missing
+     REFUSED: Post-condition failed: the certs / cert_submissions constraints are not exactly the old ones + the two CHECKs.
+  (d2) same, post-conditions stripped
+     applied -> RETEST: 21 passed, 3 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  S1 1 of 2 CHECK refusals | FAIL  L1 live: 0 disagree, or a cert already carries no_expiry / achieved_on
+  (e) CHECK achieved_on missing
+     REFUSED: Post-condition failed: the certs / cert_submissions constraints are not exactly the old ones + the two CHECKs.
+  (e2) same, post-conditions stripped
+     applied -> RETEST: 21 passed, 3 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  S1 1 of 2 CHECK refusals | FAIL  L1 live: 0 disagree, or a cert already carries no_expiry / achieved_on
+  (f) update_cert grants not re-applied (anon re-opened by the DROP + CREATE)
+     REFUSED: Post-condition failed: update_cert — the old 3-arg signature remains, or the new one is not definer / search_path public / the old grants (authenticated + service_role, no anon).
+  (f2) same, post-conditions stripped
+     applied -> RETEST: 23 passed, 1 failed, 0 skipped | FAIL  S0 shape / grants / md5s
+  (g) update_cert accepts a future achieved_on
+     REFUSED: Post-condition failed: update_cert() does not match its reviewed md5.
+  (g2) same, post-conditions stripped
+     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  U1 update_cert 8 of 9: [2026-12|2028-02|Achievement date can't be in the future. accepted] | FAIL  U1 update_cert 8 of 9: [2026-12|2028-02|Achievement date can't be in the future. accepted] | FAIL  U1 update_cert 8 of 9: [2026-12|2028-02|Achievement date can't be in the future. accepted]
+  (h) approve keeps an invalid achieved_on
+     REFUSED: Post-condition failed: public.approve_cert_submission(uuid) does not match its reviewed md5.
+  (h2) same, post-conditions stripped
+     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S0 shape / grants / md5s | FAIL  A1 approve raised: new row for relation "certs" violates check constraint "certs_achieved_on_valid" | FAIL  A1 approve raised: new row for relation "certs" violates check constraint "certs_achieved_on_valid" | FAIL  A1 approve raised: new row for relation "certs" violates check constraint "certs_achieved_on_valid"
+  (i) helper ignores the type's department
+     REFUSED: Post-condition failed: cert_never_expires() does not match its reviewed md5.
+  (i2) same, post-conditions stripped
+     applied -> RETEST: 23 passed, 1 failed, 0 skipped | FAIL  S0 shape / grants / md5s
+  (j) no_expiry DEFAULT true
+     REFUSED: check constraint "certs_no_expiry_clears_exp" of relation "certs" is violated by some row
+  (k) a collateral function change (is_dept_admin)
+     REFUSED: Post-condition failed: another function (or its grants) changed.
+  (l) a policy changed in the block
+     REFUSED: Post-condition failed: a policy changed.
+  (m) a trigger dropped in the block
+     REFUSED: Post-condition failed: a trigger changed.
+  (n) an existing cert changed in the block
+     REFUSED: Post-condition failed: an existing certs / cert_submissions / cert_types row changed (or a new column is not at its default).
+  (o) a cert type added in the block
+     REFUSED: Post-condition failed: an existing certs / cert_submissions / cert_types row changed (or a new column is not at its default).
+  (p) a reader's live output changes (md5 pin stripped, so only the read-identity check stands)
+     REFUSED: Post-condition failed: a reader's output on the live data changed (expected none: 0 no_expiry certs, 0 cert types).
+  (q) live drift: probation_item_states changed before apply
+     REFUSED: Precondition failed: public.probation_item_states(uuid,uuid) drifted from the reviewed live body (md5 677b005d…). Nothing changed.
+  (r) live drift: update_cert changed before apply
+     REFUSED: Precondition failed: update_cert(uuid,text,text) drifted from the reviewed live body (md5 232cd2f1…). Nothing changed.
+  (s) already applied
+     REFUSED: Precondition failed: achieved_on / no_expiry / cert_never_expires() already exist — already applied. Nothing changed.
