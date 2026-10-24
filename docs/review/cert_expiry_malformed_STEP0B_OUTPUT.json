@@ -1,0 +1,102 @@
+{
+ "certs_cols": [
+  "id:uuid",
+  "department_id:uuid",
+  "member_id:uuid",
+  "name:text",
+  "exp:text",
+  "created_at:timestamp with time zone",
+  "proof_path:text",
+  "cert_type_id:uuid"
+ ],
+ "certs_policies": [
+  "Dept admins read own dept cert submissions | SELECT | (is_dept_admin() AND (department_id = my_department_id())) | ",
+  "Leaders propose cert submissions | INSERT |  | (is_leader() AND (department_id = my_department_id()) AND (member_id IN ( SELECT m.id\n   FROM members m\n  WHERE (m.department_id = my_department_id()))) AND (status = 'pending'::text) AND (proposed_by = auth.uid()))",
+  "members propose own cert submissions | INSERT |  | ((member_id = my_member_id()) AND (department_id = my_department_id()) AND (proposed_by = auth.uid()) AND (status = 'pending'::text) AND (proof_path IS NOT NULL))",
+  "members read own cert submissions | SELECT | (member_id = my_member_id()) | ",
+  "Leaders read all certs | SELECT | (is_leader() AND (department_id = my_department_id())) | ",
+  "Members read own certs | SELECT | (member_id IN ( SELECT members.id\n   FROM members\n  WHERE (lower(members.email) = lower(auth.email())))) | "
+ ],
+ "certs_triggers": null,
+ "cleanup_targets": [
+  {
+   "id": "d19a5449-c5e4-47f5-9a91-74bb71894b4d",
+   "exp": "2026-09-15",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "75badecf-7628-4232-9ac8-7415d9915656",
+   "exp": "2026-12-31",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "3a9c1f96-243e-4b42-b398-e46b9235e3dc",
+   "exp": "2027-03-01",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "4aace421-14ba-4d14-b138-5e83d8e4b5ec",
+   "exp": "2027-05-01",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "b82eb65a-78b0-4bbd-853f-a148e75835d4",
+   "exp": "2027-06-01",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "00b3562b-1352-421c-a122-18ad2089a9a9",
+   "exp": "2028-01-01",
+   "dept": "B4C Demo Department",
+   "dept_id": "94667450-481c-4f40-a6b6-86e1b364be93"
+  },
+  {
+   "id": "8599898a-0a71-4664-82ae-6e97ede8e7fe",
+   "exp": "0000-00",
+   "dept": "North Hood County Volunteer Fire Department",
+   "dept_id": "6d51b00a-bdb0-4807-8e45-70bb53d4dcff"
+  }
+ ],
+ "submissions_cols": [
+  "id:uuid",
+  "department_id:uuid",
+  "member_id:uuid",
+  "name:text",
+  "exp:text",
+  "status:text",
+  "source:text",
+  "note:text",
+  "proposed_by:uuid",
+  "reviewed_by:uuid",
+  "reviewed_at:timestamp with time zone",
+  "created_at:timestamp with time zone",
+  "proof_path:text"
+ ],
+ "pending_malformed": 0,
+ "submissions_by_shape": [
+  {
+   "n": 21,
+   "shape": "YYYY-MM bad month",
+   "source": "self",
+   "status": "approved"
+  },
+  {
+   "n": 2,
+   "shape": "YYYY-MM bad month",
+   "source": "manual",
+   "status": "approved"
+  },
+  {
+   "n": 1,
+   "shape": "YYYY-MM-DD",
+   "source": "manual",
+   "status": "approved"
+  }
+ ],
+ "submissions_triggers": null
+}

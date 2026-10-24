@@ -1,0 +1,97 @@
+# The 7 cert functions: LIVE body (Step 0, md5-pinned) -> the body sql/cert_expiry_valid_ym_DRAFT.sql creates.
+# Generated from the live text + each function's single token swap; the migration's post-condition requires exactly this.
+
+--- live/dept_cert_readiness()
++++ new/dept_cert_readiness()
+@@ -14,3 +14,3 @@
+         when coalesce(t.never_expires, false) then 'no_expiry'   -- cert catalog: satisfied, never a "needs a date" gap
+-        when c.exp is null or c.exp !~ '^\d{4}-\d{2}$' then 'no_date'
++        when c.exp is null or not public.valid_exp_ym(c.exp) then 'no_date'
+         when (split_part(c.exp,'-',1)::int * 12 + split_part(c.exp,'-',2)::int) <  n.now_ym then 'expired'
+
+--- live/pa_department_radar()
++++ new/pa_department_radar()
+@@ -55,6 +55,6 @@
+                                           and (dc.content_text is null or btrim(dc.content_text) = '')) as documents_no_text_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3) as expiring_certs_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+
+--- live/my_department_rollup()
++++ new/my_department_rollup()
+@@ -61,6 +61,6 @@
+                                           and (dc.content_text is null or btrim(dc.content_text) = '')) as documents_no_text_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+              - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3) as expiring_certs_count,
+-      (select count(*) from certs c where c.department_id = d.id and c.exp ~ '^\d{4}-\d{2}$'
++      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+@@ -104,3 +104,3 @@
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\d{4}-\d{2}$'
++           and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+@@ -108,3 +108,3 @@
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\d{4}-\d{2}$'
++           and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+@@ -112,3 +112,3 @@
+       (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid
+-           and c.exp ~ '^\d{4}-\d{2}$'
++           and public.valid_exp_ym(c.exp)
+            and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)
+
+--- live/expiration_rows(uuid,uuid)
++++ new/expiration_rows(uuid,uuid)
+@@ -21,3 +21,3 @@
+            'cert'::text as kind, c.name as label, null::text as cls,
+-           case when c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++           case when public.valid_exp_ym(c.exp)
+                 then (date_trunc('month', to_date(c.exp || '-01', 'YYYY-MM-DD')) + interval '1 month - 1 day')::date end as expires_on
+
+--- live/probation_item_states(uuid,uuid)
++++ new/probation_item_states(uuid,uuid)
+@@ -63,3 +63,3 @@
+                                           and (coalesce(t.never_expires, false)   -- cert catalog: a never-expires type is current
+-                                               or (c.exp ~ '^\d{4}-(0[1-9]|1[0-2])$'
++                                               or (public.valid_exp_ym(c.exp)
+                                                    and split_part(c.exp, '-', 1)::int * 12 + split_part(c.exp, '-', 2)::int
+
+--- live/update_cert(uuid,text,text)
++++ new/update_cert(uuid,text,text)
+@@ -16,4 +16,4 @@
+   -- exp must be null/empty (no expiration) or a valid YYYY-MM string
+-  if new_exp is not null and btrim(new_exp) <> '' and new_exp !~ '^\d{4}-\d{2}$' then
+-    raise exception 'Expiration must be YYYY-MM (got: %)', new_exp;
++  if new_exp is not null and btrim(new_exp) <> '' and not public.valid_exp_ym(new_exp) then
++    raise exception 'Expiration must be a real month as YYYY-MM (e.g. 2027-06).';
+   end if;
+
+--- live/approve_cert_submission(uuid)
++++ new/approve_cert_submission(uuid)
+@@ -24,3 +24,3 @@
+   insert into public.certs (id, department_id, member_id, name, exp, proof_path, created_at)
+-  values (gen_random_uuid(), sub.department_id, sub.member_id, sub.name, sub.exp, sub.proof_path, now())
++  values (gen_random_uuid(), sub.department_id, sub.member_id, sub.name, case when public.valid_exp_ym(sub.exp) then sub.exp end, sub.proof_path, now())
+   returning id into new_cert_id;
+
+# NEW: public.valid_exp_ym(text)
+  CREATE FUNCTION public.valid_exp_ym(p_exp text)
+   RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE
+  AS $fn$
+  -- B4C:cert expiry — the ONE rule for "is this a real expiration month", the SQL twin of shared/expiry.js validExpYM():
+  -- 'YYYY-MM', month 01-12, year >= 1900. NULL / blank / '0000-00' / '2026-13' / a full date / anything else -> false, never
+  -- NULL. [0-9], not \d (ASCII digits, like JS). No cast, so it cannot raise. Kept inlinable (no SET, not definer): the cert
+  -- readers test it in a WHERE ahead of split_part(exp)::int arithmetic, and inlined it is ordered like the regex it replaced.
+    select coalesce(p_exp OPERATOR(pg_catalog.~) '^(19|[2-9][0-9])[0-9]{2}-(0[1-9]|1[0-2])$', false)
+  $fn$;
+  REVOKE ALL ON FUNCTION public.valid_exp_ym(text) FROM PUBLIC, anon;
+  GRANT EXECUTE ON FUNCTION public.valid_exp_ym(text) TO authenticated, service_role;
+
