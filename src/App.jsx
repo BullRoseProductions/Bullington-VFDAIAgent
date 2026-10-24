@@ -23871,7 +23871,7 @@ function TrainingOfficersCard({ S, members, meId, notify, onChanged }) {
           <span style={{ overflowWrap: "anywhere" }}>{officers === null ? (loadErr ? "Couldn't load the list." : "Loading…") : list.length ? list.map((o) => `${o.name}${o.member_id === meId ? " (you)" : ""}`).join(", ") : "No training officers yet — only Department Admins can schedule"}</span>
         </div>
         <button onClick={() => setOpen((v) => !v)} aria-expanded={open} style={{ ...FS.btn, marginLeft: "auto", padding: "8px 13px", fontSize: 12 }}><Pencil size={13} color={FIRE.btnIcon} /> {open ? "Done" : "Manage access"}</button>
-        <span style={{ fontSize: 9.5, color: FIRE.textMuted, letterSpacing: ".04em" }}>Dept Admin only</span>
+        <span style={{ fontSize: 9.5, color: FIRE.textMuted, letterSpacing: ".04em" }}>Dept Admin / Project Admin</span>
       </div>
       {open && (<div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.4 }}>Training officers schedule sessions and meetings, take the roster, manage categories and the plan library. Department Admins always can. You assign them.</div>

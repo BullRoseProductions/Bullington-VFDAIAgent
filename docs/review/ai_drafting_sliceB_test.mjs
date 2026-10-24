@@ -13,8 +13,9 @@
 //      draft -> set_drill_plan(null, …, mapped content, 'ai'); approve / back to draft; edit keeps source; attach + "View as
 //      attached" opens the real viewer; delete through confirmDestructive with the keep-the-copy copy; RPC errors surfaced;
 //      a failed library read shows Retry, not an empty library; Board / Project Admin get no write controls
-//   5. the source: only src/App.jsx; AIDrillPlanner byte-identical to origin/main; the only new RPCs are the six Slice A
-//      ones; no direct drill_plans / session_plans writes added; no hex in the new block; verified count unchanged; Notify absent
+//   5. the source: only src/App.jsx; AIDrillPlanner = origin/main with exactly the Training Officers canManageTraining gate
+//      swap; the six Slice A RPCs still called and the only RPCs new vs main the Training Officers card's two (re-baselined
+//      post-merge — originally: the only new RPCs are the six Slice A ones); no direct drill_plans / session_plans writes added; no hex in the new block; verified count unchanged; Notify absent
 import { mkdtempSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -290,11 +291,26 @@ fail.dept_drill_plans = "Load failed";
 const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
 ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const fn = (s, name) => { const i = s.indexOf(`function ${name}(`); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
-ok("AIDrillPlanner (the inline Draft with AI planner) byte-identical to origin/main", fn(src, "AIDrillPlanner") === fn(main, "AIDrillPlanner") && fn(src, "AIDrillPlanner").length > 1000);
+// Training Officers Slice 1 re-points AIDrillPlanner's write gate to the canManageTraining twin (is_training_manager()). The fence:
+// main's AIDrillPlanner with EXACTLY that swap — the signature gains canManageTraining, the canManage line flips — nothing else.
+const AIDP_SWAP = [
+  ["function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories }) {",
+   "function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories, canManageTraining }) {"],
+  ["  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)",
+   "  const canManage = !!canManageTraining;   // training_sessions write — is_training_manager() (a Department Admin or a training officer; not PA)"],
+];
+const aidpMain = fn(main, "AIDrillPlanner"), aidpSrc = fn(src, "AIDrillPlanner");
+ok("AIDrillPlanner (the inline Draft with AI planner) = origin/main with exactly the canManageTraining gate swap",
+  AIDP_SWAP.every(([a]) => aidpMain.split(a).length === 2) && AIDP_SWAP.reduce((s, [a, b]) => s.replace(a, () => b), aidpMain) === aidpSrc
+  && !aidpSrc.includes("CANMANAGE_OPS_ROLES") && aidpSrc.length > 1000);
 ok("serializeDrillPlan + AiPlanViewer byte-identical to origin/main", fn(src, "serializeDrillPlan") === fn(main, "serializeDrillPlan") && fn(src, "AiPlanViewer") === fn(main, "AiPlanViewer"));
 const rpcSet = (s) => new Set([...(s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)), ...[...s.matchAll(/\bact\("[a-z]+", "([a-z_]+)"/g)].map((m) => m[1])]);
 const added = [...rpcSet(src)].filter((n) => !rpcSet(main).has(n)).sort();
-ok("the only new RPCs are the six Slice A ones", JSON.stringify(added) === JSON.stringify(["approve_drill_plan", "attach_drill_plan_to_session", "delete_drill_plan", "dept_drill_plans", "set_drill_plan", "unapprove_drill_plan"]), JSON.stringify(added));
+// Post-merge: the six Slice A RPCs are on main (aed762f) — they must all still be called; the only RPCs new vs main are the
+// Training Officers card's two.
+const SLICE_A_RPCS = ["approve_drill_plan", "attach_drill_plan_to_session", "delete_drill_plan", "dept_drill_plans", "set_drill_plan", "unapprove_drill_plan"];
+ok("the six Slice A RPCs are all still called", SLICE_A_RPCS.every((n) => rpcSet(src).has(n)), JSON.stringify(SLICE_A_RPCS.filter((n) => !rpcSet(src).has(n))));
+ok("the only new RPCs vs origin/main are the Training Officers card's two", JSON.stringify(added) === JSON.stringify(["assign_training_officer", "remove_training_officer"]), JSON.stringify(added));
 const block = src.slice(src.indexOf("/* ---------------- TRAINING PLANS (AI Drafting Slice B)"), src.indexOf("function TrainingSchedule("));
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 ok("no direct drill_plans / session_plans writes in the new block", !/from\("(drill_plans|session_plans)"\)/.test(block));
