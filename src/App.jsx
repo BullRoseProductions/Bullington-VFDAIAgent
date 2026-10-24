@@ -2520,6 +2520,18 @@ export default function App() {
       .then(({ data, error }) => { if (!off && !error && data) setIsEqMgr(data.length > 0); });
     return () => { off = true; };
   }, [myMemberId]);
+  /* Training officers — the same shape as isEqMgr. An active training_officer row for the REAL member id (the
+     members-read RLS scopes the read to the active department). With "Department Admin" it makes canManageTraining,
+     the client twin of is_training_manager(). A failed read keeps the last-known answer. */
+  const [isTrainingOfficer, setIsTrainingOfficer] = useState(false);
+  const [trainingOfficersTick, setTrainingOfficersTick] = useState(0);   // the Training Officers card bumps it after assign / remove
+  useEffect(() => {
+    if (!myMemberId) { setIsTrainingOfficer(false); return; }
+    let off = false;
+    supabase.from("training_officer").select("id").eq("member_id", myMemberId).is("removed_at", null).limit(1)
+      .then(({ data, error }) => { if (!off && !error && data) setIsTrainingOfficer(data.length > 0); });
+    return () => { off = true; };
+  }, [myMemberId, trainingOfficersTick]);
   const [dept, setDept] = useState(null);   // real department identity (name + logo_url) — header crest + sidebar
   useEffect(() => {
     if (!authEmail) { setDept(null); return; }
@@ -3142,7 +3154,7 @@ export default function App() {
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} />}
+          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
@@ -5850,13 +5862,13 @@ function DrillPlanPanel({ S, plan, form, loading, onRegenerate, onSave, saveOpen
     </div>
   );
 }
-function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories }) {
+function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories, canManageTraining }) {
   const [form, setForm] = useState({ size: "12", apparatus: "1 engine, 1 brush truck", topic: "Search and rescue", level: "Intermediate", time: "90", history: "Have not trained on search & rescue in 6 months." });
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(""); const [plan, setPlan] = useState(null); const [genId, setGenId] = useState(0);
   const [saveSession, setSaveSession] = useState(""); const [saving, setSaving] = useState(false);
   const [view, setView] = useState("full");
   const [saveOpen, setSaveOpen] = useState(false);   // the Save-to-a-session footer button opens the existing save + schedule row   // 'full' | 'quick' — preview toggle; resets to full on each generate
-  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)
+  const canManage = !!canManageTraining;   // training_sessions write — is_training_manager() (a Department Admin or a training officer; not PA)
   const [newDate, setNewDate] = useState(""); const [newTime, setNewTime] = useState(""); const [newTitle, setNewTitle] = useState(""); const [newCat, setNewCat] = useState("");
   const [newAudience, setNewAudience] = useState("everyone");   // audience for AI schedule-on-a-date
   const [newCounts, setNewCounts] = useState(true);   // AI schedule-on-a-date "counts toward attendance rate"; default ON
@@ -23577,8 +23589,8 @@ function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel }) {
   );
 }
 
-function TrainingPlans({ S, role, sessions, loadSessions, members, notify, dept, categories, viewToggle }) {
-  const canWrite = hasAny(role, CANMANAGE_OPS_ROLES);   // set / approve / unapprove / delete / attach: is_canmanage_ops() (DA / Officer)
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle }) {
+  const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
   const [form, setForm] = useState({ topic: "", type: TP_TYPES[0], duration: "120", category: "", members: "", level: "Mixed crew", standard: "", focus: "" });
@@ -23810,27 +23822,115 @@ function TrainingPlans({ S, role, sessions, loadSessions, members, notify, dept,
   );
 }
 
+/* TRAINING OFFICERS — the assign / remove card (the Equipment managers card's twin). Who may schedule and manage training
+   (is_training_manager() = a Department Admin or an active training officer). Shown to Department Admin + Project Admin —
+   the assign_ / remove_training_officer RPCs' is_dept_admin() gate (PA may APPOINT, though PA doesn't manage training).
+   Writes ONLY through those two RPCs; the list is the training_officer members-read SELECT (RLS scopes it to the
+   department). No cap. Eligible = any Active member not already an officer, by the same isAssignable rule equipment uses. */
+function TrainingOfficersCard({ S, members, meId, notify, onChanged }) {
+  const [officers, setOfficers] = useState(null);   // null = not loaded yet; a failed read keeps the last-known list
+  const [loadErr, setLoadErr] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState(false);
+  const nameById = new Map((members || []).map((m) => [m.id, m.name]));
+  async function load() {
+    const { data, error } = await supabase.from("training_officer")
+      .select("id, member_id, assigned_by_name, assigned_at").is("removed_at", null).order("assigned_at", { ascending: true });
+    if (error || !data) { setLoadErr(true); return; }
+    setLoadErr(false); setOfficers(data);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useReconnect(() => { if (loadErr) load(); });
+  const list = (officers || []).map((r) => ({ ...r, name: nameById.get(r.member_id) || "A member" }));
+  const eligible = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !list.some((o) => o.member_id === m.id))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  async function assign(memberId) {
+    if (!memberId) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("assign_training_officer", { p_member_id: memberId });
+    setBusy(false);
+    if (error || !data) { notify({ kind: "error", title: "Couldn't assign training officer", text: error?.message || "Please try again." }); return; }
+    setPick(""); await load(); onChanged && onChanged();
+  }
+  async function remove(o) {
+    if (!(await noirConfirm({ title: `Remove ${o.name} as a training officer?`, body: "They'll no longer schedule or manage training (sessions, roster, categories, the plan library). They can still open a QR sign-in if their role allows it. You can assign them again later.", confirmLabel: "Remove training officer", danger: true }))) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("remove_training_officer", { p_member_id: o.member_id });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: "Couldn't remove training officer", text: error.message || "Please try again." }); return; }
+    await load(); onChanged && onChanged();
+  }
+  const fmtWhen = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "");
+  return (
+    <Card padding="12px 16px" style={{ marginBottom: 12, background: FIRE.card2Noir }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: FIRE.textPrimary, fontWeight: 600 }}><Users size={16} color={FIRE.redBright} />Training officers <span style={{ color: FIRE.textMuted, fontSize: 11, fontWeight: 400 }}>· schedule &amp; manage training · {list.length}</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12, color: FIRE.textSecondary, flexWrap: "wrap", minWidth: 0 }}>
+          {list.slice(0, 6).map((o) => <span key={o.id} title={o.name} style={{ width: 28, height: 28, borderRadius: "50%", background: FIRE.card, border: `1px solid ${FIRE.line2Noir}`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, fontFamily: DISPLAY_FONT, color: FIRE.textPrimary }}>{(o.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>)}
+          <span style={{ overflowWrap: "anywhere" }}>{officers === null ? (loadErr ? "Couldn't load the list." : "Loading…") : list.length ? list.map((o) => `${o.name}${o.member_id === meId ? " (you)" : ""}`).join(", ") : "No training officers yet — only Department Admins can schedule"}</span>
+        </div>
+        <button onClick={() => setOpen((v) => !v)} aria-expanded={open} style={{ ...FS.btn, marginLeft: "auto", padding: "8px 13px", fontSize: 12 }}><Pencil size={13} color={FIRE.btnIcon} /> {open ? "Done" : "Manage access"}</button>
+        <span style={{ fontSize: 9.5, color: FIRE.textMuted, letterSpacing: ".04em" }}>Dept Admin / Project Admin</span>
+      </div>
+      {open && (<div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+        <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 10px", lineHeight: 1.4 }}>Training officers schedule sessions and meetings, take the roster, manage categories and the plan library. Department Admins always can. You assign them.</div>
+        {loadErr && <div role="alert" style={{ ...NOIR_ERR, marginTop: 0, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>Couldn't load the training officers.{officers ? " Showing the last list." : ""}
+          <button style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }} onClick={load}><RefreshCw size={13} color={FIRE.btnIcon} /> Retry</button></div>}
+        {officers !== null && (list.length === 0 ? (
+          <div style={{ fontSize: 13, color: FIRE.textMuted }}>No training officers assigned yet.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {list.map((o) => (
+              <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 40, flexWrap: "wrap" }}>
+                <Users size={15} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{o.name}{o.member_id === meId ? " (you)" : ""}</span>
+                  <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>{[o.assigned_by_name ? `Assigned by ${o.assigned_by_name}` : null, fmtWhen(o.assigned_at)].filter(Boolean).join(" · ")}</span>
+                </span>
+                <button disabled={busy} onClick={() => remove(o)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5, minHeight: 40, opacity: busy ? 0.6 : 1 }}><X size={13} color={FIRE.deleteRed} /> Remove</button>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
+          <label style={{ ...S.field, minWidth: 190 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign a training officer</span>
+            <select style={{ ...FS.input, minHeight: 40 }} value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Choose a member…</option>
+              {eligible.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+          <button disabled={busy || !pick} onClick={() => assign(pick)} style={{ ...FS.btnPrimary, minHeight: 40, opacity: (busy || !pick) ? 0.6 : 1 }}><Plus size={15} /> Assign</button>
+        </div>
+      </div>)}
+    </Card>
+  );
+}
+
 /* The Training page: the mock's Schedule | Training Plans toggle over the two views. The schedule stays mounted while
    Plans is shown (its month, open panels and edit modes survive a round trip); Plans mounts on first open. */
 function Training(props) {
   const [view, setView] = useState("schedule");
   const [plansSeen, setPlansSeen] = useState(false);
   const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); }} style={{ marginBottom: 12 }} />;
+  // The client twin of is_training_manager(): a Department Admin (NOT Project Admin — not isDeptAdmin) OR an active
+  // training officer. Every training write below keys on it; running a QR sign-in does not (canRunSignin, decision 3).
+  const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
-    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} viewToggle={toggle} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} /></div>}
+    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} /></div>
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} /></div>}
   </>);
 }
 
 // CardHead paints its icon red; the "no length recorded" notice keeps its amber accent, so its icon overrides the colour.
 const AmberClockIcon = (props) => <Clock {...props} color={FIRE.amberText} />;
-function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle }) {
+function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle, canManageTraining, isTrainingOfficer, onTrainingOfficersChanged }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
-  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // create/edit sessions + take attendance — ops only (DA/Officer, excludes Board + PA)
+  const canManage = !!canManageTraining;   // create/edit/complete/Reopen sessions, roster attendance, categories — is_training_manager() (a Department Admin or a training officer; not PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
-  const canPlanAI = hasAny(role, SIGNIN_ROLES);   // AI drill planner — same PA/DA/TO set as the retired standalone AI page (NOT canManage: excludes Board, includes PA)
-  const memberView = !isLeader(role);
+  const canPlanAI = !!canManageTraining;   // AI drill planner — its only outputs (save to a session / schedule on a date) are writes is_training_manager() gates
+  const memberView = !isLeader(role) && !isTrainingOfficer;   // a training officer who is a plain Member gets the management view (the isEqMgr analogue)
   const today = new Date();
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -24618,7 +24718,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         );
       })()}
 
-      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} />}
+      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} canManageTraining={canManage} />}
       {agendaSession && <AttachAgendaModal S={S} session={agendaSession} byName={me?.name} notify={notify} onAttached={loadSessions} onClose={() => setAgendaSession(null)} />}
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
@@ -24628,6 +24728,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
           <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
         </div>
       )}
+
+      {isDeptAdmin(role) && <TrainingOfficersCard S={S} members={members} meId={meId} notify={notify} onChanged={onTrainingOfficersChanged} />}
 
       {/* TRAINING CATEGORIES — one card: head (Edit trainings on the right, the mock's .chead .right), then the add
           form when open, then the category grid. */}
