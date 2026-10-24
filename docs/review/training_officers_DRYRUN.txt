@@ -1,0 +1,103 @@
+gate is_canmanage_ops(): live 92fa180343748968dff96fa044b0420d · here 92fa180343748968dff96fa044b0420d
+gate is_dept_admin(): live c692e44f62923d2bf4c1a39a21a87bf7 · here c692e44f62923d2bf4c1a39a21a87bf7
+gate my_department_id(): live 87f546659c3804a943b48e419e017f18 · here 87f546659c3804a943b48e419e017f18
+gate my_member_id(): live 3f66369c8af7bc07ec59831af6536fee · here 3f66369c8af7bc07ec59831af6536fee
+gate is_equipment_manager(): live c4d54ae10cb936dcc5f185ae38ec5fcd · here c4d54ae10cb936dcc5f185ae38ec5fcd
+fn open_signin(uuid): live 38d66e034a5f0d8a71b9e668e358c446 · here 38d66e034a5f0d8a71b9e668e358c446
+fn set_drill_plan(uuid,text,text,integer,text,jsonb,text): live 7d7fcbeac484f5be702f9bfde9106195 · here 7d7fcbeac484f5be702f9bfde9106195
+
+PRE-MIGRATION RETEST (must fail — nothing there yet):
+  relation "public.training_officer" does not exist
+
+APPLY — state: [{"to_rls":true,"to_policies":1,"seeded":3,"seeded_by_dept":"Indian Harbor Volunteer Fire Department 2 · North Hood County Volunteer Fire Department 1","gate_fns":4,"repointed":13,"canmanage_ops_md5":"92fa1803","total_policies":18,"locked_token_fns":1}]
+re-run -> Precondition failed: public.training_officer already exists — already applied. Nothing changed.
+is_canmanage_ops() after: 92fa180343748968dff96fa044b0420d · apparatus policy still: ((department_id = my_department_id()) AND is_canmanage_ops())
+  repointed training_sessions: leaders update training_sessions: ((department_id = my_department_id()) AND is_training_manager()) / ((department_id = my_department_id()) AND is_training_manager()) || leaders write training_sessions:  / ((department_id = my_department_id()) AND is_training_manager())
+  repointed session_attendance: leaders delete session_attendance: ((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1 FROM training_sessions ts WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false))))) /  || leaders insert session_attendance:  / ((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1 FROM training_sessions ts WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false)))))
+
+RETEST AFTER THE MIGRATION:
+PASS  S0 registry RLS + one policy; 4 gate fns authenticated-only; 13 repointed, none left on is_canmanage_ops(); is_canmanage_ops() 92fa1803 unchanged; seed covers every active non-DA Officer (3 active)
+— Granbury Fire Station
+   SKIP  all — needs a DA here, a plain member here (window covering today) and a DA of another department, unique emails (DA gil@c, member none, other-dept DA dao@a)
+— Indian Harbor Volunteer Fire Department
+   PASS  T1 the DA (not a training officer) manages training: session + board meeting + category + drill plan
+   PASS  T2 plain member refused: schedule / roster / category / the registry itself by RLS, edit touches 0 rows, drill plan + self-assign by the RPCs
+   PASS  T3 DA assigns the member (stamped by the DA); assigning again returns the same row, one active
+   PASS  T4 the member as training officer: schedules a leadership meeting, edits the session, marks + clears the roster, adds a category, writes a drill plan
+   PASS  T5 remove revokes (stamped by the DA; scheduling refused again); a second remove returns NULL; re-assign adds a new row (2 rows, 1 active)
+   PASS  O1 seeded Officer schedules; once removed: schedule refused (RLS), drill plan refused — QR sign-in still opens (opened)
+   PASS  P1 Project Admin: not a training manager (schedule refused) — but removes and appoints a training officer
+   PASS  X1 another department's DA: assigning this department's member refused; removing is a no-op (this department's officer untouched); sees 0 of its officers
+— North Hood County Volunteer Fire Department
+   PASS  T1 the DA (not a training officer) manages training: session + board meeting + category + drill plan
+   PASS  T2 plain member refused: schedule / roster / category / the registry itself by RLS, edit touches 0 rows, drill plan + self-assign by the RPCs
+   PASS  T3 DA assigns the member (stamped by the DA); assigning again returns the same row, one active
+   PASS  T4 the member as training officer: schedules a leadership meeting, edits the session, marks + clears the roster, adds a category, writes a drill plan
+   PASS  T5 remove revokes (stamped by the DA; scheduling refused again); a second remove returns NULL; re-assign adds a new row (2 rows, 1 active)
+   PASS  O1 seeded Officer schedules; once removed: schedule refused (RLS), drill plan refused — QR sign-in still opens (opened)
+   SKIP  P1 — no Project Admin (non-DA, non-Officer) here
+   PASS  X1 another department's DA: assigning this department's member refused; removing is a no-op (this department's officer untouched); sees 0 of its officers
+---- 16 passed, 0 failed, 2 skipped ----
+(this exception IS the rollback — nothing was changed)
+rolled back: training_sessions 0 -> 0; training_officer rows 3 (the seed)
+
+MULTI-DEPARTMENT PROBE: PASS — dual@x acting in A: officer true manager true · acting in B: officer false manager false
+
+mutations (each must be REFUSED by the migration, or caught by the RETEST / the probe):
+  (a) is_canmanage_ops() itself changed in the block
+     REFUSED: Post-condition failed: is_canmanage_ops() changed.
+  (b) a 14th object repointed (the NON-training apparatus policy)
+     REFUSED: Post-condition failed: a policy outside the 13 changed.
+  (c) a non-training function changed (open_signin's gate widened)
+     REFUSED: Post-condition failed: a function outside the 13 (or its grants) changed.
+  (d) is_training_officer() not department-scoped (the equipment shape)
+     REFUSED: Post-condition failed: is_training_officer() does not match its reviewed md5.
+  (d2) same, post-conditions removed — the probe must catch it
+     migration applied -> RETEST: ---- 16 passed, 0 failed, 2 skipped ----
+     PROBE: FAIL — dual@x acting in A: officer true manager true · acting in B: officer true manager true
+  (e) is_training_manager() admits Project Admin (is_dept_admin shape)
+     REFUSED: Post-condition failed: is_training_manager() does not match its reviewed md5.
+  (e2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  P1 manager t · schedule: ok · remove: ok · assign: ok | ---- 15 passed, 1 failed, 2 skipped ----
+  (f) assign gated on is_canmanage_ops() (Officers appoint, PA can't)
+     REFUSED: Post-condition failed: assign_training_officer(uuid) does not match its reviewed md5.
+  (f2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  P1 manager f · schedule: new row violates row-level security policy for table "training_sessions" · remove: ok · assign: Only a Department Admin | FAIL  X1 assign: That member is not an active member of your department. · remove: ok () · sees 0 | ---- 14 passed, 2 failed, 2 skipped ----
+  (g) assign accepts a member of another department
+     REFUSED: Post-condition failed: assign_training_officer(uuid) does not match its reviewed md5.
+  (g2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  X1 assign: ok · remove: ok () · sees 0 | FAIL  X1 assign: ok · remove: ok () · sees 0 | ---- 14 passed, 2 failed, 2 skipped ----
+  (h) one of the 8 policies not repointed (roster insert left on is_canmanage_ops)
+     REFUSED: Post-condition failed: policy "leaders insert session_attendance" on session_attendance is not exactly its pre-image with is_canmanage_ops() -> is_training_manager().
+  (h2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure / seed (3 active) | FAIL  T4 officer t manager t · meeting: ok · edit rows 1 · roster: new row violates row-level security policy for table "session_attendance" / cleared | FAIL  T4 officer t manager t · meeting: ok · edit rows 1 · roster: new row violates row-level security policy for table "session_attendance" / cleared | ---- 13 passed, 3 failed, 2 skipped ----
+  (i) the drill-plan functions not repointed
+     REFUSED: Post-condition failed: delete_drill_plan(uuid) is not exactly its live body with the gate swapped (or not its reviewed md5).
+  (i2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure / seed (3 active) | FAIL  T2 manager f · session: new row violates row-level security policy for table "training_sessions" · edit rows 0 · roster: new row violates row-le | FAIL  T4 officer t manager t · meeting: ok · edit rows 1 · roster: ok / cleared 1 · category: ok · plan: Only a Department Admin or Officer can manage | FAIL  O1 seeded t · schedule: ok · after removal: new row violates row-level security policy for table "training_sessions" · plan: ok · open_signin: o | FAIL  T2 manager f · session: new row violates row-level security policy for table "training_sessions" · edit rows 0 · roster: new row violates row-le | FAIL  T4 officer t manager t · meeting: ok · edit rows 1 · roster: ok / cleared 1 · category: ok · plan: Only a Department Admin or Officer can manage | FAIL  O1 seeded t · schedule: ok · after removal: new row violates row-level security policy for table "training_sessions" · plan: ok · open_signin: o | ---- 9 passed, 7 failed, 2 skipped ----
+  (j) the seed skipped
+     REFUSED: Post-condition failed: seeded 0 training officers, expected 3 (active Officers who are not Department Admins).
+  (j2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure / seed (0 active) | FAIL  O1 seeded f · schedule: new row violates row-level security policy for table "training_sessions" · after removal: new row violates row-level sec | FAIL  O1 seeded f · schedule: new row violates row-level security policy for table "training_sessions" · after removal: new row violates row-level sec | ---- 13 passed, 3 failed, 2 skipped ----
+  (k) the seed includes Department Admins
+     REFUSED: Post-condition failed: seeded 4 training officers, expected 3 (active Officers who are not Department Admins).
+  (l) a write policy slipped onto training_officer
+     REFUSED: Post-condition failed: training_officer must have exactly one policy — SELECT, authenticated, own department.
+  (l2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure / seed (3 active) | FAIL  T2 manager f · session: new row violates row-level security policy for table "training_sessions" · edit rows 0 · roster: new row violates row-le | FAIL  T3 assign: ok / again: ok · rows 796c90c5-46ed-41dd-8b7c-e764d3880eec / 796c90c5-46ed-41dd-8b7c-e764d3880eec | FAIL  T2 manager f · session: new row violates row-level security policy for table "training_sessions" · edit rows 0 · roster: new row violates row-le | FAIL  T3 assign: ok / again: ok · rows 63b83e36-ef74-4ecb-a2f5-ad889dfd7a69 / 63b83e36-ef74-4ecb-a2f5-ad889dfd7a69 | ---- 11 passed, 5 failed, 2 skipped ----
+  (m) remove hard-deletes (no history), post-conditions removed
+     migration applied -> RETEST: FAIL  T5 remove: ok / again: ok () · manager after f · schedule: new row violates row-level security policy for table "training_sessions" · re-assign: | FAIL  T5 remove: ok / again: ok () · manager after f · schedule: new row violates row-level security policy for table "training_sessions" · re-assign: | ---- 14 passed, 2 failed, 2 skipped ----
+  (n) the one-active-per-member guard missing
+     REFUSED: Post-condition failed: training_officer indexes are not as designed (the one-active-per-member guard?).
+  (o) an anon grant left on a gate function
+     REFUSED: Post-condition failed: is_training_manager() is not SECURITY DEFINER / search_path public / authenticated-only.
+  (p) live drift: is_canmanage_ops() widened before apply
+     REFUSED: Precondition failed: a pinned gate drifted from Step 0 (is_canmanage_ops 92fa1803… / is_dept_admin c692e44f… / my_department_id 87f54665… / my_member_id 3f66369c… / is_equipment_manager c4d54ae1…). Nothing changed.
+  (q) live drift: a training policy changed before apply
+     REFUSED: Precondition failed: policy "leaders update training_plans" on training_plans is missing or drifted from Step 0. Nothing changed.
+  (r) live drift: a drill-plan function changed before apply
+     REFUSED: Precondition failed: approve_drill_plan(uuid) drifted from its Slice A body (md5 5bebe24c). Nothing changed.
+  (s) a training-table trigger dropped in the block
+     REFUSED: Post-condition failed: a training-table trigger changed.
+  (t) already applied (training_officer exists)
+     REFUSED: Precondition failed: public.training_officer already exists — already applied. Nothing changed.
