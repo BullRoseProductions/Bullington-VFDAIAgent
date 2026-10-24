@@ -1,0 +1,27 @@
+{
+ "is_canmanage()": {
+  "md5": "44083b6d721a50ace3ad21280e2260d3",
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.is_canmanage()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Board Member','Department Admin','Officer']::text[]\n  );\n$function$\n"
+ },
+ "my_member_id()": {
+  "md5": "3f66369c8af7bc07ec59831af6536fee",
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n"
+ },
+ "is_dept_admin()": {
+  "md5": "c692e44f62923d2bf4c1a39a21a87bf7",
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n"
+ },
+ "is_canmanage_ops()": {
+  "md5": "92fa180343748968dff96fa044b0420d",
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.is_canmanage_ops()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Department Admin','Officer']::text[]\n  );\n$function$\n"
+ },
+ "my_department_id()": {
+  "md5": "87f546659c3804a943b48e419e017f18",
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n"
+ }
+}

@@ -1,0 +1,87 @@
+gate is_canmanage(): live 44083b6d721a50ace3ad21280e2260d3 · here 44083b6d721a50ace3ad21280e2260d3 (identical)
+gate my_member_id(): live 3f66369c8af7bc07ec59831af6536fee · here 3f66369c8af7bc07ec59831af6536fee (identical)
+gate is_dept_admin(): live c692e44f62923d2bf4c1a39a21a87bf7 · here c692e44f62923d2bf4c1a39a21a87bf7 (identical)
+gate is_canmanage_ops(): live 92fa180343748968dff96fa044b0420d · here 92fa180343748968dff96fa044b0420d (identical)
+gate my_department_id(): live 87f546659c3804a943b48e419e017f18 · here 87f546659c3804a943b48e419e017f18 (identical)
+
+PRE-MIGRATION RETEST (must fail — nothing there yet):
+  relation "public.drill_plans" does not exist
+
+APPLY — state: [{"dp_rls":true,"dp_policies":1,"dp_rows":0,"link":true,"rpcs_ok":6,"sp_rows":3,"sp_linked":0,"total_policies":5,"locked_token_fns":1}]
+re-run -> Precondition failed: public.drill_plans already exists — already applied. Nothing changed.
+
+RETEST AFTER THE MIGRATION:
+PASS  S0 drill_plans RLS on + one SELECT policy; six RPCs definer + authenticated-only
+— Granbury Fire Station
+   SKIP  all — needs a DA/Officer here, a plain member here, a session here, and a DA/Officer of another department with a session there, unique emails (ops gil@c, member none, session none, other-dept ops ada@a)
+— Indian Harbor Volunteer Fire Department
+   PASS  A1 ops creates a draft (trimmed title, source ai, created_by them); blank title / non-object content / duration 0 refused
+   PASS  W1 plain member reads the library; set / approve refused on authority; INSERT refused by RLS; UPDATE touches 0 rows
+   PASS  A2 the author approves their own plan (approved_by them); approving again is a no-op
+   PASS  A3 an edit keeps status (approved) and source; updated_by stamped
+   PASS  A4 another department's DA/Officer can't see it; edit / approve / unapprove / attach / delete all refused; nothing moved
+   PASS  A5 attach -> a session_plans row (drill_plan_id, source ai, title, run-sheet ai_text, created_by their name); count 1; again -> "already attached"; another dept's session refused
+   PASS  A6 unapprove -> draft, approved_by / approved_at cleared
+   PASS  A7 delete -> the plan is gone; the session plan is kept, unlinked, text intact
+   PASS  O1 Officer-only creates + self-approves (yes); Board/PA-only refused (yes)
+— North Hood County Volunteer Fire Department
+   PASS  A1 ops creates a draft (trimmed title, source ai, created_by them); blank title / non-object content / duration 0 refused
+   PASS  W1 plain member reads the library; set / approve refused on authority; INSERT refused by RLS; UPDATE touches 0 rows
+   PASS  A2 the author approves their own plan (approved_by them); approving again is a no-op
+   PASS  A3 an edit keeps status (approved) and source; updated_by stamped
+   PASS  A4 another department's DA/Officer can't see it; edit / approve / unapprove / attach / delete all refused; nothing moved
+   PASS  A5 attach -> a session_plans row (drill_plan_id, source ai, title, run-sheet ai_text, created_by their name); count 1; again -> "already attached"; another dept's session refused
+   PASS  A6 unapprove -> draft, approved_by / approved_at cleared
+   PASS  A7 delete -> the plan is gone; the session plan is kept, unlinked, text intact
+   SKIP  O1 — no Officer-only and no Board/PA-only member here
+---- 18 passed, 0 failed, 2 skipped ----
+(this exception IS the rollback — nothing was changed)
+rolled back: session_plans 3 -> 3 rows, identical; drill_plans rows 0
+
+mutations (each must be REFUSED by the migration, or caught by the RETEST):
+  (a) a write policy slipped onto drill_plans
+     REFUSED: Post-condition failed: drill_plans must have exactly one policy — SELECT, authenticated, own department.
+  (a2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure |    FAIL  W1 reads 1 · set: Only a Department Admin or Officer can manage drill plans. · approve: Only a Department Admin or Officer can approve drill plans. · insert: ok · update rows 0 |    FAIL  W1 reads 1 · set: Only a Department Admin or Officer can manage drill plans. · approve: Only a Department Admin or Officer can approve drill plans. · insert: ok · update rows 0 | ---- 15 passed, 3 failed, 2 skipped ----
+  (b) set_drill_plan's edit not department-scoped
+     REFUSED: Post-condition failed: set_drill_plan(uuid,text,text,integer,text,jsonb,text) does not match its reviewed md5.
+  (b2) same, post-conditions removed
+     migration applied -> RETEST:    FAIL  A4 sees 0/0 · set: ok · approve: That drill plan is not in your department. · unapprove: That drill plan is not in your department. · attach theirs: That drill plan is not in your department. · delete: That drill plan is not in your department. · attach ours: That drill plan is not in your department. |    FAIL  A5 attach: ok · count 1 · again: That plan is already attached to this session. · cross: That session is not in your department. · row {"id":"bce405cb-ac62-4e53-9125-b06020305183","department_id":"00000000-0000-0000-0000-00000000000a","session_id":"9cbe289c-95b7-4973-bb7a-894401728359","title":"RETEST hijack","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\n**1. Brief**\n- Assign crews\n\n**2. Evolution**\n- Two r |    FAIL  A4 sees 0/0 · set: ok · approve: That drill plan is not in your department. · unapprove: That drill plan is not in your department. · attach theirs: That drill plan is not in your department. · delete: That drill plan is not in your department. · attach ours: That drill plan is not in your department. |    FAIL  A5 attach: ok · count 1 · again: That plan is already attached to this session. · cross: That session is not in your department. · row {"id":"491804f1-95a8-47c9-834f-996bebd7b78f","department_id":"00000000-0000-0000-0000-00000000000b","session_id":"3017509d-a65a-4b1f-8c75-466a5303b625","title":"RETEST hijack","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\n**1. Brief**\n- Assign crews\n\n**2. Evolution**\n- Two r | ---- 14 passed, 4 failed, 2 skipped ----
+  (c) set_drill_plan gated on is_canmanage() (Board too) instead of is_canmanage_ops()
+     REFUSED: Post-condition failed: set_drill_plan(uuid,text,text,integer,text,jsonb,text) is not gated on is_canmanage_ops() and scoped to my_department_id().
+  (c2) same, post-conditions removed
+     migration applied -> RETEST:    FAIL  O1 officer create: ok · approve: ok · board/PA: ok | ---- 17 passed, 1 failed, 2 skipped ----
+  (d) an RPC left executable by anon
+     REFUSED: Post-condition failed: dept_drill_plans() is not SECURITY DEFINER / search_path public / authenticated-only.
+  (d2) same, post-conditions removed
+     migration applied -> RETEST: FAIL  S0 structure | ---- 17 passed, 1 failed, 2 skipped ----
+  (e) the content-is-an-object CHECK dropped
+     REFUSED: Post-condition failed: drill_plans CHECKs / FK are not as designed.
+  (e2) CHECK + the RPC's object check dropped, post-conditions removed
+     migration applied -> RETEST:    FAIL  A1 create: ok · row {"id":"20b021ca-8dcb-4b47-9b46-1e67192938b1","department_id":"00000000-0000-0000-0000-00000000000a","title":"RETEST hose advance","category":"Hose","duration_min":45,"audience":"All members","content":{"safety": ["Full PPE"], "summary": "Hose advance drill.", "materials": ["1.75 in line"], "objectives": ["Advance a charged line", "Call for water"], "run_of_show": [{"d": "Assign crews", "t": "Brief"}, {"d": "Two runs", "t": "Evolution"}]},"status":"draft","source":"ai","created_by":"7b1cef36-22c4-49d4-bd3e-5256c19b6916","created_at":"2026-10-24T00:50:31.581+00:00","approved_by":null,"approved_at":null,"updated_by":"7b1cef36-22c4-49d4-bd3e-5256c19b6916","updated_at":"2026-10-24T00:50:31.581+00:00"} · blank: A drill plan needs a title. · object: ok · duration: Duration must be a positive number of minutes. |    FAIL  A1 create: ok · row {"id":"25e39f64-ed2c-4fe2-9b7b-1e7692b3060e","department_id":"00000000-0000-0000-0000-00000000000b","title":"RETEST hose advance","category":"Hose","duration_min":45,"audience":"All members","content":{"safety": ["Full PPE"], "summary": "Hose advance drill.", "materials": ["1.75 in line"], "objectives": ["Advance a charged line", "Call for water"], "run_of_show": [{"d": "Assign crews", "t": "Brief"}, {"d": "Two runs", "t": "Evolution"}]},"status":"draft","source":"ai","created_by":"0a5ce06a-3868-4982-84e3-bbbdc7be8c5d","created_at":"2026-10-24T00:50:31.581+00:00","approved_by":null,"approved_at":null,"updated_by":"0a5ce06a-3868-4982-84e3-bbbdc7be8c5d","updated_at":"2026-10-24T00:50:31.581+00:00"} · blank: A drill plan needs a title. · object: ok · duration: Duration must be a positive number of minutes. | ---- 16 passed, 2 failed, 2 skipped ----
+  (f) attach doesn't check the session's department
+     REFUSED: Post-condition failed: attach_drill_plan_to_session(uuid,uuid) does not match its reviewed md5.
+  (f2) same, post-conditions removed
+     migration applied -> RETEST:    FAIL  A5 attach: ok · count 1 · again: That plan is already attached to this session. · cross: ok · row {"id":"59b59e41-bbfe-4b93-af06-b040acf4d701","department_id":"00000000-0000-0000-0000-00000000000a","session_id":"9c1a3f28-7b82-4e6a-ab5f-d32f16a1f46c","title":"RETEST hose advance v2","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\nTotal time: 60 min\n\n**1. Brief**\n- Assign cre |    FAIL  A5 attach: ok · count 1 · again: That plan is already attached to this session. · cross: ok · row {"id":"0a00c14b-e9e7-4a74-889a-2bed80da3d17","department_id":"00000000-0000-0000-0000-00000000000b","session_id":"3ee8edff-dc91-44cb-a271-7589fa67c5b1","title":"RETEST hose advance v2","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\nTotal time: 60 min\n\n**1. Brief**\n- Assign cre | ---- 16 passed, 2 failed, 2 skipped ----
+  (g) the link cascades (delete takes the session plans with it)
+     REFUSED: Post-condition failed: session_plans.drill_plan_id is not a nullable uuid FK (ON DELETE SET NULL) with the table's grants.
+  (g2) same, post-conditions removed
+     migration applied -> RETEST:    FAIL  A7 delete: ok · plan still there f · session plan  |    FAIL  A7 delete: ok · plan still there f · session plan  | ---- 16 passed, 2 failed, 2 skipped ----
+  (h) attach dedupe removed, post-conditions removed
+     migration applied -> RETEST:    FAIL  A5 attach: ok · count 1 · again: ok · cross: That session is not in your department. · row {"id":"2ad9b958-d430-4fa3-a235-e88a4a4297d9","department_id":"00000000-0000-0000-0000-00000000000a","session_id":"6f7f0d12-ecfd-4dc8-a496-48f1358a2a5b","title":"RETEST hose advance v2","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\nTotal time: 60 min\n\n**1. Brief**\n- Assign cre |    FAIL  A5 attach: ok · count 1 · again: ok · cross: That session is not in your department. · row {"id":"f9868480-b264-4147-a411-c68a33f3831c","department_id":"00000000-0000-0000-0000-00000000000b","session_id":"e685367d-07d2-462f-a51a-0bb02c2e86d2","title":"RETEST hose advance v2","source":"ai","storage_path":null,"ai_text":"## Quick Run Sheet\n\nTotal time: 60 min\n\n**1. Brief**\n- Assign cre | ---- 16 passed, 2 failed, 2 skipped ----
+  (i) unapprove leaves approved_by / approved_at, post-conditions removed
+     migration applied -> RETEST:    FAIL  A6 unapprove: ok · {"id":"f44c624b-9eae-4a26-8e73-2e932a9ac39a","department_id":"00000000-0000-0000-0000-00000000000a","title":"RETEST hose advance v2","category":"Hose","duration_min":60,"audience":null,"content":{"safety": ["Full PPE"], "summary": "Edited.", "materials": ["1.75 in line"], "objectives": ["Advance a charged line", "Call for water"], "run_of_show": [{"d": "Assign crews", "t": "Brief"}, {"d": "Two runs", "t": "Evolution"}]},"status":"draft","source":"ai","created_by":"ba5f6d69-cf2e-4d5f-b449-6bcccd5f6f75","created_at":"2026-10-24T00:50:34.402+00:00","approved_by":"ba5f6d69-cf2e-4d5f-b449-6bcccd5f6f75","approved_at":"2026-10-24T00:50:34.402+00:00","updated_by":"ba5f6d69-cf2e-4d5f-b449-6bcccd5f6f75","updated_at":"2026-10-24T00:50:34.402+00:00"} |    FAIL  A6 unapprove: ok · {"id":"bd2f817a-d909-4e2b-a19b-4fa6b2c0a8e2","department_id":"00000000-0000-0000-0000-00000000000b","title":"RETEST hose advance v2","category":"Hose","duration_min":60,"audience":null,"content":{"safety": ["Full PPE"], "summary": "Edited.", "materials": ["1.75 in line"], "objectives": ["Advance a charged line", "Call for water"], "run_of_show": [{"d": "Assign crews", "t": "Brief"}, {"d": "Two runs", "t": "Evolution"}]},"status":"draft","source":"ai","created_by":"12551c55-e784-4403-bcb9-09ae9fa420bb","created_at":"2026-10-24T00:50:34.402+00:00","approved_by":"12551c55-e784-4403-bcb9-09ae9fa420bb","approved_at":"2026-10-24T00:50:34.402+00:00","updated_by":"12551c55-e784-4403-bcb9-09ae9fa420bb","updated_at":"2026-10-24T00:50:34.402+00:00"} | ---- 16 passed, 2 failed, 2 skipped ----
+  (j) dept_drill_plans not department-scoped, post-conditions removed
+     migration applied -> RETEST:    FAIL  A4 sees 1/0 · set: That drill plan is not in your department. · approve: That drill plan is not in your department. · unapprove: That drill plan is not in your department. · attach theirs: That drill plan is not in your department. · delete: That drill plan is not in your department. · attach ours: That drill plan is not in your department. |    FAIL  A4 sees 1/0 · set: That drill plan is not in your department. · approve: That drill plan is not in your department. · unapprove: That drill plan is not in your department. · attach theirs: That drill plan is not in your department. · delete: That drill plan is not in your department. · attach ours: That drill plan is not in your department. | ---- 16 passed, 2 failed, 2 skipped ----
+  (k) an existing session_plans policy changed in the block
+     REFUSED: Post-condition failed: an existing policy changed.
+  (l) a collateral change to an existing function
+     REFUSED: Post-condition failed: an existing public function (or its grants) changed.
+  (m) an index slipped onto session_plans
+     REFUSED: Post-condition failed: session_plans changed beyond the drill_plan_id column + its FK.
+  (n) live drift: is_canmanage_ops() widened to Board
+     REFUSED: Precondition failed: is_canmanage_ops() / my_department_id() / my_member_id() drifted from Step 0 (92fa1803… / 87f54665… / 3f66369c…). Nothing changed.
+  (o) live drift: session_plans source CHECK widened
+     REFUSED: Precondition failed: session_plans_source_check is not the Step 0 CHECK (attach writes source = 'ai'). Nothing changed.
+  (p) already applied (drill_plans exists)
+     REFUSED: Precondition failed: public.drill_plans already exists — already applied. Nothing changed.

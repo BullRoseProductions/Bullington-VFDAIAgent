@@ -1,0 +1,106 @@
+{
+ "ts_pk": [
+  "training_sessions_department_id_fkey FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+  "training_sessions_pkey PRIMARY KEY (id)",
+  "training_sessions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES training_plans(id) ON DELETE SET NULL"
+ ],
+ "sp_fns": null,
+ "ts_cols": [
+  "id:uuid",
+  "department_id:uuid",
+  "plan_id:uuid",
+  "title:text",
+  "date:date",
+  "done:boolean",
+  "created_at:timestamp with time zone",
+  "signin_token:text",
+  "signin_open:boolean",
+  "series_id:uuid",
+  "audience:text",
+  "start_time:time without time zone",
+  "counts_toward_attendance:boolean",
+  "location_lat:double precision",
+  "location_lng:double precision",
+  "location_radius_m:integer",
+  "location_label:text",
+  "is_offsite:boolean",
+  "duration_min:smallint",
+  "is_meeting:boolean"
+ ],
+ "dept_counts": [
+  {
+   "da": 3,
+   "dept": "North Hood County Volunteer Fire Department",
+   "officer": 8,
+   "sessions": 71
+  },
+  {
+   "da": 2,
+   "dept": "Lipan Volunteer Fire Department",
+   "officer": 4,
+   "sessions": 89
+  },
+  {
+   "da": 7,
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "officer": 6,
+   "sessions": 12
+  },
+  {
+   "da": 2,
+   "dept": "Granbury Fire Station",
+   "officer": 1,
+   "sessions": 0
+  },
+  {
+   "da": 2,
+   "dept": "B4C Demo Department",
+   "officer": 1,
+   "sessions": 4
+  }
+ ],
+ "new_fns_exist": 0,
+ "sp_auth_privs": "true/true/true/true",
+ "total_policies": 171,
+ "locked_token_fns": 17,
+ "session_plans_idx": [
+  "CREATE UNIQUE INDEX session_plans_pkey ON public.session_plans USING btree (id)"
+ ],
+ "session_plans_pol": [
+  "canmanage delete session_plans | DELETE | {authenticated} | ((department_id = my_department_id()) AND is_canmanage_ops()) | ",
+  "canmanage insert session_plans | INSERT | {authenticated} |  | ((department_id = my_department_id()) AND is_canmanage())",
+  "canmanage update session_plans | UPDATE | {authenticated} | ((department_id = my_department_id()) AND is_canmanage_ops()) | ((department_id = my_department_id()) AND is_canmanage_ops())",
+  "members read session_plans | SELECT | {authenticated} | (department_id = my_department_id()) | "
+ ],
+ "session_plans_rls": "true/false acl {postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+ "session_plans_src": [
+  "ai",
+  "upload"
+ ],
+ "session_plans_trg": null,
+ "drill_plans_exists": false,
+ "session_plans_cols": [
+  "id:uuid:true:gen_random_uuid()",
+  "department_id:uuid:true:",
+  "session_id:uuid:false:",
+  "title:text:false:",
+  "source:text:false:",
+  "storage_path:text:false:",
+  "ai_text:text:false:",
+  "created_by:text:false:",
+  "created_at:timestamp with time zone:true:now()"
+ ],
+ "session_plans_cons": [
+  "session_plans_pkey PRIMARY KEY (id)",
+  "session_plans_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+  "session_plans_source_check CHECK (((source IS NULL) OR (source = ANY (ARRAY['upload'::text, 'ai'::text]))))"
+ ],
+ "session_plans_rows": 39,
+ "members_access_vals": [
+  "Board Member",
+  "Department Admin",
+  "Member",
+  "Officer",
+  "Project Admin"
+ ]
+}
