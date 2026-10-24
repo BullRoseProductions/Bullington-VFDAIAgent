@@ -394,7 +394,7 @@ import {
   hasAny, isLeader, isDeptAdmin, isBoard, canManage, isTrainingLeader,
 } from "../shared/roles.js";
 import { isDoneThisPeriod, weekStartKey } from "../shared/duty-period.js";
-import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK } from "../shared/expiry.js";
+import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK, validExpYM } from "../shared/expiry.js";
 // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
@@ -4656,7 +4656,7 @@ function CertProposals({ S, notify }) {
   async function submit() {
     if (!name.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name." }); return; }
     const e = exp.trim();
-    if (e && !/^\d{4}-\d{2}$/.test(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
+    if (e && !validExpYM(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
     if (!file) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
     if (!ids?.memberId || !ids?.deptId) { notify({ kind: "error", title: "No member profile", text: "We couldn't find your member profile." }); return; }
     const { data: { user } } = await supabase.auth.getUser();
@@ -11020,7 +11020,7 @@ function certStatus(exp, neverExpires = false) {
   // coverage / compliance / report test keyed on rank (=== 2, 1 || 2, < 2, === 0) counts it exactly like a current cert,
   // so none of that math changes; only the label and colour differ. The type wins over any old exp (as expiration_rows).
   if (neverExpires) return { label: "NO EXPIRY", color: "#2E7D52", rank: 2 };
-  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };
+  if (!validExpYM(exp)) return { label: "NO DATE", color: "#6A7178", rank: 3 };   // shape + month 01–12 + year >= 1900 (shared/expiry.js)
   const [y, m] = exp.split("-").map(Number);
   const diff = (y * 12 + m) - nowYM();
   if (diff < 0) return { label: "EXPIRED", color: "#B11E2A", rank: 0 };
@@ -11127,7 +11127,7 @@ const CLASSES = [
 ];
 function expPhrase(exp, neverExpires = false) {
   if (neverExpires) return "Doesn't expire";   // its catalog type never expires — not a missing date
-  if (typeof exp !== "string" || !/^\d{4}-\d{2}$/.test(exp)) return "No expiration date";
+  if (!validExpYM(exp)) return "No expiration date";   // a garbage month ("0000-00", "2026-13") is no date — never "expired undefined 0"
   const [y, m] = exp.split("-").map(Number);
   const d = (y * 12 + m) - nowYM();
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
@@ -11752,7 +11752,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     const name = draft.name.trim();
     if (!name) { notify({ kind: "error", title: "Name can't be empty", text: "Enter a name for the certification." }); return; }
     const expTrim = draft.exp.trim();
-    if (expTrim && !/^\d{4}-\d{2}$/.test(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
+    if (expTrim && !validExpYM(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
     setBusyId(c.id);
     const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null });
     setBusyId(null);
@@ -12114,7 +12114,7 @@ function ProposeCert({ S, role, member, notify }) {
   async function propose() {
     if (!cName.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name before submitting." }); return; }
     const exp = cExp.trim();
-    if (exp && !/^\d{4}-\d{2}$/.test(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be YYYY-MM (e.g. 2027-06)." }); return; }
+    if (exp && !validExpYM(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
     if (!cFile) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
     setBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -12505,7 +12505,7 @@ function RosterCerts({ S, members, role, notify }) {
   const [sortBy, setSortBy] = useState("soonest");   // soonest (status, then expiry) | member | cert
   const [showAllRows, setShowAllRows] = useState(false);
   const ROW_CAP = 10;
-  const expKey = (r) => (/^\d{4}-\d{2}$/.test(r.exp || "") ? r.exp : "9999-99");
+  const expKey = (r) => (validExpYM(r.exp) ? r.exp : "9999-99");   // a garbage date sorts with the undated
   const sorted = visible.slice().sort((a, b) => sortBy === "member" ? a.member.localeCompare(b.member)
     : sortBy === "cert" ? (a.cert || "").localeCompare(b.cert || "")
     : (a.st.rank === 3 ? 1.5 : a.st.rank) - (b.st.rank === 3 ? 1.5 : b.st.rank) || expKey(a).localeCompare(expKey(b)));

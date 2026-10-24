@@ -18,6 +18,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { cors } from "./_cors.js";
 import { requireUser } from "./_auth.js";
+import { validExpYM } from "../shared/expiry.js";
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ROUNDS = 5;           // a question that needs more than this is answered with what it has
@@ -68,7 +69,7 @@ export function hoursTotals(shifts) {
 }
 // certStatus (App.jsx): exp "YYYY-MM"; the expiry month itself is EXPIRING, before it EXPIRED, within 3 months EXPIRING.
 export function certStatus(exp, now = new Date()) {
-  if (!/^\d{4}-\d{2}$/.test(String(exp || ""))) return "no date";
+  if (!validExpYM(String(exp || ""))) return "no date";   // shape + month 01–12 + year >= 1900 — same rule as the app (shared/expiry.js)
   const [y, m] = String(exp).split("-").map(Number);
   const [ty, tm] = todayCT(now).split("-").map(Number);
   const diff = y * 12 + m - (ty * 12 + tm);
