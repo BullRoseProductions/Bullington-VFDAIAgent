@@ -1,0 +1,68 @@
+is_equipment_manager(): live c4d54ae10cb936dcc5f185ae38ec5fcd · here c4d54ae10cb936dcc5f185ae38ec5fcd
+my_member_id(): live 3f66369c8af7bc07ec59831af6536fee · here 3f66369c8af7bc07ec59831af6536fee
+my_department_id(): live 87f546659c3804a943b48e419e017f18 · here 87f546659c3804a943b48e419e017f18
+mark_equipment_lost(uuid): live ba4b27a002206d94ee94c0f872f870db · here ba4b27a002206d94ee94c0f872f870db
+issue_equipment_batch(uuid,uuid[],text,text,uuid,text): live 502d66a724552cf248d62859d1cc5760 · here 502d66a724552cf248d62859d1cc5760
+
+PROBE BEFORE THE FIX (must LEAK — that is the bug): LEAKS — dual@x acting in B: manager true · wrote 3 of B's 3 · read 3 of B's 3 custody · RPC passed the role check  |  acting in A: manager true · wrote 2/2 · read 2/2 · RPC passed the role check
+RETEST BEFORE THE FIX (S0 must fail):
+  FAIL  S0 is_equipment_manager() shape | FAIL  X1 acting there t · manager t · probe: That item has no open custody period to mark lost · rows 3 of 3 · home manager t / probe That item has no | FAIL  X1 acting there t · manager t · probe: That item has no open custody period to mark lost · rows 2 of 2 · home manager t / probe That item has no | ---- 6 passed, 3 failed, 1 skipped ----
+
+APPLY — state: [{"scoped":true,"by_email":false,"eqm_md5":"a979933d","grants_ok":true,"managers_active":3,"total_policies":11,"locked_token_fns":1}]
+re-run -> Precondition failed: is_equipment_manager() is already department-scoped — already applied. Nothing changed.
+grants after: {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+
+RETEST AFTER THE FIX:
+PASS  S0 is_equipment_manager() scoped to my_member_id() in my_department_id() (no email match); STABLE, definer, search_path public, authenticated-only
+— Granbury Fire Station
+   SKIP  all — needs an active equipment manager (not DA / PA), a plain member and a DA here, unique emails (manager none, member none, DA gil@c)
+— Indian Harbor Volunteer Fire Department
+   PASS  E1 manager in their own department: manager true, role probe passes, writes all 2 equipment rows
+   PASS  E2 plain member: manager false, refused on authority, 0 rows
+   PASS  E3 DA (not a manager): role probe passes via is_dept_admin(), writes all 2 rows
+   PASS  X1 the manager acting in another department: manager false, refused on authority, 0 of its 3 equipment rows; back home: manager again
+— North Hood County Volunteer Fire Department
+   PASS  E1 manager in their own department: manager true, role probe passes, writes all 3 equipment rows
+   PASS  E2 plain member: manager false, refused on authority, 0 rows
+   PASS  E3 DA (not a manager): role probe passes via is_dept_admin(), writes all 3 rows
+   PASS  X1 the manager acting in another department: manager false, refused on authority, 0 of its 2 equipment rows; back home: manager again
+---- 9 passed, 0 failed, 1 skipped ----
+(this exception IS the rollback — nothing was changed)
+rolled back: members 9 (9), equipment_manager 3 (3)
+
+PROBE AFTER THE FIX: PASS — dual@x acting in B: manager false · wrote 0 of B's 3 · read 0 of B's 3 custody · RPC refused on authority  |  acting in A: manager true · wrote 2/2 · read 2/2 · RPC passed the role check
+
+mutations (each must be REFUSED by the migration, or caught by the RETEST / the probe):
+  (a) the body left matching by email in any department (the bug, re-created)
+     REFUSED: Post-condition failed: is_equipment_manager() is not scoped to my_member_id() in my_department_id() (or still matches by email).
+  (a2) same, post-conditions removed — the RETEST + probe must catch it
+     migration applied -> RETEST: FAIL  S0 is_equipment_manager() shape | FAIL  X1 acting there t · manager t · probe: That item has no open custody period to mark lost · rows 3 of 3 · home manager t / probe That item has no | FAIL  X1 acting there t · manager t · probe: That item has no open custody period to mark lost · rows 2 of 2 · home manager t / probe That item has no | ---- 6 passed, 3 failed, 1 skipped ----
+     PROBE: FAIL — dual@x acting in B: manager true · wrote 3 of B's 3 · read 3 of B's 3 custody · RPC passed the role check  |  acting in A: manager true · wrote 2/2 · read 2/2 · RPC passed the role check
+  (b) member-only scope (no department clause)
+     REFUSED: Post-condition failed: is_equipment_manager() is not scoped to my_member_id() in my_department_id() (or still matches by email).
+  (b2) same, post-conditions removed (department-safe in practice — member rows are per-department; refused by (b) anyway)
+     migration applied -> RETEST: FAIL  S0 is_equipment_manager() shape | ---- 8 passed, 1 failed, 1 skipped ----
+     PROBE: PASS — dual@x acting in B: manager false · wrote 0 of B's 3 · read 0 of B's 3 custody · RPC refused on authority  |  acting in A: manager true · wrote 2/2 · read 2/2 · RPC passed the role check
+  (c) department-only scope, still matching by email
+     REFUSED: Post-condition failed: is_equipment_manager() is not scoped to my_member_id() in my_department_id() (or still matches by email).
+  (c2) same, post-conditions removed (also safe in practice; refused by (c) anyway)
+     migration applied -> RETEST: FAIL  S0 is_equipment_manager() shape | ---- 8 passed, 1 failed, 1 skipped ----
+     PROBE: PASS — dual@x acting in B: manager false · wrote 0 of B's 3 · read 0 of B's 3 custody · RPC refused on authority  |  acting in A: manager true · wrote 2/2 · read 2/2 · RPC passed the role check
+  (d) made VOLATILE
+     REFUSED: Post-condition failed: is_equipment_manager() does not match its reviewed md5.
+  (e) SECURITY INVOKER
+     REFUSED: Post-condition failed: is_equipment_manager() does not match its reviewed md5.
+  (f) anon granted
+     REFUSED: Post-condition failed: is_equipment_manager()'s return type / language / volatility / definer / search_path / grants / owner changed.
+  (g) a collateral function change (mark_equipment_lost)
+     REFUSED: Post-condition failed: another function (or its grants) changed.
+  (h) a policy changed in the block
+     REFUSED: Post-condition failed: a policy changed.
+  (i) a trigger dropped in the block
+     REFUSED: Post-condition failed: a trigger changed.
+  (j) live drift: is_equipment_manager() changed before apply
+     REFUSED: Precondition failed: is_equipment_manager() drifted from the reviewed body (md5 c4d54ae1…). Nothing changed.
+  (k) live drift: my_member_id() changed before apply
+     REFUSED: Precondition failed: my_member_id() / my_department_id() drifted (3f66369c… / 87f54665…). Nothing changed.
+  (l) already applied (the scoped body is already there)
+     REFUSED: Precondition failed: is_equipment_manager() is already department-scoped — already applied. Nothing changed.
