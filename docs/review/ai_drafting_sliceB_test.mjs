@@ -8,7 +8,8 @@
 //   3. THE ROUND TRIP: the UI's mapped content -> the live Slice A SQL in PGlite (set_drill_plan -> attach_drill_plan_to_session)
 //      -> the session_plans.ai_text it writes -> the REAL AiPlanViewer: Quick run sheet + Full plan both render the plan;
 //      the headings sit in the same order the inline planner's serializeDrillPlan writes
-//   4. the UI flows against an in-memory fake of the six RPCs: the toggle; members read (no write controls); DA / Officer
+//   4. the UI flows against an in-memory fake of the six RPCs (since Training Officers Slice 1 the write gate is the
+//      canManageTraining prop — DA or training officer; the fixture models an Officer as a seeded training officer): the toggle; members read (no write controls); DA / Officer
 //      draft -> set_drill_plan(null, …, mapped content, 'ai'); approve / back to draft; edit keeps source; attach + "View as
 //      attached" opens the real viewer; delete through confirmDestructive with the keep-the-copy copy; RPC errors surfaced;
 //      a failed library read shows Retry, not an empty library; Board / Project Admin get no write controls
@@ -188,7 +189,7 @@ const MEMBERS = [{ id: ME.ada, name: "Ada DA" }, { id: ME.oli, name: "Oli Office
 async function mount(role, el) {
   globalThis.__sb.calls = []; globalThis.__sb.writes = []; globalThis.__confirmed = []; globalThis.__ai = []; notes.length = 0;
   document.body.innerHTML = ""; const host = document.createElement("div"); document.body.appendChild(host); const r = createRoot(host);
-  await act(async () => { r.render(el || React.createElement(TrainingPlans, { S, role, sessions: SESS, loadSessions: () => {}, members: MEMBERS, notify, dept: { name: "Indian Harbor" }, categories: CATS, viewToggle: null })); });
+  await act(async () => { r.render(el || React.createElement(TrainingPlans, { S, role, canManageTraining: (role || []).some((r) => r === "Department Admin" || r === "Officer"), sessions: SESS, loadSessions: () => {}, members: MEMBERS, notify, dept: { name: "Indian Harbor" }, categories: CATS, viewToggle: null })); });
   await tick(); await tick();
   return { host, unmount: () => act(() => r.unmount()) };
 }
