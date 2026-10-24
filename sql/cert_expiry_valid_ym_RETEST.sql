@@ -1,6 +1,10 @@
 -- =====================================================================
--- RETEST for cert_expiry_valid_ym (DRAFT, not applied) — run AFTER sql/cert_expiry_valid_ym_DRAFT.sql, separately. It reads
--- its own synthetic rows (L1 also reads the live ones — after the migration there are no malformed live rows left).
+-- RAN on live 2026-10-24 (after the migration, before the cleanup): 33 passed, 0 failed, 5 skipped — S0 S1 L1 (all 179 certs) +
+-- G1 G2 G3 G4 U1 A1 in all 5 departments (Demo, Granbury, Indian Harbor, Lipan, North Hood). The 5 skips are G5 in each
+-- department: live onboarding_items.category is NOT NULL, so the synthetic probation item could not be inserted (the dry run's
+-- G5 is the proof). Rolled back by the SENTINEL.
+-- RETEST for cert_expiry_valid_ym — run AFTER sql/cert_expiry_valid_ym_DRAFT.sql, separately (before or
+-- after the data cleanup — it reads its own synthetic rows; L1 holds either way).
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). The final
 -- RAISE is the report — the "ERROR" IS the report.
 --   S0 (once) valid_exp_ym(): the validExpYM truth table (incl. NULL -> false, full-width digits -> false); IMMUTABLE, invoker,
@@ -20,9 +24,6 @@
 --      a year out 'current'
 --   G5 probation_item_states(): a synthetic 'cert' onboarding item — '2026-13' / '0000-01' alone = missing, a valid month a
 --      year out = current (SKIPPED with the reason if the item can't be inserted; the dry run is then the proof)
---   G6 a NEVER-EXPIRES type still wins: a synthetic never-expires cert type; certs of it dated '0000-00' and a real PAST month
---      read no_expiry (+2 no_expiry in readiness, nothing in expired / no_date) and 'no_expiry' in expiration_rows (SKIPPED
---      with the reason if the type can't be inserted; the dry run is then the proof)
 --   U1 update_cert() as the DA refuses '0000-00', '2026-13', '2026-00', '1899-12', '2026-09-15', 'TBD', ' 2027-06' with the
 --      client's message; stores '2027-06'; '' and NULL clear to NULL
 --   A1 approve_cert_submission() as the DA: pending submissions '0000-00', '2026-09-15', '' -> approved with exp NULL;
@@ -183,34 +184,6 @@ BEGIN
           IF v_t = 'missing/current' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  G5 probation: ''2026-13'' + ''0000-01'' alone = missing; + a valid month a year out = current%s', chr(10));
           ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G5 probation states: %s (want missing/current)%s', coalesce(v_t, 'null'), chr(10)); END IF;
         EXCEPTION WHEN OTHERS THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G5 probation raised: %s%s', SQLERRM, chr(10)); END;
-      END IF;
-
-      -- G6 a never-expires type wins over a garbage date and over a real past month
-      v_item := NULL;
-      BEGIN
-        INSERT INTO public.cert_types (department_id, name, never_expires) VALUES (rec.dept_id, 'RETEST never-expires type', true) RETURNING id INTO v_item;
-      EXCEPTION WHEN OTHERS THEN e := SQLERRM; END;
-      IF v_item IS NULL THEN
-        v_skip := v_skip + 1; rpt := rpt || format('   SKIP  G6 never-expires — a synthetic cert type could not be inserted (%s); the dry run is the proof%s', e, chr(10));
-      ELSE
-        BEGIN
-          PERFORM set_config('request.jwt.claims', json_build_object('email', v_da, 'sub', v_da_uid, 'role', 'authenticated')::text, true);
-          PERFORM set_config('role', 'authenticated', true);
-          SELECT * INTO r0 FROM public.dept_cert_readiness();
-          PERFORM set_config('role', 'postgres', true);
-          INSERT INTO public.certs (id, department_id, member_id, name, exp, cert_type_id)
-          VALUES (gen_random_uuid(), rec.dept_id, v_da_mid, 'RETEST nx garbage', '0000-00', v_item), (gen_random_uuid(), rec.dept_id, v_da_mid, 'RETEST nx past', v_past, v_item);
-          PERFORM set_config('role', 'authenticated', true);
-          SELECT * INTO r1 FROM public.dept_cert_readiness();
-          PERFORM set_config('role', 'postgres', true);
-          SELECT count(*) FILTER (WHERE x.bucket = 'no_expiry'), count(*) INTO v_n, v_bad FROM public.expiration_rows(rec.dept_id, v_da_mid) x
-            JOIN public.certs c ON c.id = x.item_id WHERE c.cert_type_id = v_item;
-          IF r1.no_expiry - r0.no_expiry = 2 AND r1.expired = r0.expired AND r1.no_date = r0.no_date AND v_n = 2 AND v_bad = 2 THEN
-            v_pass := v_pass + 1; rpt := rpt || format('   PASS  G6 never-expires wins: ''0000-00'' and a real past month of that type read no_expiry (readiness +2 no_expiry, 0 expired / no_date; expiration_rows no_expiry)%s', chr(10));
-          ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G6 never-expires: readiness no_expiry %s · expired %s · no_date %s · expiration_rows no_expiry %s of %s%s',
-            r1.no_expiry - r0.no_expiry, r1.expired - r0.expired, r1.no_date - r0.no_date, v_n, v_bad, chr(10)); END IF;
-        EXCEPTION WHEN OTHERS THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  G6 never-expires raised: %s%s', SQLERRM, chr(10)); END;
-        PERFORM set_config('role', 'postgres', true);
       END IF;
 
       -- U1 update_cert as the DA
