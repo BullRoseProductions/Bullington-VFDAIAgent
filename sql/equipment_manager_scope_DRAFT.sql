@@ -1,5 +1,6 @@
 -- =====================================================================
--- EQUIPMENT-MANAGER DEPARTMENT-SCOPE FIX — DRAFT, not reviewed, not applied.
+-- EQUIPMENT-MANAGER DEPARTMENT-SCOPE FIX — Review PASS (5e6558e). APPLIED on live 2026-10-24; state row: scoped true ·
+-- by_email false · eqm_md5 a979933d · grants_ok true · managers_active 6 · total_policies 173 · locked_token_fns 17.
 -- Order: claude/B4C_EquipmentManager_DeptScope_Fix_BuildOrder.md · Step 0 PASS:
 -- claude/B4C_EquipmentManager_DeptScope_Fix_Step0_ReviewRecord.md (audit: claude/B4C_EquipmentManager_DeptScope_Fix_Step0.md,
 -- live evidence docs/review/equipment_manager_scope_STEP0_OUTPUT.json — 173 policies, 17 locked-token functions).

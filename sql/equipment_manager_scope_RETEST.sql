@@ -1,5 +1,10 @@
 -- =====================================================================
 -- RETEST for equipment_manager_scope (DRAFT, not applied) — run AFTER the migration, separately.
+-- RAN on live 2026-10-24: 5 passed, 0 failed, 4 skipped — S0; North Hood E1 E2 E3 + X1 (a real manager synthesized into a second
+-- department inside the rollback: not a manager there, refused on authority, 0 of its 4 rows; a manager again at home). Indian
+-- Harbor + Lipan skip: all 4 of their managers are also Department Admins (excluded so the manager role is tested alone — they keep
+-- every right via is_dept_admin(), unchanged by the fix); Demo + Granbury have no managers. Rollback confirmed after: 0 RETEST
+-- member rows, 115 members, 6 active managers.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). The final
 -- RAISE is the report — the "ERROR" IS the report.
 -- The ROLE PROBE: mark_equipment_lost(<random id>) tests "is_equipment_manager() OR is_dept_admin()" BEFORE it looks at any
