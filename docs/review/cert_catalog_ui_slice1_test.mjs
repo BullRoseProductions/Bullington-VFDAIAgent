@@ -212,7 +212,11 @@ const calls = stripAll(src).match(/certStatus\([^()]*\)/g) || [];
 const bare = calls.filter((c) => !/,/.test(c) && !/^certStatus\(exp, neverExpires/.test(c));
 ok("every certStatus(…) call passes neverExpires", calls.length >= 13 && bare.length === 0, `${calls.length} calls · bare: ${JSON.stringify(bare)}`);
 const rpcLines = (s, n) => (s.match(new RegExp(`.*supabase\\.rpc\\("${n}".*`, "g")) || []).join("\n");
-ok("update_cert / delete_cert calls byte-identical to origin/main", rpcLines(src, "update_cert") === rpcLines(main, "update_cert") && rpcLines(src, "delete_cert") === rpcLines(main, "delete_cert") && rpcLines(src, "update_cert").length > 0);
+// Re-baselined for cert dates Slice B: the update_cert call may also be main's with EXACTLY the two optional named args
+// that Slice B adds (new_no_expiry / new_achieved_on — Slice A's update_cert takes them as DEFAULT NULL). delete_cert unchanged.
+const updMain = rpcLines(main, "update_cert"), updSliceB = updMain.replace("new_exp: expTrim || null });", "new_exp: expTrim || null, new_no_expiry: draft.noExpiry, new_achieved_on: achTrim });");
+ok("update_cert call = origin/main's (or main's + exactly cert dates Slice B's two named args); delete_cert byte-identical to origin/main",
+  (rpcLines(src, "update_cert") === updMain || rpcLines(src, "update_cert") === updSliceB) && rpcLines(src, "delete_cert") === rpcLines(main, "delete_cert") && rpcLines(src, "update_cert").length > 0);
 const body = (name) => { const i = src.indexOf(`function ${name}(`); let j = src.indexOf("\nfunction ", i + 10); const k = src.indexOf("\nconst ", i + 10); if (k > 0 && k < j) j = k; return src.slice(i, j); };
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 const newCode = ["CertTypeForm", "CertTypesPanel", "CertTypePicker", "enrichCerts"].map(body).join("\n");

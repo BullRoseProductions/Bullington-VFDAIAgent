@@ -120,7 +120,7 @@ export function citedDocs(text, names) {
 const TOOLS = [
   { name: "am_i_checked_in", description: "Whether the member is clocked in at the station right now (standby, training or off-site), since when, and whether the check-in was confirmed on station.", input_schema: { type: "object", properties: {} } },
   { name: "my_hours", description: "The member's OWN station hours for a period: credited hours (only verified on-station time counts toward ISO/LOSAP), the standby/training split, and unverified (recorded, not credited) hours.", input_schema: { type: "object", properties: { range: { type: "string", enum: ["month", "last", "quarter", "year"], description: "month = this month (default), last = last month, quarter = this quarter, year = this year" } } } },
-  { name: "my_certs", description: "The member's OWN certifications with expiry status (expired / expiring within 3 months / current / no date), plus any cert submissions still pending review.", input_schema: { type: "object", properties: {} } },
+  { name: "my_certs", description: "The member's OWN certifications with expiry status (expired / expiring within 3 months / current / doesn't expire / no date) and the month each was earned when known, plus any cert submissions still pending review.", input_schema: { type: "object", properties: {} } },
   { name: "my_schedule", description: "Upcoming department trainings and meetings the member can attend (next 60 days), soonest first, with time, length, location and whether it is optional.", input_schema: { type: "object", properties: {} } },
   { name: "my_attendance", description: "The member's OWN drill attendance rate over the last 90 days, counting only drills that count toward attendance and that were held after they joined.", input_schema: { type: "object", properties: {} } },
   { name: "search_sops", description: "Search THIS department's own uploaded SOPs, policies and documents for a question. Returns document text with document names to cite. Use for any department policy/procedure question.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
@@ -148,13 +148,16 @@ async function runTool(sb, name, input, ctx) {
     }
     if (name === "my_certs") {
       const [c, s] = await Promise.all([
-        sb.from("certs").select("name, exp").eq("member_id", ctx.memberId),
-        sb.from("cert_submissions").select("name, exp, status, created_at").eq("member_id", ctx.memberId).eq("status", "pending"),
+        sb.from("certs").select("name, exp, no_expiry, achieved_on, department_id, cert_types(never_expires, department_id)").eq("member_id", ctx.memberId),
+        sb.from("cert_submissions").select("name, exp, no_expiry, status, created_at").eq("member_id", ctx.memberId).eq("status", "pending"),
       ]);
       if (c.error) return fail("Couldn't read your certifications.");
-      const certs = (c.data || []).map((x) => ({ name: x.name, expires: x.exp || null, status: certStatus(x.exp) }))
-        .sort((a, b) => ["expired", "expiring", "current", "no date"].indexOf(a.status) - ["expired", "expiring", "current", "no date"].indexOf(b.status));
-      return ok({ certs, pending_submissions: s.error ? null : (s.data || []).map((x) => ({ name: x.name, expires: x.exp || null, submitted: x.created_at })) });
+      // never expires = the cert's own "doesn't expire" flag OR its catalog type (same department) — the app's enrichCerts rule
+      const never = (x) => !!x.no_expiry || (!!x.cert_types?.never_expires && x.cert_types.department_id === x.department_id);
+      const ORDER = ["expired", "expiring", "current", "doesn't expire", "no date"];
+      const certs = (c.data || []).map((x) => ({ name: x.name, expires: never(x) ? null : x.exp || null, status: never(x) ? "doesn't expire" : certStatus(x.exp), earned: validExpYM(x.achieved_on || "") ? x.achieved_on : null }))
+        .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
+      return ok({ certs, pending_submissions: s.error ? null : (s.data || []).map((x) => ({ name: x.name, expires: x.no_expiry ? "doesn't expire" : x.exp || null, submitted: x.created_at })) });
     }
     if (name === "my_schedule") {
       const today = todayCT();

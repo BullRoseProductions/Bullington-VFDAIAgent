@@ -75,7 +75,15 @@ ok("assistant certStatus: garbage -> \"no date\"; a real past month -> \"expired
 // 5 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
 ok("no loose YYYY-MM cert-exp test left (App.jsx + api/assistant.js)", !/\^\\d\{4\}-\\d\{2\}\$/.test(src) && !/\^\\d\{4\}-\\d\{2\}\$/.test(asst));
-ok("certStatus / expPhrase / the 3 save validators / the cert sort use validExpYM", (src.match(/validExpYM\(/g) || []).length === 6 && /import \{ EXPIRING_MONTHS, expiryBucket, BUCKET_RANK, validExpYM \} from "\.\.\/shared\/expiry\.js";/.test(src));
+// Re-baselined for cert dates Slice B: the 3 save validators now go through certDatesError() (shared/expiry.js), which
+// applies validExpYM to the expiry AND the earned month — so App.jsx calls validExpYM directly 3 times (certStatus,
+// expPhrase, the cert sort) and certDatesError 3 times (the validators). Originally: 6 direct validExpYM calls.
+const sharedSrc = readFileSync(join(root, "shared/expiry.js"), "utf8");
+const cdeBody = sharedSrc.slice(sharedSrc.indexOf("export function certDatesError("), sharedSrc.indexOf("\n}\n", sharedSrc.indexOf("export function certDatesError(")));
+ok("certStatus / expPhrase / the cert sort use validExpYM; the 3 save validators use certDatesError, which applies validExpYM to both dates",
+  (src.match(/validExpYM\(/g) || []).length === 3 && (src.match(/certDatesError\(\{/g) || []).length === 3
+  && /!validExpYM\(e\)/.test(cdeBody) && /!validExpYM\(a\)/.test(cdeBody)
+  && /import \{ EXPIRING_MONTHS, expiryBucket, BUCKET_RANK, validExpYM \} from "\.\.\/shared\/expiry\.js";/.test(src));
 const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);

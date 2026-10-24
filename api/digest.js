@@ -25,6 +25,8 @@ import { buildNotifications, insertNotifications, sendPush } from "./_push.js";
    cannot drift about whether the same pump test is overdue. shared/maint-due.test.mjs holds a
    verbatim copy of what used to live here and proves the two agree across 4,059 cases. */
 import { detectMaintenanceFrom } from "../shared/maint-due.js";
+// The cert date rule the app, the assistant and the SQL readers share (shape + month 01–12 + year >= 1900).
+import { validExpYM } from "../shared/expiry.js";
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
 const FROM = "B4C <notifications@b4thecall.com>";
@@ -181,11 +183,17 @@ const fmtMonYear = (d) => `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 const daysBetween = (from, to) => Math.round((to - from) / DAY_MS);
 
 // A cert's `exp` is 'YYYY-MM' and means end of that month — new Date(y, m, 0) is the last day of month m.
-function certExpiryEnd(exp) {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(exp || ""));
-  if (!m) return null;                                    // no/garbled date → NOT flagged; an absent value must never read as an expired one
-  const d = new Date(Number(m[1]), Number(m[2]), 0);
+// validExpYM, not the bare shape: a '0000-00' would otherwise become Dec 1899 here and mail as an urgent expired cert.
+export function certExpiryEnd(exp) {
+  if (!validExpYM(exp)) return null;                      // no/garbled date → NOT flagged; an absent value must never read as an expired one
+  const [y, m] = exp.split("-").map(Number);
+  const d = new Date(y, m, 0);
   return isNaN(d.getTime()) ? null : d;
+}
+// A cert that never expires — its own "doesn't expire" flag (certs.no_expiry) OR its catalog type (same department) never
+// expires. The JS twin of SQL cert_never_expires(); rows carry no_expiry + the embedded cert_types(never_expires, department_id).
+export function certNeverExpires(r) {
+  return !!r?.no_expiry || (!!r?.cert_types?.never_expires && r.cert_types.department_id === r.department_id);
 }
 // Gear retirement = manufacture_date + service_life_years. Mirrors gearStatus's math exactly.
 function gearRetireDate(manufactureDate, serviceLifeYears) {
@@ -206,10 +214,11 @@ function parseDateOnly(value) {
 /* ---------------- detection ----------------
    Each loader returns a flat array of flagged items carrying their own department_id; grouping happens once, after. */
 async function detectCerts(sb, today) {
-  const { data, error } = await sb.from("certs").select("id, department_id, member_id, name, exp, members(name)");
+  const { data, error } = await sb.from("certs").select("id, department_id, member_id, name, exp, no_expiry, cert_types(never_expires, department_id), members(name)");
   if (error) throw new Error(`certs read failed: ${error.message}`);
   const cutoff = addDays(today, CERT_WINDOW_DAYS);
   return (data || []).flatMap((r) => {
+    if (certNeverExpires(r)) return [];                   // doesn't expire → nothing to renew, whatever an old date says
     const end = certExpiryEnd(r.exp);
     if (!end || !r.department_id || end > cutoff) return [];
     const expired = end < today;
@@ -260,16 +269,18 @@ async function detectMaintenance(sb, today) {
    Every metric returns null when the department has no data to compute it from — null renders as "—".
    A zero would be a claim ("0% of certs are current"); "—" is the truth ("nothing to measure yet"). */
 
-// Cert rank, mirroring certStatus in App.jsx: 0 expired, 1 expiring (≤3 months), 2 current.
-// A missing/garbled exp returns null and is excluded from the denominator — same as the app's "NO DATE".
-function certRank(exp, today) {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(exp || ""));
-  if (!m) return null;
-  const diff = (Number(m[1]) * 12 + Number(m[2])) - (today.getFullYear() * 12 + today.getMonth() + 1);
+// Cert rank, mirroring certStatus in App.jsx: 0 expired, 1 expiring (≤3 months), 2 current — and a cert that never
+// expires is 2 (the app's NO EXPIRY ranks with CURRENT). A missing/garbled exp returns null and is excluded from the
+// denominator — same as the app's "NO DATE".
+export function certRank(exp, today, neverExpires = false) {
+  if (neverExpires) return 2;
+  if (!validExpYM(exp)) return null;
+  const [y, mo] = exp.split("-").map(Number);
+  const diff = (y * 12 + mo) - (today.getFullYear() * 12 + today.getMonth() + 1);
   return diff < 0 ? 0 : diff <= 3 ? 1 : 2;
 }
 function certsCurrentPct(certRows, countedIds, today) {
-  const ranks = certRows.filter((c) => countedIds.has(c.member_id)).map((c) => certRank(c.exp, today)).filter((r) => r !== null);
+  const ranks = certRows.filter((c) => countedIds.has(c.member_id)).map((c) => certRank(c.exp, today, certNeverExpires(c))).filter((r) => r !== null);
   if (!ranks.length) return null;                                   // no dated certs on counted members → "—"
   return Math.round(100 * ranks.filter((r) => r === 2).length / ranks.length);
 }
@@ -629,7 +640,7 @@ export default async function handler(req, res) {
       sb.from("members").select("id, department_id, access, email, status"),
       sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance"),
       sb.from("session_attendance").select("session_id, member_id"),
-      sb.from("certs").select("department_id, member_id, exp"),
+      sb.from("certs").select("department_id, member_id, exp, no_expiry, cert_types(never_expires, department_id)"),
       sb.from("apparatus").select("department_id, in_service"),
       // auto_closed IS SELECTED NOW, and it is load-bearing. Without it this read could not tell a
       // shift whose stop time an officer confirmed from one the sweeper guessed at the cap, so the
