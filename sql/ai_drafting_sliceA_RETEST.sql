@@ -1,5 +1,8 @@
 -- =====================================================================
 -- RETEST for ai_drafting_sliceA (DRAFT, not applied) — run AFTER the migration, separately.
+-- RAN on live 2026-10-24: 28 passed, 0 failed, 2 skipped — S0; Indian Harbor + Lipan + North Hood A1 W1 A2–A7 O1 (Officer-only
+-- exercised in all three; Board/PA-only refusal exercised in North Hood); Demo (no plain member) + Granbury (no plain member, no
+-- session) skip. Rollback confirmed after: drill_plans 0 rows, session_plans 39 / 0 linked, no RETEST rows. Slice A proven on live.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). The
 -- fixtures are what the RPCs themselves write. The final RAISE is the report — the "ERROR" IS the report.
 --   S0 (once) structure: drill_plans RLS on + its one SELECT policy; the six RPCs authenticated-only

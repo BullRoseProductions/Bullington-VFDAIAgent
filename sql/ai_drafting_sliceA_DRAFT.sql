@@ -1,5 +1,6 @@
 -- =====================================================================
--- AI DRAFTING — SLICE A (DB): the drill-plan library — DRAFT, not reviewed, not applied.
+-- AI DRAFTING — SLICE A (DB): the drill-plan library — Review PASS (1882859). APPLIED on live 2026-10-24; state row:
+-- dp_rls true · dp_policies 1 · dp_rows 0 · link true · rpcs_ok 6 · sp_rows 39 · sp_linked 0 · total_policies 172 · locked_token_fns 17.
 -- Order: claude/B4C_AIDrafting_SliceA_DB_BuildOrder.md. Built on live (Step 0 read 2026-10-24: 171 policies, 17 locked-
 -- token functions, session_plans 39 rows, no function references session_plans, is_canmanage_ops() = DA + Officer).
 --
