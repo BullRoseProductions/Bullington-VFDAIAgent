@@ -79,7 +79,13 @@ const A = await import(pathToFileURL(out).href);
 const { DRILL_PLAN_SYSTEM, drillPlanToContent, serializeDrillPlan, TrainingPlans, Training, AiPlanViewer, createRoot, act, React } = A;
 
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
+// Structural fences are PINNED to this slice's own release (aed762f, a --no-ff merge whose first parent is the main it landed
+// on): "vs origin/main" was true only until the next slice merged. Historical = the release vs its parent; ongoing guards
+// compare a block this slice owns in today's tree with the release's copy.
+const REL = "aed762f";
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = at(REL), relParent = at(`${REL}^1`);
+const changedFiles = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 
 // ---- the generator-shaped plan the inline planner's prompt returns
 const GEN = {
@@ -288,35 +294,37 @@ fail.dept_drill_plans = "Load failed";
   unmount(); }
 
 // 5 the source
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+ok("AI Drafting Slice B (aed762f) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
 const fn = (s, name) => { const i = s.indexOf(`function ${name}(`); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
-// Training Officers Slice 1 re-points AIDrillPlanner's write gate to the canManageTraining twin (is_training_manager()). The fence:
-// main's AIDrillPlanner with EXACTLY that swap — the signature gains canManageTraining, the canManage line flips — nothing else.
+// AIDrillPlanner: Slice B (aed762f) didn't touch it. Training Officers (2a94baa) later re-pointed its write gate to the
+// canManageTraining twin — its parent's AIDrillPlanner with EXACTLY that swap (signature gains canManageTraining, the canManage
+// line flips), nothing else. Ongoing guard: today's AIDrillPlanner = 2a94baa's.
 const AIDP_SWAP = [
   ["function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories }) {",
    "function AIDrillPlanner({ S, addFeedback, sessions, loadSessions, notify, dept, me, role, categories, canManageTraining }) {"],
   ["  const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // training_sessions write — ops only (DA/Officer, excludes Board + PA)",
    "  const canManage = !!canManageTraining;   // training_sessions write — is_training_manager() (a Department Admin or a training officer; not PA)"],
 ];
-const aidpMain = fn(main, "AIDrillPlanner"), aidpSrc = fn(src, "AIDrillPlanner");
-ok("AIDrillPlanner (the inline Draft with AI planner) = origin/main with exactly the canManageTraining gate swap",
-  AIDP_SWAP.every(([a]) => aidpMain.split(a).length === 2) && AIDP_SWAP.reduce((s, [a, b]) => s.replace(a, () => b), aidpMain) === aidpSrc
-  && !aidpSrc.includes("CANMANAGE_OPS_ROLES") && aidpSrc.length > 1000);
-ok("serializeDrillPlan + AiPlanViewer byte-identical to origin/main", fn(src, "serializeDrillPlan") === fn(main, "serializeDrillPlan") && fn(src, "AiPlanViewer") === fn(main, "AiPlanViewer"));
+const aidpTo = fn(at("2a94baa"), "AIDrillPlanner"), aidpToParent = fn(at("2a94baa^1"), "AIDrillPlanner"), aidpSrc = fn(src, "AIDrillPlanner");
+ok("AIDrillPlanner: untouched by Slice B (aed762f vs its parent)", fn(rel, "AIDrillPlanner") === fn(relParent, "AIDrillPlanner") && fn(rel, "AIDrillPlanner").length > 1000);
+ok("AIDrillPlanner: Training Officers (2a94baa) = its parent's with exactly the canManageTraining gate swap; here = 2a94baa's",
+  AIDP_SWAP.every(([a]) => aidpToParent.split(a).length === 2) && AIDP_SWAP.reduce((s, [a, b]) => s.replace(a, () => b), aidpToParent) === aidpTo
+  && aidpSrc === aidpTo && !aidpSrc.includes("CANMANAGE_OPS_ROLES") && aidpSrc.length > 1000);
+ok("serializeDrillPlan + AiPlanViewer: untouched by Slice B (aed762f vs its parent); here = aed762f's",
+  ["serializeDrillPlan", "AiPlanViewer"].every((f) => fn(rel, f) === fn(relParent, f) && fn(src, f) === fn(rel, f)));
 const rpcSet = (s) => new Set([...(s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)), ...[...s.matchAll(/\bact\("[a-z]+", "([a-z_]+)"/g)].map((m) => m[1])]);
-const added = [...rpcSet(src)].filter((n) => !rpcSet(main).has(n)).sort();
-// Post-merge: the six Slice A RPCs are on main (aed762f) — they must all still be called; the only RPCs new vs main are the
-// Training Officers card's two.
+const added = [...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n)).sort();
+// The six Slice A RPCs: the only RPCs Slice B (aed762f) added vs its parent, and all still called today. (The Training
+// Officers card's two RPCs are fenced in training_officers_ui_test.mjs, pinned to 2a94baa.)
 const SLICE_A_RPCS = ["approve_drill_plan", "attach_drill_plan_to_session", "delete_drill_plan", "dept_drill_plans", "set_drill_plan", "unapprove_drill_plan"];
 ok("the six Slice A RPCs are all still called", SLICE_A_RPCS.every((n) => rpcSet(src).has(n)), JSON.stringify(SLICE_A_RPCS.filter((n) => !rpcSet(src).has(n))));
-ok("the only new RPCs vs origin/main are the Training Officers card's two", JSON.stringify(added) === JSON.stringify(["assign_training_officer", "remove_training_officer"]), JSON.stringify(added));
+ok("the only new RPCs in Slice B (aed762f) vs its parent are the six Slice A ones", JSON.stringify(added) === JSON.stringify(SLICE_A_RPCS), JSON.stringify(added));
 const block = src.slice(src.indexOf("/* ---------------- TRAINING PLANS (AI Drafting Slice B)"), src.indexOf("function TrainingSchedule("));
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 ok("no direct drill_plans / session_plans writes in the new block", !/from\("(drill_plans|session_plans)"\)/.test(block));
 ok("no hex literal in the new block (FIRE / FS tokens)", (strip(block).replace(DRILL_PLAN_SYSTEM, "").match(/#[0-9A-Fa-f]{3,8}\b/g) || []).length === 0);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Slice B (aed762f) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back: no api/notify-session.js, 0 NotifyCrewModal", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

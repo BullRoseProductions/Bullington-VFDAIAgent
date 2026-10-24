@@ -133,23 +133,27 @@ REQS = [];
 
 // 6 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changedFiles = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
+// Structural fences are PINNED to this slice's own release (e371010, a --no-ff merge whose first parent is the main it landed
+// on): "vs origin/main" was true only until the next slice merged. Historical = the release vs its parent; ongoing guards
+// compare a block this slice owns in today's tree with the release's copy.
+const REL = "e371010";
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = at(REL), relParent = at(`${REL}^1`);
+const changedFiles = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 2 (e371010) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
 const block = (s) => { const i = s.indexOf("function RdSetup("); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
 // Re-baselined after promote: "outside RdSetup unchanged vs origin/main" only holds until a later slice lands. Pinned instead
 // to the reviewed release itself — Slice 2 (e371010) changed nothing outside RdSetup vs its parent (ebfcb1c) — and the
 // ongoing guard: RdSetup in this tree is byte-identical to Slice 2's.
-const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const s2 = at("e371010"), s2parent = at("e371010^1");
+const s2 = rel, s2parent = relParent;
 ok("Slice 2 (e371010) changed nothing outside RdSetup vs its parent; RdSetup here = Slice 2's", s2.replace(block(s2), "") === s2parent.replace(block(s2parent), "") && block(src) === block(s2) && block(src).length > 500);
 const mounts = (s) => (s.match(/.*configurer && <RdSetup.*/g) || []).join("\n");
-ok("the two DA/PA mounts (configurer && <RdSetup>) unchanged", mounts(src) === mounts(main) && (src.match(/configurer && <RdSetup/g) || []).length === 2);
+ok("the two DA/PA mounts (configurer && <RdSetup>): unchanged by Slice 2 vs its parent; here = Slice 2's", mounts(rel) === mounts(relParent) && mounts(src) === mounts(rel) && (src.match(/configurer && <RdSetup/g) || []).length === 2);
 ok("the scorecard's \"certs don't count\" visibility line unchanged", src.includes("Shown so they're visible — certs don't count toward the readiness verdict."));
 const rpcs = (s) => [...new Set(s.match(/supabase\.rpc\("[a-z_]+"/g) || [])].sort().join(",");
-ok("RPC set unchanged vs origin/main (no new RPC)", rpcs(src) === rpcs(main));
+ok("Slice 2 (e371010) added no RPC vs its parent", rpcs(rel) === rpcs(relParent));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Slice 2 (e371010) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 ok("no hex literal in RdSetup", (strip(block(src)).match(/#[0-9A-Fa-f]{3,8}\b/g) || []).length === 0);
 ok("Notify crew held back: no api/notify-session.js, 0 NotifyCrewModal", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
