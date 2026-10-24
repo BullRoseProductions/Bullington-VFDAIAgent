@@ -1,0 +1,100 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 6d20446..04dde6b 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -23666,10 +23666,11 @@ function TrainingPlans({ S, role, sessions, loadSessions, members, notify, dept,
+   const upcoming = (sessions || []).filter((s) => !s.done).sort(sessSort);
+ 
+   return (
+-    <PageShell band watermark="PLANS" above={<>{viewToggle}{mounts}</>} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
++    <PageShell band watermark="PLANS" above={mounts} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
+       sub="Build a plan for any topic with AI — save it, reuse it, and attach it to any session."
+       actions={canWrite ? <button style={FS.btnPrimary} onClick={() => { topicRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); topicRef.current?.focus(); }}><Sparkles size={14} /> Draft with AI</button> : null}>
+       <NoirSkin>
++        {viewToggle}{/* Schedule | Training Plans — first in the body, under the band, the same spot on all three views */}
+         {canWrite && (
+           <div style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.red}55`, borderRadius: 16, background: `radial-gradient(120% 140% at 10% 0%, ${FIRE.red}24, transparent 50%), ${FIRE.cardNoir}`, padding: "20px 22px", marginBottom: 18 }}>
+             <div style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 17, color: FIRE.textPrimary, marginBottom: 4 }}><Sparkles size={19} color={FIRE.redBright} /> Draft a training plan with AI</div>
+@@ -23821,6 +23822,8 @@ function Training(props) {
+   </>);
+ }
+ 
++// CardHead paints its icon red; the "no length recorded" notice keeps its amber accent, so its icon overrides the colour.
++const AmberClockIcon = (props) => <Clock {...props} color={FIRE.amberText} />;
+ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle }) {
+   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+ 
+@@ -23999,6 +24002,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+   const [rCount, setRCount] = useState("26");               // N occurrences (the end condition)
+   // AI training-plan drafter (Card 2) + ai_text viewer
+   const [draftOpen, setDraftOpen] = useState(false);
++  const [noLenOpen, setNoLenOpen] = useState(false);   // the "finished drills with no length" notice: tucked by default; the count stays in its header
+   const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);
+   async function toggleAttend(s, mid) {
+     if (s.done) return;   // officer lock (UI also hides the control once done)
+@@ -24357,7 +24361,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+     const R = 58, C = 2 * Math.PI * R;
+ 
+     return (
+-      <PageShell band watermark="TRAIN" above={<>{viewToggle}{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
++      <PageShell band watermark="TRAIN" above={<>{sessionsErr && <OfflineNotice onRetry={loadSessions} what="trainings" />}{mounts}</>} kicker={dept?.name ? `MY TRAINING · ${dept.name}` : "MY TRAINING"} title="Your training calendar"
+         sub="What's coming up, where you stand, and what to catch up on."
+         actions={totalRecorded > 0 ? (
+           <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
+@@ -24365,6 +24369,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+             <div style={{ fontSize: 10.5, color: FIRE.textSecondary, marginTop: 4, letterSpacing: ".02em" }}>attended · last 90 days</div>
+           </div>) : null}>
+       <NoirSkin>
++        {viewToggle}{/* Schedule | Training Plans — first in the body, under the band, the same spot on all three views */}
+ 
+         {/* 1 — WHAT'S COMING UP: the month calendar (saved category colours) + the member's next three sessions. */}
+         <div id="mt-upcoming" style={card}>
+@@ -24501,32 +24506,33 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+ 
+   return (
+     <PageShell band kicker={dept?.name ? `TRAINING · ${dept.name}` : "TRAINING"} title="Keep training on schedule"
+-      watermark="TRAIN" above={<>{viewToggle}{sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}</>}
++      watermark="TRAIN" above={sessionsErr ? <OfflineNotice onRetry={loadSessions} what="trainings" /> : null}
+       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
+       <NoirSkin>
++      {viewToggle}{/* Schedule | Training Plans — first in the body, under the band, the same spot on all three views */}
+       {/* Moved from the member view (2026-10-13): it addresses officers ("open a session and set its length"),
+           but sat in the members-only branch — members saw an instruction they can't act on, officers never saw it. */}
+           {(() => {
+             const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
+               && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
+             if (!noLen.length) return null;
++            // Tucked by default (the reports Action Center pattern: CardHead button + chevron); the count stays in the header,
++            // the amber accent stays, and it keeps rendering until every listed drill has a length.
+             return (
+               <div style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12, borderLeft: `3px solid ${FIRE.amberText}` }}>
+-                <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+-                  <Clock size={16} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 1 }} />
+-                  <div style={{ flex: 1, minWidth: 0 }}>
+-                    <div style={{ fontSize: 13.5, fontWeight: 700, color: FIRE.textPrimary }}>
+-                      {noLen.length} finished drill{noLen.length === 1 ? "" : "s"} with no length recorded
+-                    </div>
+-                    <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.5 }}>
+-                      Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+-                    </div>
+-                    <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+-                      {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
+-                      {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
+-                    </div>
++                <CardHead as="button" onClick={() => setNoLenOpen((v) => !v)} aria-expanded={noLenOpen} icon={AmberClockIcon}
++                  title={`${noLen.length} finished drill${noLen.length === 1 ? "" : "s"} with no length recorded`}
++                  right={noLenOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
++                  style={{ marginBottom: noLenOpen ? 8 : 0, cursor: "pointer" }} />
++                {noLenOpen && (<>
++                  <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
++                    Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+                   </div>
+-                </div>
++                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
++                    {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
++                    {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
++                  </div>
++                </>)}
+               </div>
+             );
+           })()}
