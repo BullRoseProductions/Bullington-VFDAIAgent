@@ -137,7 +137,12 @@ const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer
 const changedFiles = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
 ok("only src/App.jsx changed (runtime)", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
 const block = (s) => { const i = s.indexOf("function RdSetup("); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
-ok("outside RdSetup, App.jsx is byte-identical to origin/main", src.replace(block(src), "") === main.replace(block(main), ""));
+// Re-baselined after promote: "outside RdSetup unchanged vs origin/main" only holds until a later slice lands. Pinned instead
+// to the reviewed release itself — Slice 2 (e371010) changed nothing outside RdSetup vs its parent (ebfcb1c) — and the
+// ongoing guard: RdSetup in this tree is byte-identical to Slice 2's.
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const s2 = at("e371010"), s2parent = at("e371010^1");
+ok("Slice 2 (e371010) changed nothing outside RdSetup vs its parent; RdSetup here = Slice 2's", s2.replace(block(s2), "") === s2parent.replace(block(s2parent), "") && block(src) === block(s2) && block(src).length > 500);
 const mounts = (s) => (s.match(/.*configurer && <RdSetup.*/g) || []).join("\n");
 ok("the two DA/PA mounts (configurer && <RdSetup>) unchanged", mounts(src) === mounts(main) && (src.match(/configurer && <RdSetup/g) || []).length === 2);
 ok("the scorecard's \"certs don't count\" visibility line unchanged", src.includes("Shown so they're visible — certs don't count toward the readiness verdict."));

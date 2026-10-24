@@ -395,6 +395,7 @@ import {
 } from "../shared/roles.js";
 import { isDoneThisPeriod, weekStartKey } from "../shared/duty-period.js";
 import { EXPIRING_MONTHS, expiryBucket, BUCKET_RANK, validExpYM } from "../shared/expiry.js";
+import { ymLabel, certDatesError } from "../shared/expiry.js";   // cert dates (Slice B): the earned month + the D1 date rules
 // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
@@ -2401,7 +2402,7 @@ export default function App() {
   const loadMembers = () => {
     return Promise.all([
       supabase.from("members_view").select("*"),
-      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
+      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id, no_expiry, achieved_on"),   // proof_path: approve_cert_submission copies the submission's proof onto the cert
       supabase.from("celebrations").select("member_id, joined_date"),   // full join date (dept-scoped, all-members-readable) → joinCutoff
       supabase.rpc("dept_cert_types"),   // the cert catalog — enriches each cert's type (never-expires) below
     ]).then(([membersRes, certsRes, celebRes, typesRes]) => {
@@ -2416,7 +2417,7 @@ export default function App() {
       if (!certsRes.error && certsRes.data) {
         for (const c of certsRes.data) {
           if (!certsByMember.has(c.member_id)) certsByMember.set(c.member_id, []);
-          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null });
+          certsByMember.get(c.member_id).push({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null, noExpiry: !!c.no_expiry, achievedOn: c.achieved_on || null });
         }
       }
       const { data, error } = membersRes;
@@ -2492,13 +2493,13 @@ export default function App() {
     let cancelled = false;
     Promise.all([
       supabase.from("members").select("*").eq("id", myMemberId).single(),
-      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id").eq("member_id", myMemberId),
+      supabase.from("certs").select("id, member_id, name, exp, proof_path, cert_type_id, no_expiry, achieved_on").eq("member_id", myMemberId),
       supabase.from("celebrations").select("joined_date").eq("member_id", myMemberId).maybeSingle(),
     ]).then(([selfRes, certsRes, celebRes]) => {
       if (cancelled) return;
       const s = selfRes.data;
       if (selfRes.error || !s) return;
-      const certs = enrichCerts((certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null })), certTypeMapRef.current);
+      const certs = enrichCerts((certsRes.data || []).map((c) => ({ id: c.id, name: c.name, exp: c.exp, proofPath: c.proof_path || null, certTypeId: c.cert_type_id || null, noExpiry: !!c.no_expiry, achievedOn: c.achieved_on || null })), certTypeMapRef.current);
       const selfRow = {
         id: s.id, department_id: s.department_id, name: s.name, role: s.role, access: s.access,
         status: s.status, phone: s.phone, email: s.email, joined: s.joined, joinedOn: celebRes.data?.joined_date || null,
@@ -3451,7 +3452,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
                 <Award size={15} color={CERT_FIRE[c.st.label]} style={{ flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.name }}>{c.name}</div>
-                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp, c.neverExpires)}</div>
+                  <div style={{ fontSize: 11.5, color: FIRE.textMuted, ...FS.num }}>{expPhrase(c.exp, c.neverExpires)}{ymLabel(c.achievedOn) ? ` · earned ${ymLabel(c.achievedOn)}` : ""}</div>
                 </div>
                 <Pill S={S} color={CERT_FIRE[c.st.label]}>{c.st.label}</Pill>
                 {/* only when a proof is actually on file — a leader-entered cert legitimately has none */}
@@ -4653,6 +4654,7 @@ function CertProposals({ S, notify }) {
   const [ids, setIds] = useState(null);   // { memberId, deptId } from my_member_id()/my_department_id() — match the RLS guards
   const [subs, setSubs] = useState([]);
   const [name, setName] = useState(""); const [exp, setExp] = useState(""); const [note, setNote] = useState("");
+  const [noExpiry, setNoExpiry] = useState(false); const [achievedOn, setAchievedOn] = useState("");   // cert dates (Slice B)
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);   // collapsed by default — the form expands on toggle
@@ -4667,8 +4669,9 @@ function CertProposals({ S, notify }) {
   useEffect(() => { if (ids?.memberId) loadSubs(ids.memberId); }, [ids]);
   async function submit() {
     if (!name.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name." }); return; }
-    const e = exp.trim();
-    if (e && !validExpYM(e)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+    const e = noExpiry ? "" : exp.trim(), a = achievedOn.trim();
+    const dateErr = certDatesError({ exp: e, noExpiry, achievedOn: a });
+    if (dateErr) { notify({ kind: "error", title: "Check the dates", text: dateErr }); return; }
     if (!file) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
     if (!ids?.memberId || !ids?.deptId) { notify({ kind: "error", title: "No member profile", text: "We couldn't find your member profile." }); return; }
     const { data: { user } } = await supabase.auth.getUser();
@@ -4679,10 +4682,10 @@ function CertProposals({ S, notify }) {
     const { error: upErr } = await supabase.storage.from("station-documents").upload(path, file);
     if (upErr) { setBusy(false); notify({ kind: "error", title: "Couldn't upload the proof", text: "Something went wrong uploading that. Please try again.", details: upErr.message }); return; }
     // 2) insert the submission — fields match the INSERT policy guards exactly
-    const { error: insErr } = await supabase.from("cert_submissions").insert({ department_id: ids.deptId, member_id: ids.memberId, name: name.trim(), exp: e || null, status: "pending", source: "self", note: note.trim() || null, proposed_by: user.id, proof_path: path });
+    const { error: insErr } = await supabase.from("cert_submissions").insert({ department_id: ids.deptId, member_id: ids.memberId, name: name.trim(), exp: e || null, no_expiry: noExpiry, achieved_on: a || null, status: "pending", source: "self", note: note.trim() || null, proposed_by: user.id, proof_path: path });
     setBusy(false);
     if (insErr) { notify({ kind: "error", title: "Couldn't submit", text: "The proof uploaded but the request couldn't be saved. Please try again.", details: insErr.message }); return; }
-    setName(""); setExp(""); setNote(""); setFile(null); setOpen(false);   // auto-collapse after a successful propose
+    setName(""); setExp(""); setNote(""); setNoExpiry(false); setAchievedOn(""); setFile(null); setOpen(false);   // auto-collapse after a successful propose
     notify({ kind: "success", text: "Submitted for review." });
     loadSubs(ids.memberId);
   }
@@ -4700,7 +4703,7 @@ function CertProposals({ S, notify }) {
         <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "8px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it.</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={name} onChange={(e2) => setName(e2.target.value)} placeholder="e.g. EMT-B" /></label>
-          <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={exp} onChange={(e2) => setExp(e2.target.value)} placeholder="2027-06" /></label>
+          <CertDatesFields S={S} exp={exp} setExp={setExp} noExpiry={noExpiry} setNoExpiry={setNoExpiry} achievedOn={achievedOn} setAchievedOn={setAchievedOn} />
           <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={note} onChange={(e2) => setNote(e2.target.value)} /></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e2) => setFile(e2.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
           <button style={{ ...FS.btnPrimary, opacity: (busy || !file || !name.trim()) ? 0.55 : 1 }} onClick={submit} disabled={busy || !file || !name.trim()}>{busy ? "Submitting…" : "Submit for review"}</button>
@@ -11017,13 +11020,38 @@ function nowYM() { const d = new Date(); return d.getFullYear() * 12 + (d.getMon
    cert_count), loaded once with the roster and shared through CertTypesCtx so the Cert Types screen, the member file's
    type picker and every badge read ONE source. Each cert row carries its raw certTypeId; enrichCerts() adds the type's
    neverExpires / typeName / typeCategory. A cert with no type — or whose type was since deleted (the FK clears the
-   link, and a stale id simply isn't in the map) — enriches to neverExpires false and no type: exactly today's cert. */
+   link, and a stale id simply isn't in the map) — enriches to neverExpires false and no type: exactly today's cert.
+   CERT DATES (Slice B): a cert can also be marked "doesn't expire" itself (certs.no_expiry). neverExpires is the cert's
+   own flag OR its type's never_expires — the client twin of SQL cert_never_expires() (Slice A), so the badge, coverage and
+   every report agree with readiness / the radar / the rollup. */
 const CertTypesCtx = React.createContext({ types: [], typeMap: new Map(), reload: async () => {} });
 function enrichCerts(certs, typeMap) {
   return (certs || []).map((c) => {
     const t = c.certTypeId ? typeMap.get(c.certTypeId) : null;
-    return { ...c, neverExpires: !!t?.never_expires, typeName: t?.name || null, typeCategory: t?.category || null };
+    return { ...c, neverExpires: !!c.noExpiry || !!t?.never_expires, typeName: t?.name || null, typeCategory: t?.category || null };
   });
+}
+/* CERT DATES (Slice B) — the shared date inputs for the three cert forms (CertProposals, the member file's inline editor,
+   ProposeCert): an expiry that is a CHOICE — "Expires" (then a YYYY-MM month) or "Doesn't expire" (the month is disabled
+   and saved empty) — and an optional "Earned" month. The segmented look mirrors CertTypeForm's Category toggle. Values
+   are checked by certDatesError() (shared/expiry.js), the twin of update_cert's rules. */
+function CertDatesFields({ S, exp, setExp, noExpiry, setNoExpiry, achievedOn, setAchievedOn, typeNeverExpires = false }) {
+  const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
+  return (<>
+    <div style={{ ...S.field, minWidth: 0 }}>{lbl("Expiration")}
+      <div role="group" aria-label="Expiration" style={{ display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
+        {[[false, "Expires"], [true, "Doesn't expire"]].map(([v, l], i) => (
+          <button key={l} type="button" aria-pressed={noExpiry === v} onClick={() => setNoExpiry(v)}
+            style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: noExpiry === v ? FIRE.red : FIRE.card2Noir, color: noExpiry === v ? FIRE.textPrimary : FIRE.navLabel, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+        ))}
+      </div>
+    </div>
+    <label style={{ ...S.field, minWidth: 120 }}>{lbl("Expires (YYYY-MM)")}
+      <input style={{ ...FS.input, opacity: noExpiry ? 0.5 : 1 }} value={noExpiry ? "" : exp} disabled={noExpiry} onChange={(e) => setExp(e.target.value)} placeholder={noExpiry ? "—" : "2027-06"} /></label>
+    <label style={{ ...S.field, minWidth: 120 }}>{lbl("Earned (YYYY-MM, optional)")}
+      <input style={FS.input} value={achievedOn} onChange={(e) => setAchievedOn(e.target.value)} placeholder="2024-03" /></label>
+    {typeNeverExpires && !noExpiry && <div style={{ width: "100%", fontSize: 11.5, color: FIRE.textMuted }}>Its cert type doesn't expire, so it reads "Doesn't expire" whatever date is set here.</div>}
+  </>);
 }
 function certStatus(exp, neverExpires = false) {
   // Cert-status rule is ALSO replicated in SQL dept_cert_readiness() — keep in lockstep (≤3mo = EXPIRING). The window
@@ -11647,7 +11675,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const [note, setNote] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [editingCertId, setEditingCertId] = useState(null);
-  const [draft, setDraft] = useState({ name: "", exp: "" });
+  const [draft, setDraft] = useState({ name: "", exp: "", noExpiry: false, achievedOn: "" });
+  const { typeMap: certTypeMap } = React.useContext(CertTypesCtx);   // re-enrich an edited cert (its own flag OR its type)
   useEditorOpen(!!draft.name || !!draft.exp);   // half-typed cert
   const [priv, setPriv] = useState(null);        // member_private (birthday/address/joined_date) — DA/PA only
   // Probation start (member_probation, written only by set_member_probation): a real Department Admin of the
@@ -11754,24 +11783,26 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   }
   function startEdit(c) {
     setEditingCertId(c.id);
-    setDraft({ name: c.name, exp: c.exp || "" });
+    setDraft({ name: c.name, exp: c.exp || "", noExpiry: !!c.noExpiry, achievedOn: c.achievedOn || "" });
   }
   function cancelEdit() {
     setEditingCertId(null);
-    setDraft({ name: "", exp: "" });
+    setDraft({ name: "", exp: "", noExpiry: false, achievedOn: "" });
   }
   async function saveCert(c) {
     const name = draft.name.trim();
     if (!name) { notify({ kind: "error", title: "Name can't be empty", text: "Enter a name for the certification." }); return; }
-    const expTrim = draft.exp.trim();
-    if (expTrim && !validExpYM(expTrim)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+    const expTrim = draft.noExpiry ? "" : draft.exp.trim(), achTrim = draft.achievedOn.trim();
+    const dateErr = certDatesError({ exp: expTrim, noExpiry: draft.noExpiry, achievedOn: achTrim });
+    if (dateErr) { notify({ kind: "error", title: "Check the dates", text: dateErr }); return; }
     setBusyId(c.id);
-    const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null });
+    // new_achieved_on: "" clears it (NULL would mean "leave as is"); new_no_expiry always sent, so the choice is explicit
+    const { error } = await supabase.rpc("update_cert", { cert_id: c.id, new_name: name, new_exp: expTrim || null, new_no_expiry: draft.noExpiry, new_achieved_on: achTrim });
     setBusyId(null);
     if (error) { notify({ kind: "error", title: "Couldn't update the certification", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    onUpdate({ ...member, certs: member.certs.map((x) => (x.id === c.id ? { ...x, name, exp: expTrim || null } : x)) });
+    onUpdate({ ...member, certs: enrichCerts(member.certs.map((x) => (x.id === c.id ? { ...x, name, exp: expTrim || null, noExpiry: draft.noExpiry, achievedOn: achTrim || null } : x)), certTypeMap) });
     setEditingCertId(null);
-    setDraft({ name: "", exp: "" });
+    setDraft({ name: "", exp: "", noExpiry: false, achievedOn: "" });
   }
   // ---- facelift: derived display numbers (all from data already on this screen) ----
   const initials = (member.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -11839,11 +11870,12 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
               <span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} title={c.st.label} />
               {assign && editingCertId === c.id ? (<>
                 <label style={{ ...S.field, flex: 1, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></label>
-                <label style={{ ...S.field, minWidth: 120 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={draft.exp} onChange={(e) => setDraft((d) => ({ ...d, exp: e.target.value }))} placeholder="2027-06" /></label>
+                <CertDatesFields S={S} exp={draft.exp} setExp={(v) => setDraft((d) => ({ ...d, exp: v }))} noExpiry={draft.noExpiry} setNoExpiry={(v) => setDraft((d) => ({ ...d, noExpiry: v }))}
+                  achievedOn={draft.achievedOn} setAchievedOn={(v) => setDraft((d) => ({ ...d, achievedOn: v }))} typeNeverExpires={!!(c.certTypeId && certTypeMap.get(c.certTypeId)?.never_expires)} />
                 <button style={{ ...FS.btnPrimary, flex: "0 0 auto" }} disabled={busyId === c.id} onClick={() => saveCert(c)}>{busyId === c.id ? "Saving…" : "Save"}</button>
                 <button style={{ ...FS.btn, padding: "6px 10px", fontSize: 12.5 }} disabled={busyId === c.id} onClick={cancelEdit}>Cancel</button>
               </>) : (<>
-                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span>{c.typeName && <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>Type: <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{c.typeName}</b>{c.neverExpires ? " · doesn't expire" : ""}</span>}</span></div>
+                <div style={{ flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", fontSize: 12.5, display: "flex", alignItems: "center", gap: 9 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: CERT_FIRE[c.st.label], flexShrink: 0 }} /><span style={{ minWidth: 0 }}><span style={{ fontWeight: 600, color: FIRE.textPrimary }}>{c.name}</span>{c.typeName && <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>Type: <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{c.typeName}</b>{c.neverExpires ? " · doesn't expire" : ""}</span>}{ymLabel(c.achievedOn) && <span style={{ display: "block", fontSize: 11, color: FIRE.textMuted, marginTop: 1 }}>Earned {ymLabel(c.achievedOn)}</span>}</span></div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", flexShrink: 0, maxWidth: "100%" }}>
                   <span style={{ fontSize: 10.5, color: c.st.rank === 2 ? FIRE.textMuted : CERT_FIRE[c.st.label], fontWeight: c.st.rank === 2 ? 400 : 600, marginRight: 4 }}>{expPhrase(c.exp, c.neverExpires)}</span>
                   {/* only when a proof is on file — a leader-entered cert legitimately has none */}
@@ -12119,14 +12151,16 @@ function ProposeCert({ S, role, member, notify }) {
   const [open, setOpen] = useState(false);
   const [cName, setCName] = useState("");
   const [cExp, setCExp] = useState("");        // "YYYY-MM" string, matches certs.exp
+  const [cNoExpiry, setCNoExpiry] = useState(false); const [cAchieved, setCAchieved] = useState("");   // cert dates (Slice B)
   const [cNote, setCNote] = useState("");
   const [cFile, setCFile] = useState(null);
   const [busy, setBusy] = useState(false);
 
   async function propose() {
     if (!cName.trim()) { notify({ kind: "error", title: "Certification needs a name", text: "Enter the certification name before submitting." }); return; }
-    const exp = cExp.trim();
-    if (exp && !validExpYM(exp)) { notify({ kind: "error", title: "Check the expiration format", text: "Expiration must be a real month as YYYY-MM (e.g. 2027-06)." }); return; }
+    const exp = cNoExpiry ? "" : cExp.trim(), achieved = cAchieved.trim();
+    const dateErr = certDatesError({ exp, noExpiry: cNoExpiry, achievedOn: achieved });
+    if (dateErr) { notify({ kind: "error", title: "Check the dates", text: dateErr }); return; }
     if (!cFile) { notify({ kind: "error", title: "Proof required", text: "Attach a PDF or photo of the certification." }); return; }
     setBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -12140,6 +12174,8 @@ function ProposeCert({ S, role, member, notify }) {
       member_id: member.id,
       name: cName.trim(),
       exp: exp || null,
+      no_expiry: cNoExpiry,
+      achieved_on: achieved || null,
       source: "manual",
       note: cNote.trim() || null,
       proposed_by: user.id,
@@ -12149,7 +12185,7 @@ function ProposeCert({ S, role, member, notify }) {
     const { data, error } = await supabase.from("cert_submissions").insert(row).select().single();
     setBusy(false);
     if (error || !data) { notify({ kind: "error", title: "Couldn't submit", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setCName(""); setCExp(""); setCNote(""); setCFile(null); setOpen(false);
+    setCName(""); setCExp(""); setCNoExpiry(false); setCAchieved(""); setCNote(""); setCFile(null); setOpen(false);
     notify({ kind: "success", text: "Submitted for review." });
   }
 
@@ -12157,7 +12193,7 @@ function ProposeCert({ S, role, member, notify }) {
   return open ? (
     <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label style={{ ...S.field, flex: 1, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={cName} onChange={(e) => setCName(e.target.value)} /></label>
-      <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Expires (YYYY-MM)</span><input style={FS.input} value={cExp} onChange={(e) => setCExp(e.target.value)} placeholder="2027-06" /></label>
+      <CertDatesFields S={S} exp={cExp} setExp={setCExp} noExpiry={cNoExpiry} setNoExpiry={setCNoExpiry} achievedOn={cAchieved} setAchievedOn={setCAchieved} />
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Note (optional)</span><input style={FS.input} value={cNote} onChange={(e) => setCNote(e.target.value)} /></label>
       <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Proof (required)</span><input type="file" accept=".pdf,image/*" onChange={(e) => setCFile(e.target.files?.[0] || null)} style={{ ...FS.input, padding: "6px 8px", fontSize: 12 }} /></label>
       <button style={{ ...FS.btnPrimary, flex: "0 0 auto", opacity: (busy || !cFile || !cName.trim()) ? 0.55 : 1 }} disabled={busy || !cFile || !cName.trim()} onClick={propose}>{busy ? "Submitting…" : "Submit for review"}</button>
@@ -12758,7 +12794,7 @@ function RosterPending({ S, members, notify }) {
             <span aria-hidden="true" style={{ width: 38, height: 38, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 13.5, color: FIRE.amberText, background: `${FIRE.amberText}1A`, border: `1px solid ${FIRE.amberText}55` }}>{initials(who)}</span>
             <div style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}>{who}</div>
-              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 1 }}>{r.name} · {r.exp ? expPhrase(r.exp) : "no expiry"}</div>
+              <div style={{ fontSize: 12.5, color: FIRE.textSecondary, marginTop: 1 }}>{r.name} · {expPhrase(r.exp, !!r.no_expiry)}{ymLabel(r.achieved_on) ? ` · earned ${ymLabel(r.achieved_on)}` : ""}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
                 {r.proof_path
                   ? <button type="button" disabled={busy} onClick={() => viewProof(r)} title="View proof" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: FIRE.blueText, background: "rgba(91,155,213,.1)", border: "1px solid rgba(91,155,213,.35)", borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: "inherit", maxWidth: 220 }}><FileText size={12} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.proof_path || "").split("/").pop()}</span></button>

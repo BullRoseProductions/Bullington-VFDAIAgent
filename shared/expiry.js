@@ -23,6 +23,26 @@ export function validExpYM(exp) {
   return y >= 1900 && mo >= 1 && mo <= 12;
 }
 
+// A real "YYYY-MM" -> "Mar 2024" (the earned month on a cert row). Anything else -> null.
+export function ymLabel(ym) {
+  if (!validExpYM(ym)) return null;
+  const [y, m] = ym.split("-").map(Number);
+  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]} ${y}`;
+}
+
+/* CERT DATES (Slice B) — the client twin of update_cert's rules (Slice A, D1): the expiry is a real month unless the cert
+ * doesn't expire; the optional achievement month is a real month, not in the future, and not after the expiry. Returns the
+ * first problem in the server's own words, or null. `today` is injectable for tests. */
+export function certDatesError({ exp, noExpiry, achievedOn }, today = new Date()) {
+  const e = String(exp || "").trim(), a = String(achievedOn || "").trim();
+  if (!noExpiry && e && !validExpYM(e)) return "Expiration must be a real month as YYYY-MM (e.g. 2027-06).";
+  if (a && !validExpYM(a)) return "Achievement date must be a real month as YYYY-MM (e.g. 2024-03).";
+  const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  if (a && a > thisMonth) return "Achievement date can't be in the future.";
+  if (a && !noExpiry && e && a > e) return "Achievement date can't be after the expiration.";
+  return null;
+}
+
 // "YYYY-MM…" -> a month index (y*12 + m). Anything else -> NaN.
 export function monthIndex(ymd) {
   const m = /^(\d{4})-(\d{2})/.exec(String(ymd || ""));
