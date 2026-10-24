@@ -1,5 +1,9 @@
 -- =====================================================================
 -- RETEST for training_officers (DRAFT, not applied) — run AFTER the migration, separately.
+-- RAN on live 2026-10-24: 22 passed, 0 failed, 5 skipped — S0; Indian Harbor + Lipan + North Hood T1–T5 O1 X1 (QR still opens for a
+-- removed Officer in all three); P1 skipped in all three — both live Project Admins are also Department Admins, so no PA-only member
+-- exists (the PA-only path is proven in the PGlite dry run); Demo + Granbury skip (no plain member). Rollback confirmed after:
+-- training_officer = the 8 seed rows only, no RETEST sessions / categories / plans.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). Fixtures
 -- (a session, a meeting, a category, a drill plan, a roster mark, assignments) are written by the people under test and
 -- vanish with the rollback. The final RAISE is the report — the "ERROR" IS the report.

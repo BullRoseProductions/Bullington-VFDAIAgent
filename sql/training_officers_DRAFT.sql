@@ -1,5 +1,7 @@
 -- =====================================================================
--- TRAINING OVERHAUL · SLICE 1 (DB): the Training Officers registry — DRAFT, not reviewed, not applied.
+-- TRAINING OVERHAUL · SLICE 1 (DB): the Training Officers registry — Review PASS (ba051e3). APPLIED on live 2026-10-24; state row:
+-- to_rls true · to_policies 1 · seeded 8 (Indian Harbor 1 · Lipan 2 · North Hood 5) · gate_fns 4 · repointed 13 · canmanage_ops_md5 92fa1803 ·
+-- total_policies 173 · locked_token_fns 17.
 -- Order: claude/B4C_TrainingOverhaul_Slice1_TrainingOfficers_BuildOrder.md · Step 0 PASS:
 -- claude/B4C_TrainingOverhaul_Slice1_TrainingOfficers_Step0_ReviewRecord.md (decisions 1–8 locked). Built on live
 -- (Step 0 read 2026-10-24: 172 policies, 17 locked-token functions — docs/review/training_officers_STEP0_OUTPUT.json).
