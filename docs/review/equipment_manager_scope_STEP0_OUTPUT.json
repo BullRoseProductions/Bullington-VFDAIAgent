@@ -1,0 +1,204 @@
+{
+ "gates": {
+  "my_member_id()": "3f66369c8af7bc07ec59831af6536fee",
+  "is_dept_admin()": "c692e44f62923d2bf4c1a39a21a87bf7",
+  "my_department_id()": "87f546659c3804a943b48e419e017f18",
+  "is_training_officer()": "248392a51fe913771f725b2a51013302"
+ },
+ "views": null,
+ "managers": [
+  {
+   "dept": "North Hood County Volunteer Fire Department",
+   "member": "3eab1fe0-512d-49a3-b0b8-0b939ea9dab4",
+   "email_rows": 1,
+   "other_depts": null
+  },
+  {
+   "dept": "North Hood County Volunteer Fire Department",
+   "member": "760c28e2-0541-4e33-800a-9f179c51f597",
+   "email_rows": 1,
+   "other_depts": null
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "member": "0fa6e912-7126-446d-a2e1-5f28016d9b75",
+   "email_rows": 1,
+   "other_depts": null
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "member": "3f846eda-0cb4-4644-928a-7ad139759ff2",
+   "email_rows": 1,
+   "other_depts": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "member": "25f4a45b-3109-408e-ad08-49094ce9051b",
+   "email_rows": 1,
+   "other_depts": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "member": "359b0efd-b785-4817-9fdd-17b458ad5009",
+   "email_rows": 1,
+   "other_depts": null
+  }
+ ],
+ "policies": [
+  {
+   "cmd": "ALL",
+   "name": "da or manager manage equipment",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "table": "equipment",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "UPDATE",
+   "name": "leadership correct custody",
+   "qual": "((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id()))",
+   "roles": "{authenticated}",
+   "table": "equipment_custody",
+   "with_check": "((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "SELECT",
+   "name": "managers read all custody",
+   "qual": "((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id()))",
+   "roles": "{authenticated}",
+   "table": "equipment_custody",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "parties read handoffs",
+   "qual": "((from_member_id = my_member_id()) OR (to_member_id = my_member_id()) OR ((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id())))",
+   "roles": "{authenticated}",
+   "table": "equipment_handoff",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "parties read handoff items",
+   "qual": "(EXISTS ( SELECT 1\n   FROM equipment_handoff h\n  WHERE ((h.id = equipment_handoff_items.handoff_id) AND ((h.from_member_id = my_member_id()) OR (h.to_member_id = my_member_id()) OR ((is_equipment_manager() OR is_dept_admin()) AND (h.department_id = my_department_id()))))))",
+   "roles": "{authenticated}",
+   "table": "equipment_handoff_items",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "managers read batches",
+   "qual": "((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id()))",
+   "roles": "{authenticated}",
+   "table": "equipment_issue_batch",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "managers read issues",
+   "qual": "((is_equipment_manager() OR is_dept_admin()) AND (department_id = my_department_id()))",
+   "roles": "{authenticated}",
+   "table": "equipment_issues",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "da or manager manage equipment photos",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "table": "equipment_photos",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "ALL",
+   "name": "da or manager manage equipment types",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "table": "equipment_type",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  }
+ ],
+ "functions": {
+  "is_training_officer()": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_officer()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers — an ACTIVE registry row for the caller's member row in the caller's department. Department-scoped\n  -- (unlike is_equipment_manager()): an officer of one department is not one in another.\n    select exists (\n      select 1 from public.training_officer t\n       where t.member_id = public.my_member_id()\n         and t.department_id = public.my_department_id()\n         and t.removed_at is null\n    );\n  $function$\n",
+   "md5": "248392a51fe913771f725b2a51013302",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": false
+  },
+  "equipment_manager_cap()": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.equipment_manager_cap()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  if (select count(*) from public.equipment_manager\n        where department_id = new.department_id and removed_at is null) >= 2 then\n    raise exception 'A department can have at most two equipment managers. Remove one before assigning another.';\n  end if;\n  return new;\nend;\n$function$\n",
+   "md5": "071eb5e21d240b5c4cfe25cf4cd8b347",
+   "secdef": true,
+   "calls_fn": false,
+   "inline_table": true
+  },
+  "mark_equipment_lost(uuid)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.mark_equipment_lost(p_equipment_id uuid)\n RETURNS equipment_custody\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_member  public.members;\n  v_custody public.equipment_custody;\nbegin\n  -- identity + manager/DA gate\n  select * into v_member from public.members where id = public.my_member_id();\n  if v_member.id is null then\n    raise exception 'No member record for the signed-in user';\n  end if;\n  if not (public.is_equipment_manager() or public.is_dept_admin()) then\n    raise exception 'Only an equipment manager or department admin can mark an item lost';\n  end if;\n\n  -- lock the open custody period\n  select * into v_custody\n    from public.equipment_custody\n   where equipment_id = p_equipment_id and closed_at is null\n   for update;\n  if v_custody.id is null then\n    raise exception 'That item has no open custody period to mark lost';\n  end if;\n\n  -- same-department guard\n  if v_custody.department_id <> v_member.department_id then\n    raise exception 'Not authorized: this item belongs to another department';\n  end if;\n\n  -- close the period as lost; the closed row preserves who held it (holder_* snapshots)\n  update public.equipment_custody\n     set closed_at      = now(),\n         close_action   = 'marked_lost',\n         closed_by      = v_member.id,\n         closed_by_name = v_member.name\n   where id = v_custody.id\n   returning * into v_custody;\n\n  -- the unit is gone: status 'lost', holder cleared (condition left as-is)\n  update public.equipment\n     set status              = 'lost',\n         current_holder_id   = null,\n         current_holder_name = null\n   where id = p_equipment_id;\n\n  return v_custody;\nend;\n$function$\n",
+   "md5": "ba4b27a002206d94ee94c0f872f870db",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": false
+  },
+  "assign_equipment_manager(uuid)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.assign_equipment_manager(p_member_id uuid)\n RETURNS equipment_manager\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_actor  public.members;\n  v_target public.members;\n  v_row    public.equipment_manager;\nbegin\n  select * into v_actor from public.members where id = public.my_member_id();\n  if v_actor.id is null then raise exception 'No member record for the signed-in user'; end if;\n  if not public.is_dept_admin() then\n    raise exception 'Only a Department Admin can assign equipment managers';\n  end if;\n\n  select * into v_target from public.members where id = p_member_id;\n  if v_target.id is null then raise exception 'Member not found'; end if;\n  if v_target.department_id <> v_actor.department_id then\n    raise exception 'Not authorized: that member belongs to another department';\n  end if;\n\n  if (select count(*) from public.equipment_manager\n        where department_id = v_actor.department_id and removed_at is null) >= 2 then\n    raise exception 'A department can have at most two equipment managers. Remove one before assigning another.';\n  end if;\n  if exists (select 1 from public.equipment_manager\n               where department_id = v_actor.department_id and member_id = p_member_id and removed_at is null) then\n    raise exception 'That member is already an equipment manager';\n  end if;\n\n  insert into public.equipment_manager\n    (department_id, member_id, assigned_by, assigned_by_name, assigned_at)\n  values\n    (v_actor.department_id, p_member_id, v_actor.id, v_actor.name, now())\n  returning * into v_row;\n  return v_row;\nend;\n$function$\n",
+   "md5": "9087db450904ed82f34d38e5f8066282",
+   "secdef": true,
+   "calls_fn": false,
+   "inline_table": true
+  },
+  "remove_equipment_manager(uuid)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.remove_equipment_manager(p_member_id uuid)\n RETURNS equipment_manager\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_actor public.members;\n  v_row   public.equipment_manager;\nbegin\n  select * into v_actor from public.members where id = public.my_member_id();\n  if v_actor.id is null then raise exception 'No member record for the signed-in user'; end if;\n  if not public.is_dept_admin() then\n    raise exception 'Only a Department Admin can remove equipment managers';\n  end if;\n\n  select * into v_row from public.equipment_manager\n    where department_id = v_actor.department_id and member_id = p_member_id and removed_at is null\n    for update;\n  if v_row.id is null then raise exception 'That member is not an active equipment manager'; end if;\n\n  update public.equipment_manager\n     set removed_at = now(), removed_by = v_actor.id, removed_by_name = v_actor.name\n   where id = v_row.id\n   returning * into v_row;\n  return v_row;\nend;\n$function$\n",
+   "md5": "080d35076a1b6a0ef028ca83bb5ed45c",
+   "secdef": true,
+   "calls_fn": false,
+   "inline_table": true
+  },
+  "recover_equipment(uuid,text,text)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.recover_equipment(p_equipment_id uuid, p_condition text DEFAULT 'Needs attention'::text, p_photo_path text DEFAULT NULL::text)\n RETURNS equipment_custody\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_member  public.members;\n  v_custody public.equipment_custody;\n  v_cond    text := coalesce(nullif(btrim(p_condition), ''), 'Needs attention');\n  v_photo   text := nullif(btrim(coalesce(p_photo_path, '')), '');\nbegin\n  -- identity + manager/DA gate\n  select * into v_member from public.members where id = public.my_member_id();\n  if v_member.id is null then\n    raise exception 'No member record for the signed-in user';\n  end if;\n  if not (public.is_equipment_manager() or public.is_dept_admin()) then\n    raise exception 'Only an equipment manager or department admin can recover an item';\n  end if;\n\n  -- recovered gear is condition-UNVERIFIED until inspected (mirrors confirm_return)\n  if v_cond not in ('Serviceable', 'Needs attention', 'Out of service') then\n    raise exception 'Invalid condition: %', v_cond;\n  end if;\n\n  -- lock the open custody period\n  select * into v_custody\n    from public.equipment_custody\n   where equipment_id = p_equipment_id and closed_at is null\n   for update;\n  if v_custody.id is null then\n    raise exception 'That item has no open custody period to recover';\n  end if;\n\n  -- same-department guard\n  if v_custody.department_id <> v_member.department_id then\n    raise exception 'Not authorized: this item belongs to another department';\n  end if;\n\n  -- close the period as a manager recovery (distinct from a clean 'returned')\n  update public.equipment_custody\n     set closed_at          = now(),\n         close_action       = 'manager_recovery',\n         condition_at_close = v_cond,\n         closed_by          = v_member.id,\n         closed_by_name     = v_member.name\n   where id = v_custody.id\n   returning * into v_custody;\n\n  -- reset the item: back in inventory, holder cleared, condition = the recorded value\n  update public.equipment\n     set status              = 'in_inventory',\n         condition           = v_cond,\n         current_holder_id   = null,\n         current_holder_name = null\n   where id = p_equipment_id;\n\n  -- optional condition-at-close photo, linked to THIS custody period\n  if v_photo is not null then\n    insert into public.equipment_photos\n      (department_id, equipment_id, custody_id, kind, storage_path, caption, sort_order, uploaded_by)\n    values\n      (v_member.department_id, p_equipment_id, v_custody.id, 'condition', v_photo, '', 2, v_member.id);\n  end if;\n\n  return v_custody;\nend;\n$function$\n",
+   "md5": "8d44ca03d630aa378d79e4bf36805aa3",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": false
+  },
+  "resolve_equipment_issue(uuid,text)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.resolve_equipment_issue(p_issue_id uuid, p_note text DEFAULT NULL::text)\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_member public.members;\n  v_id     uuid;\nbegin\n  if not (is_equipment_manager() or is_dept_admin()) then raise exception 'Not authorized'; end if;\n  select * into v_member from public.members where id = my_member_id();\n  update public.equipment_issues\n     set resolved_at = now(), resolved_by = v_member.id, resolved_by_name = v_member.name,\n         resolution_note = nullif(btrim(coalesce(p_note, '')), '')\n   where id = p_issue_id and department_id = my_department_id() and resolved_at is null\n  returning id into v_id;\n  if v_id is null then raise exception 'Issue not found or already resolved.'; end if;\n  return v_id;\nend;\n$function$\n",
+   "md5": "3c94c249269d35ce28d102efbb6be715",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": false
+  },
+  "confirm_equipment_return(uuid,text,text)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.confirm_equipment_return(p_equipment_id uuid, p_condition text DEFAULT 'Needs attention'::text, p_photo_path text DEFAULT NULL::text)\n RETURNS equipment_custody\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_member  public.members;\n  v_custody public.equipment_custody;\n  v_cond    text := coalesce(nullif(btrim(p_condition), ''), 'Needs attention');\n  v_photo   text := nullif(btrim(coalesce(p_photo_path, '')), '');\nbegin\n  select * into v_member from public.members where id = public.my_member_id();\n  if v_member.id is null then\n    raise exception 'No member record for the signed-in user';\n  end if;\n  if not (public.is_equipment_manager() or public.is_dept_admin()) then\n    raise exception 'Only an equipment manager or department admin can confirm a return';\n  end if;\n  if v_cond not in ('Serviceable', 'Needs attention', 'Out of service') then\n    raise exception 'Invalid condition: %', v_cond;\n  end if;\n  select * into v_custody\n    from public.equipment_custody\n   where equipment_id = p_equipment_id and closed_at is null\n   for update;\n  if v_custody.id is null then\n    raise exception 'That item has no open custody period to confirm';\n  end if;\n  if v_custody.department_id <> v_member.department_id then\n    raise exception 'Not authorized: this item belongs to another department';\n  end if;\n  update public.equipment_custody\n     set closed_at          = now(),\n         close_action       = 'returned',\n         condition_at_close = v_cond,\n         closed_by          = v_member.id,\n         closed_by_name     = v_member.name\n   where id = v_custody.id\n   returning * into v_custody;\n  update public.equipment\n     set status              = 'in_inventory',\n         condition           = v_cond,\n         current_holder_id   = null,\n         current_holder_name = null\n   where id = p_equipment_id;\n  if v_photo is not null then\n    insert into public.equipment_photos\n      (department_id, equipment_id, custody_id, kind, storage_path, caption, sort_order, uploaded_by)\n    values\n      (v_member.department_id, p_equipment_id, v_custody.id, 'condition', v_photo, '', 2, v_member.id);\n  end if;\n  return v_custody;\nend;\n$function$\n",
+   "md5": "baddaa8b2239839e008d6f9776ce5b0e",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": false
+  },
+  "issue_equipment_batch(uuid,uuid[],text,text,uuid,text)": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.issue_equipment_batch(p_member_id uuid, p_equipment_ids uuid[], p_signature_data text, p_signed_name text, p_witness_member_id uuid DEFAULT NULL::uuid, p_witness_signature text DEFAULT NULL::text)\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_actor   public.members;\n  v_target  public.members;\n  v_witness public.members;\n  v_batch   uuid;\n  v_eid     uuid;\n  v_e       public.equipment;\n  v_ename   text;\n  v_count   int := 0;\nbegin\n  select * into v_actor from public.members where id = public.my_member_id();\n  if v_actor.id is null then raise exception 'No member record for the signed-in user'; end if;\n  if v_actor.status = 'Inactive' then raise exception 'Inactive members cannot issue equipment'; end if;\n\n  if not (public.is_equipment_manager() or public.is_dept_admin()) then\n    raise exception 'Only an assigned equipment manager or a Department Admin can issue equipment';\n  end if;\n\n  if coalesce(btrim(p_signature_data), '') = '' then raise exception 'A signature is required to issue equipment'; end if;\n  if coalesce(btrim(p_signed_name), '')    = '' then raise exception 'The signer''s name is required'; end if;\n\n  select * into v_target from public.members where id = p_member_id;\n  if v_target.id is null then raise exception 'Recipient not found'; end if;\n  if v_target.department_id <> v_actor.department_id then raise exception 'Not authorized: that member belongs to another department'; end if;\n  if v_target.status = 'Inactive' then raise exception 'Cannot issue equipment to an inactive member'; end if;\n\n  if p_member_id = v_actor.id then\n    if coalesce(btrim(p_witness_signature), '') = '' then raise exception 'Issuing to yourself requires a second (witness) signature'; end if;\n    select * into v_witness from public.members where id = p_witness_member_id;\n    if v_witness.id is null then raise exception 'A witness must be identified for a self-issue'; end if;\n    if v_witness.id = v_actor.id then raise exception 'The witness must be someone other than you'; end if;\n    if v_witness.department_id <> v_actor.department_id then raise exception 'The witness must be in your department'; end if;\n    if not (exists (select 1 from public.equipment_manager em where em.member_id = v_witness.id and em.removed_at is null)\n            or (v_witness.access && array['Department Admin','Project Admin']::text[]))\n    then raise exception 'The witness must be another equipment manager or a Department Admin'; end if;\n  end if;\n\n  if p_equipment_ids is null or array_length(p_equipment_ids, 1) is null then raise exception 'No items to issue'; end if;\n\n  insert into public.equipment_issue_batch\n    (department_id, member_id, signed_name, signed_at, signature_data, witness_signature, witness_name, item_count, issued_by, issued_by_name)\n  values\n    (v_actor.department_id, p_member_id, btrim(p_signed_name), now(), p_signature_data,\n     nullif(btrim(coalesce(p_witness_signature,'')), ''), v_witness.name, 0, v_actor.id, v_actor.name)\n  returning id into v_batch;\n\n  foreach v_eid in array p_equipment_ids loop\n    select * into v_e from public.equipment where id = v_eid for update;\n    if v_e.id is null then raise exception 'Equipment item not found'; end if;\n    if v_e.department_id <> v_actor.department_id then raise exception 'Not authorized: an item belongs to another department'; end if;\n    if v_e.status <> 'in_inventory' then raise exception 'An item is not available to issue (currently %). Nothing was issued.', v_e.status; end if;\n\n    select coalesce(et.name, 'Equipment')\n           || case when coalesce(btrim(v_e.serial_number),'') <> '' then ' · SN ' || v_e.serial_number\n                   when coalesce(btrim(v_e.asset_number),'')  <> '' then ' · Asset ' || v_e.asset_number\n                   else '' end\n      into v_ename\n      from public.equipment_type et where et.id = v_e.equipment_type_id;\n\n    insert into public.equipment_custody\n      (department_id, equipment_id, equipment_name, holder_member_id, holder_name,\n       opened_at, opened_by, opened_by_name, open_action, batch_id, condition_at_open)\n    values\n      (v_actor.department_id, v_e.id, coalesce(v_ename, 'Equipment'), p_member_id, v_target.name,\n       now(), v_actor.id, v_actor.name, 'issue', v_batch, v_e.condition);\n\n    update public.equipment\n       set status = 'held', current_holder_id = p_member_id, current_holder_name = v_target.name\n     where id = v_e.id;\n\n    v_count := v_count + 1;\n  end loop;\n\n  update public.equipment_issue_batch set item_count = v_count where id = v_batch;\n  return v_batch;\nend;\n$function$\n",
+   "md5": "502d66a724552cf248d62859d1cc5760",
+   "secdef": true,
+   "calls_fn": true,
+   "inline_table": true
+  }
+ },
+ "total_policies": 173,
+ "locked_token_fns": 17,
+ "dept_mismatch_rows": 0,
+ "is_equipment_manager": {
+  "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+  "def": "CREATE OR REPLACE FUNCTION public.is_equipment_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1\n    from public.equipment_manager em\n    join public.members m on m.id = em.member_id\n    where lower(m.email) = lower(auth.email())\n      and m.status in ('Active','Probationary')\n      and em.removed_at is null\n  );\n$function$\n",
+  "md5": "c4d54ae10cb936dcc5f185ae38ec5fcd",
+  "volatile": "s"
+ }
+}
