@@ -1,5 +1,9 @@
 -- =====================================================================
--- CERT DATES — SLICE A (DB): certs.achieved_on + certs.no_expiry (DRAFT — for gate review, NOT applied).
+-- APPLIED on live 2026-10-24 — this file as reviewed at f27c525, byte-for-byte (sha256 c3243382…); state row:
+-- columns_ok · checks_ok · helper_ok · grants_ok true · update_cert_args 5 · update_cert_old_gone true · no_expiry_sites
+-- readiness 1 · expiration_rows 1 · rollup 5 · radar 2 · probation 1 · update_cert_md5 88ae9180 · helper_md5 7c4083b5 ·
+-- existing_defaults 0 · certs_total 179 · total_policies 173 · locked_token_fns 17.
+-- CERT DATES — SLICE A (DB): certs.achieved_on + certs.no_expiry (Review PASS).
 -- Concept claude/B4C_CertDates_AchievedOn_NoExpiry_Concept.md · Step 0 PASS claude/B4C_CertDates_SliceA_Step0_ReviewRecord.md
 -- (audit claude/B4C_CertDates_SliceA_Step0.md, live evidence docs/review/cert_dates_STEP0_OUTPUT.json — 179 certs, 0 cert
 -- types, 0 malformed, 173 policies, 17 locked-token functions; the 7 functions below = the post-malformed-fix md5s).

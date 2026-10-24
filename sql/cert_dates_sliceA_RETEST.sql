@@ -1,5 +1,10 @@
 -- =====================================================================
--- RETEST for cert_dates_sliceA (DRAFT, not applied) — run AFTER sql/cert_dates_sliceA_DRAFT.sql, separately.
+-- RAN on live 2026-10-24 (as at f27c525, sha256 b2cef174…): 31 passed, 0 failed, 7 skipped — S0 S1 L1 (all 179 certs) +
+-- N1 (readiness / rollup / radar / expiration_rows) U1 A1 in all 5 departments, P1 in Indian Harbor / Lipan / North Hood.
+-- Skips: N2 ×5 — live onboarding_items.approver_kind is NOT NULL and the clone nulls it (a RETEST gap, not a migration one;
+-- the dry run's N2 is the proof); P1 ×2 — Demo and Granbury have no plain member with a unique email + auth user.
+-- Rolled back by the SENTINEL.
+-- RETEST for cert_dates_sliceA — run AFTER sql/cert_dates_sliceA_DRAFT.sql, separately.
 -- NOTHING CHANGES: each department's checks run inside a sub-block that ends in RAISE 'SENTINEL' (rolled back). The final
 -- RAISE is the report — the "ERROR" IS the report.
 --   S0 (once) the columns + the two CHECKs exist exactly; cert_never_expires() follows the rule; update_cert is the 5-arg
