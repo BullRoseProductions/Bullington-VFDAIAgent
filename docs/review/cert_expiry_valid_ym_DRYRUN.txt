@@ -8,16 +8,50 @@ approve_cert_submission(uuid): live 5a1a89ee0cc2254ad4347f27a141b94e · here 5a1
 
 CLIENT <-> SQL (validExpYM vs valid_exp_ym, 30 inputs incl. NULL, full-width and Arabic-Indic digits): AGREE on all
 
+CLIENT <-> SQL STATUS (real certStatus vs dept_cert_readiness + expiration_rows, 32 certs): AGREE on all
+  NULL: client no_date · readiness no_date · expiration_rows no_date
+  "": client no_date · readiness no_date · expiration_rows no_date
+  "2026-09-15": client no_date · readiness no_date · expiration_rows no_date
+  "0000-00": client no_date · readiness no_date · expiration_rows no_date
+  "0000-01": client no_date · readiness no_date · expiration_rows no_date
+  "2026-00": client no_date · readiness no_date · expiration_rows no_date
+  "2026-13": client no_date · readiness no_date · expiration_rows no_date
+  "1899-12": client no_date · readiness no_date · expiration_rows no_date
+  "TBD": client no_date · readiness no_date · expiration_rows no_date
+  "2026-07": client expired · readiness expired · expiration_rows expired
+  "2026-09": client expired · readiness expired · expiration_rows expired
+  "2026-10": client expiring · readiness expiring · expiration_rows soon
+  "2026-11": client expiring · readiness expiring · expiration_rows current
+  "2027-01": client expiring · readiness expiring · expiration_rows current
+  "2027-02": client current · readiness current · expiration_rows current
+  "2028-10": client current · readiness current · expiration_rows current
+  never-expires NULL: client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-09-15": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "0000-00": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "0000-01": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-00": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-13": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "1899-12": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "TBD": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-07": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-09": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-10": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2026-11": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2027-01": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2027-02": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+  never-expires "2028-10": client no_expiry · readiness no_expiry · expiration_rows no_expiry
+
 RETEST BEFORE THE FIX (must fail): function public.valid_exp_ym(text) does not exist
 PROBE BEFORE (the bug): North Hood readiness expired 1 · no_date 1 · rollup expired 1 · expiration_rows '0000-00' no_date · '0000-01' expired
 PROBE AFTER:            North Hood readiness expired 0 · no_date 2 · rollup expired 0 · expiration_rows '0000-00' no_date · '0000-01' no_date
 
-APPLY — state: [{"helper_ok":true,"helper_inlinable":true,"grants_ok":true,"sites_repointed":10,"old_tests_left":0,"update_refuses":true,"approve_clears":true,"helper_md5":"51b8cde1","malformed_certs":7,"certs_total":11,"total_policies":6,"locked_token_fns":1}]
+APPLY — state: [{"helper_ok":true,"helper_inlinable":true,"grants_ok":true,"sites_repointed":10,"old_tests_left":0,"update_refuses":true,"approve_clears":true,"helper_md5":"51b8cde1","demo_values":"2026-09,2026-12,2027-03,2027-05,2027-06,2028-01","north_hood_exp":"NULL","malformed_certs":0,"certs_total":11,"total_policies":6,"locked_token_fns":1}]
 re-run -> Precondition failed: public.valid_exp_ym(text) already exists — already applied. Nothing changed.
 helper grants: {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} · plan: Aggregate / Output: count(*) / ->  Seq Scan on public.certs c / Output: id, department_id, member_id, name, exp, created_at, proof_path, cert_type_id / Filter: COALESCE((c.exp ~ '^(19|[2-9][0-9])[0-9]{2}-(0[1-9]|1[0-2])$'::text), false)
 
 RETEST AFTER THE FIX:
-24 passed, 0 failed, 0 skipped
+35 passed, 0 failed, 0 skipped
 PASS  S0 valid_exp_ym(): the validExpYM truth table (19 cases, NULL -> false); IMMUTABLE, invoker, no SET, inlined in the plan; authenticated-only
 PASS  S1 the 8 reviewed md5s; no shape-only / year-less cert regex left
 PASS  L1 live: all 11 dated-type certs on the honest rosters read no_date exactly when the exp is not a valid month
@@ -27,6 +61,7 @@ PASS  L1 live: all 11 dated-type certs on the honest rosters read no_date exactl
    PASS  G3 radar: expired +1 / expiring +1 — garbage counted nowhere, no error
    PASS  G4 expiration_rows: the 9 garbage rows no_date; past expired; next month dated, not expired; a year out current
    PASS  G5 probation: '2026-13' + '0000-01' alone = missing; + a valid month a year out = current
+   PASS  G6 never-expires wins: '0000-00' and a real past month of that type read no_expiry (readiness +2 no_expiry, 0 expired / no_date; expiration_rows no_expiry)
    PASS  U1 update_cert: 7 malformed refused with the client's message; '2027-06' stored; '' and NULL clear to NULL
    PASS  A1 approve: approved; 2027-06->2027-06 0000-00->NULL 2026-09-15->NULL ''->NULL (malformed cleared, valid kept)
 — Indian Harbor Volunteer Fire Department
@@ -35,6 +70,7 @@ PASS  L1 live: all 11 dated-type certs on the honest rosters read no_date exactl
    PASS  G3 radar: expired +1 / expiring +1 — garbage counted nowhere, no error
    PASS  G4 expiration_rows: the 9 garbage rows no_date; past expired; next month dated, not expired; a year out current
    PASS  G5 probation: '2026-13' + '0000-01' alone = missing; + a valid month a year out = current
+   PASS  G6 never-expires wins: '0000-00' and a real past month of that type read no_expiry (readiness +2 no_expiry, 0 expired / no_date; expiration_rows no_expiry)
    PASS  U1 update_cert: 7 malformed refused with the client's message; '2027-06' stored; '' and NULL clear to NULL
    PASS  A1 approve: approved; 2027-06->2027-06 0000-00->NULL 2026-09-15->NULL ''->NULL (malformed cleared, valid kept)
 — North Hood County Volunteer Fire Department
@@ -43,30 +79,34 @@ PASS  L1 live: all 11 dated-type certs on the honest rosters read no_date exactl
    PASS  G3 radar: expired +1 / expiring +1 — garbage counted nowhere, no error
    PASS  G4 expiration_rows: the 9 garbage rows no_date; past expired; next month dated, not expired; a year out current
    PASS  G5 probation: '2026-13' + '0000-01' alone = missing; + a valid month a year out = current
+   PASS  G6 never-expires wins: '0000-00' and a real past month of that type read no_expiry (readiness +2 no_expiry, 0 expired / no_date; expiration_rows no_expiry)
+   PASS  U1 update_cert: 7 malformed refused with the client's message; '2027-06' stored; '' and NULL clear to NULL
+   PASS  A1 approve: approved; 2027-06->2027-06 0000-00->NULL 2026-09-15->NULL ''->NULL (malformed cleared, valid kept)
+— Zulu (status probe)
+   PASS  G1 readiness: 9 garbage -> +9 no_date, 0 expired; past +1 expired, next month +1 expiring, a year out +1 current
+   PASS  G2 rollup: dept expired +1 / expiring +1, mine current +1 / expiring +1 / expired +1 — garbage counted nowhere, no error
+   PASS  G3 radar: expired +1 / expiring +1 — garbage counted nowhere, no error
+   PASS  G4 expiration_rows: the 9 garbage rows no_date; past expired; next month dated, not expired; a year out current
+   PASS  G5 probation: '2026-13' + '0000-01' alone = missing; + a valid month a year out = current
+   PASS  G6 never-expires wins: '0000-00' and a real past month of that type read no_expiry (readiness +2 no_expiry, 0 expired / no_date; expiration_rows no_expiry)
    PASS  U1 update_cert: 7 malformed refused with the client's message; '2027-06' stored; '' and NULL clear to NULL
    PASS  A1 approve: approved; 2027-06->2027-06 0000-00->NULL 2026-09-15->NULL ''->NULL (malformed cleared, valid kept)
 rolled back: certs 11 (11), rows byte-identical true; submissions 0 (0); onboarding_items 0 (0)
-
-DATA CLEANUP (after the code migration):
-  APPLY — state: [{"demo_fixed":6,"demo_values":"2026-09,2026-12,2027-03,2027-05,2027-06,2028-01","north_hood_exp":"NULL","malformed_certs":0,"certs_total":11,"total_policies":6,"locked_token_fns":1}]
-  re-run -> Precondition failed: all 7 rows already hold their target values — already applied. Nothing changed.
-  RETEST after the cleanup: 24 passed, 0 failed, 0 skipped
-  Demo dept_cert_readiness() as its DA now: {"current":5,"expiring":1,"expired":1,"no_date":0,"no_expiry":0,"total_dated":7,"pct":71}
-  cleanup BEFORE the code migration -> function "public.valid_exp_ym(text)" does not exist
+Demo dept_cert_readiness() as its DA after the cleanup: {"current":5,"expiring":1,"expired":1,"no_date":0,"no_expiry":0,"total_dated":7,"pct":71}
 
 mutations — code migration (each must be REFUSED, or with post-conditions stripped caught by the RETEST):
   (a) helper without the year bound ('0000-01' valid)
      REFUSED: Post-condition failed: valid_exp_ym() does not match validExpYM (YYYY-MM, month 01-12, year >= 1900, NULL -> false).
   (a2) same, post-conditions stripped
-     applied -> RETEST: 7 passed, 17 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted] | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted] | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted]
+     applied -> RETEST: 13 passed, 22 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted] | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted] | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted] | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G2 rollup deltas: dept expired 3 / expiring 1 · mine current 1 / expiring 1 / expired 3 | FAIL  G3 radar deltas: expired 3 / expiring 1 | FAIL  G4 expiration_rows buckets: 1=no_date 2=no_date 3=no_date 4=expired 5=expired 6=no_date 7=no_date 8=no_date 9=no_date 10=expired 11=current 12=current | FAIL  U1 update_cert: 6 of 7 refused with the message; valid path true; [1899-12 accepted]
   (b) helper without the coalesce (NULL -> NULL)
      REFUSED: Post-condition failed: valid_exp_ym() does not match validExpYM (YYYY-MM, month 01-12, year >= 1900, NULL -> false).
   (b2) same, post-conditions stripped
-     applied -> RETEST: 21 passed, 3 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  L1 live: 1 of 11 certs disagree with valid_exp_ym()
+     applied -> RETEST: 32 passed, 3 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  L1 live: 2 of 11 certs disagree with valid_exp_ym()
   (c) helper given SET search_path (no longer inlined, COST 100)
      REFUSED: Post-condition failed: valid_exp_ym() is not boolean / sql / IMMUTABLE / invoker / without a SET clause.
   (c2) same, post-conditions stripped
-     applied -> RETEST: 16 passed, 8 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD" | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD" | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD"
+     applied -> RETEST: 25 passed, 10 failed, 0 skipped | FAIL  S0 valid_exp_ym() truth table / shape / inlining / grants (plan: Aggregate  Output: count(*)  ->  Seq Scan on public.certs c        Output: id, department_id, membe | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD" | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD" | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD" | FAIL  G2 rollup raised: invalid input syntax for type integer: "TBD" | FAIL  G3 radar raised: invalid input syntax for type integer: "TBD"
   (d) helper SECURITY DEFINER
      REFUSED: Post-condition failed: valid_exp_ym() is not boolean / sql / IMMUTABLE / invoker / without a SET clause.
   (e) anon granted the helper
@@ -74,15 +114,15 @@ mutations — code migration (each must be REFUSED, or with post-conditions stri
   (f) readiness swapped to a month-only test (no year bound) — md5 pin
      REFUSED: Post-condition failed: public.dept_cert_readiness() does not match its reviewed md5.
   (f2) same, post-conditions stripped
-     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 1 function(s) | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0
+     applied -> RETEST: 30 passed, 5 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 1 function(s) | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0 | FAIL  G1 readiness deltas: no_date 7 · expired 3 · expiring 1 · current 1 · no_expiry 0
   (g) update_cert keeps the old message
      REFUSED: Post-condition failed: public.update_cert(uuid,text,text) does not match its reviewed md5.
   (g2) same, post-conditions stripped
-     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20 | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20 | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20
+     applied -> RETEST: 30 passed, 5 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20 | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20 | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20 | FAIL  U1 update_cert: 0 of 7 refused with the message; valid path true; [0000-00: Expiration must be YYYY-MM (got: 0000-00)] [2026-13: Expiration must be YYYY-MM (got: 20
   (h) approve still copies sub.exp verbatim
      REFUSED: Post-condition failed: public.approve_cert_submission(uuid) does not match its reviewed md5.
   (h2) same, post-conditions stripped
-     applied -> RETEST: 20 passed, 4 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''-> | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''-> | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''->
+     applied -> RETEST: 30 passed, 5 failed, 0 skipped | FAIL  S1 md5s match false · old regex left in 0 function(s) | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''-> | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''-> | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''-> | FAIL  A1 approve: 2027-06->2027-06 0000-00->0000-00 2026-09-15->2026-09-15 ''->
   (i) an extra edit to a repointed body in the block
      REFUSED: Post-condition failed: public.dept_cert_readiness() does not match its reviewed md5.
   (j) a collateral function change (is_dept_admin)
@@ -91,8 +131,8 @@ mutations — code migration (each must be REFUSED, or with post-conditions stri
      REFUSED: Post-condition failed: a policy changed.
   (l) a trigger dropped in the block
      REFUSED: Post-condition failed: a trigger changed.
-  (m) data touched in the block (the cleanup smuggled in)
-     REFUSED: Post-condition failed: a certs / cert_submissions row changed (this migration touches no data).
+  (m) a cert outside the 7 changed in the block
+     REFUSED: Post-condition failed: a cert row outside the 7 changed.
   (n) live drift: pa_department_radar() changed before apply
      REFUSED: Precondition failed: public.pa_department_radar() drifted from the reviewed live body (md5 224f9ec3…). Nothing changed.
   (o) live drift: my_department_rollup() lost one of its 5 sites
@@ -100,18 +140,18 @@ mutations — code migration (each must be REFUSED, or with post-conditions stri
   (p) already applied
      REFUSED: Precondition failed: public.valid_exp_ym(text) already exists — already applied. Nothing changed.
 
-mutations — data cleanup (each must be REFUSED):
+mutations — the data cleanup inside the migration (each must be REFUSED, certs untouched):
   (c1) a target drifted live (North Hood's row now '0000-01')
-     REFUSED: Precondition failed: 1 of the 7 rows is missing, moved department, or no longer holds its reviewed value — re-audit. Nothing changed. (certs untouched)
+     REFUSED: Precondition failed: 1 of the 7 malformed cert rows is missing, moved department, or no longer holds its reviewed value — re-audit. Nothing changed. (certs untouched)
   (c2) a target moved department
-     REFUSED: Precondition failed: 1 of the 7 rows is missing, moved department, or no longer holds its reviewed value — re-audit. Nothing changed. (certs untouched)
-  (c3) the Demo UPDATE without its id scope (an 8th full-date Demo row exists)
+     REFUSED: Precondition failed: 1 of the 7 malformed cert rows is missing, moved department, or no longer holds its reviewed value — re-audit. Nothing changed. (certs untouched)
+  (c3) a target already hand-fixed (Demo's 2026-09-15 now 2026-09)
+     REFUSED: Precondition failed: 1 of the 7 malformed cert rows is missing, moved department, or no longer holds its reviewed value — re-audit. Nothing changed. (certs untouched)
+  (c4) the Demo UPDATE without its id scope (an 8th full-date Demo row exists)
      REFUSED: Cleanup failed: the Demo full-date UPDATE touched 7 rows, not 6. (certs untouched)
-  (c4) North Hood set to '' instead of NULL
-     REFUSED: Post-condition failed: the 7 rows do not all hold their reviewed target values. (certs untouched)
-  (c5) another column changed on a target
+  (c5) North Hood set to '' instead of NULL
+     REFUSED: Post-condition failed: the 7 malformed certs do not all hold their reviewed target values. (certs untouched)
+  (c6) another column changed on a target
      REFUSED: Post-condition failed: a column other than exp changed on the 7 rows. (certs untouched)
-  (c6) a cert outside the 7 changed in the block
-     REFUSED: Post-condition failed: a cert row outside the 7 changed. (certs untouched)
-  (c7) already applied
-     REFUSED: Precondition failed: all 7 rows already hold their target values — already applied. Nothing changed. (certs untouched)
+  (c7) a cert_submissions row changed in the block
+     REFUSED: Post-condition failed: a cert_submissions row changed. (certs untouched)
