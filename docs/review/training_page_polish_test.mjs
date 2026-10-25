@@ -128,12 +128,17 @@ function placement(h, title) {
 
 // 3 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+// Structural fences are PINNED to this slice's own release (c6aa254, a --no-ff merge whose first parent is the main it landed
+// on): "vs origin/main" was true only until the next slice merged. Historical = the release vs its parent; ongoing guards
+// compare a block this slice owns in today's tree with the release's copy.
+const REL = "c6aa254";
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = at(REL), relParent = at(`${REL}^1`);
+const changedFiles = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Training page polish (c6aa254) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
 ok("the toggle is in no PageShell `above` slot any more", !/above=\{[^}]*viewToggle/.test(src) && (src.match(/\{viewToggle\}\{\/\* Schedule \| Training Plans/g) || []).length === 3);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Training page polish (c6aa254) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

@@ -165,24 +165,29 @@ async function mountCard() {
 
 // 3 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changedFiles = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
+// Structural fences are PINNED to this slice's own release (2a94baa, a --no-ff merge whose first parent is the main it landed
+// on): "vs origin/main" was true only until the next slice merged. Historical = the release vs its parent; ongoing guards
+// compare a block this slice owns in today's tree with the release's copy.
+const REL = "2a94baa";
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = at(REL), relParent = at(`${REL}^1`);
+const changedFiles = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Training Officers (2a94baa) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
 const fn = (s, name) => { const i = s.indexOf(`function ${name}(`); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
 for (const c of ["TrainingSchedule", "TrainingPlans", "AIDrillPlanner"]) ok(`${c}: no CANMANAGE_OPS_ROLES left`, !fn(src, c).includes("CANMANAGE_OPS_ROLES"));
 const sig = (s) => (s.match(/.*const canRunSignin = .*/) || [""])[0];
-ok("canRunSignin line byte-identical to origin/main (QR gate untouched)", sig(src) === sig(main) && sig(src).includes("SIGNIN_ROLES"));
+ok("canRunSignin line untouched by Training Officers (2a94baa vs its parent); here = 2a94baa's (QR gate untouched)", sig(rel) === sig(relParent) && sig(src) === sig(rel) && sig(src).includes("SIGNIN_ROLES"));
 ok("canPlanAI + memberView repointed", /const canPlanAI = !!canManageTraining;/.test(src) && /const memberView = !isLeader\(role\) && !isTrainingOfficer;/.test(src));
 ok("canManageTraining = Department Admin OR training officer (not PA / not isDeptAdmin)", src.includes('const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;'));
 ok("isTrainingOfficer is an active-row lookup like isEqMgr", src.includes('supabase.from("training_officer").select("id").eq("member_id", myMemberId).is("removed_at", null).limit(1)'));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-const added = [...rpcSet(src)].filter((n) => !rpcSet(main).has(n)).sort();
-ok("the only new RPCs are assign_ / remove_training_officer", JSON.stringify(added) === '["assign_training_officer","remove_training_officer"]', JSON.stringify(added));
+const added = [...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n)).sort();
+ok("the only new RPCs in Training Officers (2a94baa) vs its parent are assign_ / remove_training_officer", JSON.stringify(added) === '["assign_training_officer","remove_training_officer"]', JSON.stringify(added));
 ok("no direct training_officer writes anywhere", !/from\("training_officer"\)\.(insert|update|delete|upsert)/.test(src));
 const card = fn(src, "TrainingOfficersCard"); const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 ok("no hex literal in the new card", card.length > 500 && (strip(card).match(/#[0-9A-Fa-f]{3,8}\b/g) || []).length === 0);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Training Officers (2a94baa) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
