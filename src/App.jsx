@@ -23795,7 +23795,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
 
   const field = (label, el, wide) => <label style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: wide ? "1 / -1" : undefined }}><span style={tpLabel}>{label}</span>{el}</label>;
   const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : "Draft"} tone="warn" />;
-  const upcoming = (sessions || []).filter((s) => !s.done).sort(sessSort);
+  const upcoming = (sessions || []).filter((s) => !s.done && !isMeeting(s)).sort(sessSort);   // Slice 4: drill plans go on trainings — meetings take an agenda (their row's "Attach agenda")
 
   return (
     <PageShell band watermark="PLANS" above={mounts} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
@@ -24214,6 +24214,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [sDur, setSDur] = useState("");
   const sDurMin = () => { const n = Number(sDur); return sDur === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n); };
   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
+  const [agendaMenu, setAgendaMenu] = useState(null);               // Slice 4: meeting row whose "Attach agenda" chooser is open (session id)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
   const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true, isMeeting: false });
   const [repeat, setRepeat] = useState(false);          // recurring toggle in the schedule form
@@ -25003,7 +25004,11 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
               const roll = restricted ? counted.filter((m) => rollFor(s, m) || att.includes(m.id)) : counted;         // shown = expected ∪ actual attendees (an invited non-member still shows, tagged 'not counted')
               const expCount = expected.length;                                                                        // denominator M
               const attCount = expected.filter((m) => att.includes(m.id)).length;                                      // numerator N — expected who attended
-              const locked = s.done || s.signinOpen || (s.attendance?.length > 0);   // editable only BEFORE QR sign-in starts / any check-in / done
+              const locked = s.done || s.signinOpen || (s.attendance?.length > 0);
+              // Slice 4 — one attach control per row, by type: a meeting (leadership / board audience, or an everyone session
+              // flagged "This is a meeting" — isMeeting, the Minutes helper) gets "Attach agenda"; a training gets "Attach plan".
+              // Who may attach is unchanged: the plan upload is canManage; the agenda pick canManage || isBoard.
+              const meetingRow = isMeeting(s);   // editable only BEFORE QR sign-in starts / any check-in / done
               return (
                 <div key={s.id} id={`ts-${s.id}`}>
                   <div style={{ ...Lrow, padding: "12px 2px", gap: 13, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
@@ -25025,12 +25030,22 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                       {!s.done && (() => { const n = reg.forSession(s.id).filter((r) => r.status === "coming").length; return (
                         <button style={{ ...Sbtn, borderStyle: "dashed" }} aria-expanded={plansOpen === s.id} onClick={() => setPlansOpen(plansOpen === s.id ? null : s.id)}><CalendarCheck size={14} color={LbtnIcon} /> Plans{n ? ` · ${n} coming` : ""}</button>
                       ); })()}
-                      {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan"} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
+                      {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {meetingRow ? (s.plans.length > 1 ? `Agenda (${s.plans.length})` : "Agenda") : (s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan")} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
                       {canRunSignin && !s.done && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
-                      {canManage && (
+                      {!meetingRow && canManage && (
                         <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Sbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} />Attach plan<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
-                      {isRestrictedEvent(s) && (canManage || isBoard(role)) && <button title="Attach an agenda" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setAgendaSession(s)}><ClipboardList size={14} color={LbtnIcon} />Agenda</button>}
+                      {meetingRow && (canManage || isBoard(role)) && (<>
+                        <button title="Attach an agenda" aria-expanded={agendaMenu === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setAgendaMenu(agendaMenu === s.id ? null : s.id)}><ClipboardList size={14} color={LbtnIcon} />Attach agenda</button>
+                        {agendaMenu === s.id && (
+                          // the chooser: a saved AI agenda (the snapshot modal, canManage || isBoard) or a file (the same upload as
+                          // "Attach plan", canManage only) — keeps the file-on-a-meeting capability board meetings already use
+                          <span role="group" aria-label="Attach agenda" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                            <button style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => { setAgendaMenu(null); setAgendaSession(s); }}><Sparkles size={14} color={LbtnIcon} />Pick a saved agenda</button>
+                            {canManage && <label title="Upload an agenda file" style={{ ...Sbtn, padding: "6px 8px", cursor: "pointer" }}><Upload size={14} color={LbtnIcon} />Upload a file<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; setAgendaMenu(null); for (const f of files) await attachPlan(s, f); }} /></label>}
+                          </span>
+                        )}
+                      </>)}
                       {s.done
                         ? <>{canManage && <button style={Sbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
                         : canManage && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
