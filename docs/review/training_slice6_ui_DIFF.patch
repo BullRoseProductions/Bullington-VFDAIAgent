@@ -1,0 +1,335 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 569c643..36580b8 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -23168,6 +23168,36 @@ function nthWeekdayOfMonth(y, m0, dow, ord) {
+ const CADENCES = ["Weekly", "Bi-weekly", "Monthly", "Quarterly", "Semi-annual", "Annual", "One-off"];
+ const TRAIN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+ function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
++/* Slice 6 — corrections. The correction RPCs raise "CODE: sentence"; show the sentence under a title keyed by the code
++   (DA_ONLY / MEMBERSHIP_WINDOW / LOCKED_SESSION … come straight from correct_training_session and the live triggers). */
++const S6_TITLES = { DA_ONLY: "Department Admin only", MEMBERSHIP_WINDOW: "Not on the roster that day", LOCKED_SESSION: "This session is locked",
++  REASON_REQUIRED: "A reason is required", NO_CHANGE: "Nothing changed", NOT_LOCKED: "No correction needed", BAD_ROSTER: "Check the roll",
++  BAD_VALUE: "Check the details", NOT_FINALIZED: "Not finalized", ALREADY_FINALIZED: "Already finalized", SIGNIN_OPEN: "Sign-in still open",
++  USE_CORRECT: "Use Correct", NOT_FOUND: "Session not found", UNKNOWN_FIELD: "Can't change that here" };
++function s6Err(error) {
++  const m = String(error?.message || "");
++  const mm = m.match(/^([A-Z_]+):\s*([\s\S]*)$/);
++  return mm && S6_TITLES[mm[1]] ? { code: mm[1], title: S6_TITLES[mm[1]], text: mm[2] } : { code: null, title: "Something went wrong", text: m || "Please try again." };
++}
++/* The §2a whitelist, built as ONLY the fields that changed: the session as loaded vs the correction form. Same
++   normalising as saveEditSession (blank length = null, the meeting flag only on an everyone session, no label unless
++   off-site), so an untouched field never shows up as a change. */
++function sessionCorrectionDiff(s, c) {
++  const before = { title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), start_time: (s.startTime || "").slice(0, 5) || null,
++    duration_min: s.durationMin ?? null, audience: s.audience || "everyone", plan_id: s.planId || null,
++    counts_toward_attendance: s.countsAttendance !== false, is_meeting: (s.audience || "everyone") === "everyone" && !!s.isMeeting,
++    is_offsite: !!s.isOffsite, location_label: s.isOffsite ? (s.locLabel || null) : null };
++  const after = { title: (c.title || "").trim(), date: c.date, start_time: c.startTime || null,
++    duration_min: c.durationMin === "" || c.durationMin == null ? null : Number(c.durationMin), audience: c.audience, plan_id: c.planId || null,
++    counts_toward_attendance: !!c.countsAttendance, is_meeting: c.audience === "everyone" && !!c.isMeeting,
++    is_offsite: !!c.isOffsite, location_label: c.isOffsite ? ((c.offLabel || "").trim() || null) : null };
++  const changes = {};
++  for (const k of Object.keys(after)) if (JSON.stringify(after[k]) !== JSON.stringify(before[k])) changes[k] = after[k];
++  return changes;
++}
++const S6_FIELDS = { title: "Title", date: "Date", start_time: "Start time", duration_min: "Length (min)", audience: "Audience", plan_id: "Category",
++  counts_toward_attendance: "Counts toward attendance", is_meeting: "Meeting", is_offsite: "Off-site", location_label: "Location", location: "Coordinates", done: "Finalized" };
++const S6_ACTIONS = { correct: "Corrected", reopen: "Reopened", finalize: "Finalized" };
+ function dueInfo(item) {
+   if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? FIRE.green : FIRE.redText, rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
+   const days = CADENCE_DAYS[item.cadence] || 30;
+@@ -24242,6 +24272,16 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+   const [sDur, setSDur] = useState("");
+   const sDurMin = () => { const n = Number(sDur); return sDur === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n); };
+   const [editingSessionId, setEditingSessionId] = useState(null);   // inline session edit (locked once QR started / done)
++  // Slice 6 — a LOCKED session (done / sign-in open / anyone on the roll) changes only through correct_training_session:
++  const [correctingId, setCorrectingId] = useState(null);   // the row whose "Correct…" panel is open
++  const [corr, setCorr] = useState(null);                   // the correction form: the edit fields + roll (a Set of member ids)
++  const [corrReason, setCorrReason] = useState("");
++  const [corrErr, setCorrErr] = useState(null);             // { title, text } — the RPC's own sentence, inline
++  const [corrBusy, setCorrBusy] = useState(false);
++  const [auditRows, setAuditRows] = useState(null);         // training_session_audit (leadership-readable), newest first; null = not loaded
++  const [histOpenId, setHistOpenId] = useState(null);       // the row whose "Corrections (N)" history is open
++  const [stationBy, setStationBy] = useState({});           // R1: sessionId -> drill_window_presence rows (fetched at Complete)
++  const [stationTicks, setStationTicks] = useState({});     // R1: sessionId -> Set of on-station member ids ticked to mark present
+   const [agendaMenu, setAgendaMenu] = useState(null);               // Slice 4: meeting row whose "Attach agenda" chooser is open (session id)
+   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
+   const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true, isMeeting: false });
+@@ -24276,6 +24316,49 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+       setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...(x.attendance || []), mid], times: { ...(x.times || {}), [mid]: now } } : x));
+     }
+   }
++  /* Slice 6 R1 — the on-station suggestions the officer confirmed: the SAME plain session_attendance insert toggleAttend
++     makes, one per name (never station_presence, never the location-proof flag — attested hours are derived from these rows). A
++     membership-window refusal is reported per name and doesn't stop the rest. */
++  async function addToRoll(s, ids) {
++    if (!ids.length) return;
++    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
++    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
++    const added = [], refused = [];
++    for (const mid of ids) {
++      const { error } = await supabase.from("session_attendance").insert({ department_id: deptId, session_id: s.id, member_id: mid, checked_in_at: new Date().toISOString() });
++      if (error) refused.push({ mid, windowErr: isMembershipWindowErr(error) }); else added.push(mid);
++    }
++    if (added.length) {
++      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
++      setSessions((ss) => ss.map((x) => x.id === s.id ? { ...x, attendance: [...new Set([...(x.attendance || []), ...added])], times: { ...(x.times || {}), ...Object.fromEntries(added.map((m) => [m, now])) } } : x));
++    }
++    const nm = (id) => members.find((m) => m.id === id)?.name || "A member";
++    if (refused.length) notify({ kind: "error", title: `${refused.length} couldn't be marked present`, text: refused.map((r) => `${nm(r.mid)}${r.windowErr ? " wasn't on the roster that day" : " — please try again"}`).join("; ") + "." });
++    else notify({ kind: "success", title: "Marked present", text: `${added.length} on-station member${added.length === 1 ? "" : "s"} added to the roll.` });
++  }
++  /* Slice 6 — the correction log. RLS lets leadership (is_leadership() — the LEADERSHIP roles) read their department's
++     rows; anyone else gets none, so the read is only made for them. A failed read keeps the last-known log (a failure is
++     not "no corrections"), and before the 6-DB migration exists it simply fails quietly. */
++  async function loadAudit() {
++    if (!isLeader(role)) return;
++    const { data, error } = await supabase.from("training_session_audit")
++      .select("id, seq, session_id, action, actor_name, at, reason, changes, roster_added, roster_removed, roster_before, roster_after")
++      .order("seq", { ascending: false });
++    if (error) return;
++    setAuditRows(data || []);
++  }
++  useEffect(() => { loadAudit(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
++  const corrN = (id) => (auditRows || []).filter((a) => a.session_id === id && a.action !== "finalize").length;   // a close isn't a correction
++  /* R1/R2 — who was on standby while the drill ran (drill_window_presence: the window math lives server-side, matching
++     attested_training). Cached per session; new names are pre-ticked. null = unavailable (no start time, or an error). */
++  async function presenceFor(s) {
++    if (stationBy[s.id]) return stationBy[s.id];
++    const { data, error } = await supabase.rpc("drill_window_presence", { p_session_id: s.id });
++    if (error || !Array.isArray(data)) return null;
++    setStationBy((m) => ({ ...m, [s.id]: data }));
++    setStationTicks((t) => t[s.id] ? t : { ...t, [s.id]: new Set(data.filter((r) => !(s.attendance || []).includes(r.member_id)).map((r) => r.member_id)) });
++    return data;
++  }
+ 
+   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
+   const _t0 = new Date(today); _t0.setHours(0, 0, 0, 0);
+@@ -24390,6 +24473,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+   // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
+   function beginCloseout(s) {
+     setOpenAtt(s.id);   // expand the attendance roster in writable state
++    presenceFor(s);     // Slice 6 R1: the "On station during the drill" suggestions, pre-ticked
+   }
+   // Finalize & lock — the explicit second step, run AFTER the roll is confirmed.
+   async function finalizeSession(s) {
+@@ -24404,8 +24488,12 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+        genuinely have nobody, so this stays a confirm rather than a block: still one click to
+        proceed, never by accident. */
+     const presentCount = (s.attendance || []).length;
++    // Slice 6 R3 — not a second nag: one soft line inside the existing confirm, only when fewer are on the roll than were
++    // on station during the drill (the roll closing incomplete — the real failure), never on a merely small drill.
++    const onStation = await presenceFor(s);
++    const stationLine = onStation && onStation.length > presentCount ? `${presentCount} present · ${onStation.length} were on station` : null;
+     if (presentCount === 0) {
+-      if (!(await noirConfirm({ title: "Finalize with an empty roll?", body: `Nobody is marked present for “${s.title}”. Finalizing locks it with an empty roll — no one earns training credit for it.`, confirmLabel: "Finalize anyway", danger: true }))) return;
++      if (!(await noirConfirm({ title: "Finalize with an empty roll?", body: `Nobody is marked present for “${s.title}”. Finalizing locks it with an empty roll — no one earns training credit for it.${stationLine ? ` (${stationLine} during the drill.)` : ""}`, confirmLabel: "Finalize anyway", danger: true }))) return;
+     } else {
+       // Display only: the roll the officer is about to lock, read from the session + the members already loaded.
+       const presentNames = (s.attendance || []).map((id) => members.find((m) => m.id === id)?.name).filter(Boolean);
+@@ -24420,6 +24508,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+               {presentNames.length > 12 && <span style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "2px 4px" }}>+{presentNames.length - 12} more</span>}
+             </div>
+           )}
++          {stationLine && <p data-testid="r3-line" style={{ fontSize: 12.5, color: FIRE.amberText, lineHeight: 1.45, margin: "0 0 8px" }}>{stationLine} — anyone missing from the roll?</p>}
+           <p style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, margin: 0 }}>{`“${s.title}” — you can reopen it later if needed.`}</p>
+         </div>
+       );
+@@ -24443,31 +24532,32 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+       const nMin = answer == null ? null : parseInt(String(answer).trim(), 10);
+       if (Number.isFinite(nMin) && nMin >= 1 && nMin <= 1440) dur = nMin;
+       else if (answer != null && String(answer).trim() !== "") {
+-        notify({ kind: "error", title: "That length didn't look right", text: "Finalized without a length — you can set it from the session's Edit later." });
++        notify({ kind: "error", title: "That length didn't look right", text: "Finalized without a length — you can set it later with Correct." });
+       }
+     }
+-    const { error } = await supabase.from("training_sessions").update({ done: true, ...(dur == null ? {} : { duration_min: dur }) }).eq("id", s.id);
+-    if (error) { notify({ kind: "error", title: "Couldn't finalize the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+-    // plan-linked -> reset the overdue clock to today, persisted. One-offs reset nothing.
+-    if (s.planId) {
+-      const iso = toISO(new Date());
+-      const { error: pErr } = await supabase.from("training_plans").update({ last_iso: iso }).eq("id", s.planId);
+-      if (pErr) notify({ kind: "error", title: "Locked — clock not reset", text: "Attendance is locked, but the training clock couldn't be reset.", details: pErr.message });
+-      else setPlan((ps) => ps.map((p) => p.id === s.planId ? { ...p, lastISO: iso } : p));
+-    }
++    /* Slice 6 (C4) — finalize through finalize_training_session: the same done + FIRST length, now logged; the category's
++       "last trained" (R4: the drill's date, only with a non-empty roll) is set server-side, so the client no longer
++       stamps today's date into training_plans. A length is only sent when none is recorded (a different one is a Correct). */
++    const { error } = await supabase.rpc("finalize_training_session", { p_session_id: s.id, p_duration_min: s.durationMin == null ? dur : null });
++    if (error) { const e = s6Err(error); notify({ kind: "error", title: "Couldn't finalize the session", text: e.code ? e.text : "Something went wrong saving that. Please try again.", details: error.message }); return; }
+     loadSessions();
+     loadPlans();
++    loadAudit();
+   }
+-  // Recover from a premature finalize — flips done back to false and reopens the writable roll.
+-  // Direct UPDATE, permitted by the existing "leaders update training_sessions" RLS (same policy that
+-  // wrote done:true); re-enables manual taps + self check-in. HARDEN LATER: a grace-window reopen RPC
+-  // (mirroring reopen_action_item) could cap how long a finalized session stays reopenable — deferred
+-  // for the pilot so leaders keep full flexibility to fix attendance.
++  /* Recover from a premature finalize — Slice 6 (C6): reopen_training_session with a REQUIRED reason (10+ characters),
++     logged on the session. The direct update({done:false}) it replaces is refused by the 6-DB policy (a finalized row
++     can't be updated directly). Older than 14 days is Department Admin only (the RPC says so — shown as-is). */
+   async function reopenSession(s) {
+-    const { error } = await supabase.from("training_sessions").update({ done: false }).eq("id", s.id);
+-    if (error) { notify({ kind: "error", title: "Couldn't reopen the session", text: "Something went wrong. Please try again.", details: error.message }); return; }
++    const reason = await noirPrompt({ title: `Reopen “${s.title}”?`, body: "Reopening unlocks the roll so attendance can be fixed. Say why — it's kept on the session's corrections log.",
++      label: "Reason", placeholder: "e.g. Two members were missed off the roll", required: true, confirmLabel: "Reopen" });
++    if (reason == null) return;
++    if (reason.trim().length < 10) { notify({ kind: "error", title: "A reason is required", text: "Say a little more (at least 10 characters) — it's what the log shows later." }); return; }
++    const { error } = await supabase.rpc("reopen_training_session", { p_session_id: s.id, p_reason: reason.trim() });
++    if (error) { const e = s6Err(error); notify({ kind: "error", title: e.code ? e.title : "Couldn't reopen the session", text: e.text, details: error.message }); return; }
+     setOpenAtt(s.id);   // pop the roll back open, writable, for the correction
+     loadSessions();
++    loadPlans();
++    loadAudit();
+   }
+   async function removeSession(id) {
+     const sess = sessions.find((x) => x.id === id);
+@@ -24527,6 +24617,32 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+     setEditingSessionId(null); loadSessions();
+   }
+ 
++  // Slice 6 — "Correct…": the edit form, pre-filled, plus the roll and a required reason; one correct_training_session call.
++  function openCorrect(s) {
++    setCorrectingId(s.id); setEditingSessionId(null); setCorrErr(null); setCorrReason("");
++    setCorr({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "",
++      planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isMeeting: !!s.isMeeting,
++      isOffsite: !!s.isOffsite, offLabel: s.locLabel || "", roll: new Set(s.attendance || []) });
++    setCur({ y: s.y, m: s.m }); setListFilter("month");   // make sure its row is on screen (the no-length notice can point anywhere)
++    setTimeout(() => document.getElementById(`ts-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
++  }
++  async function submitCorrection(s) {
++    const changes = sessionCorrectionDiff(s, corr);
++    const was = s.attendance || [];
++    const add = [...corr.roll].filter((id) => !was.includes(id)), remove = was.filter((id) => !corr.roll.has(id));
++    const reason = corrReason.trim();
++    if (!Object.keys(changes).length && !add.length && !remove.length) { setCorrErr({ title: "Nothing changed", text: "Change a detail or the roll first." }); return; }
++    if ("title" in changes && !changes.title) { setCorrErr({ title: "Check the details", text: "A session needs a title." }); return; }
++    if (reason.length < 10) { setCorrErr({ title: "A reason is required", text: "Say why (at least 10 characters) — it's kept on the session's corrections log." }); return; }
++    setCorrBusy(true); setCorrErr(null);
++    const { error } = await supabase.rpc("correct_training_session", { p_session_id: s.id, p_changes: changes, p_add: add, p_remove: remove, p_reason: reason });
++    setCorrBusy(false);
++    if (error) { setCorrErr(s6Err(error)); return; }
++    notify({ kind: "success", title: "Correction saved", text: `“${changes.title || s.title}” was corrected — it's on the session's corrections log.` });
++    setCorrectingId(null); setCorr(null);
++    loadSessions(); loadPlans(); loadAudit();
++  }
++
+   async function attachPlan(s, file) {
+     if (!file) return;
+     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+@@ -24844,11 +24960,13 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+                   style={{ marginBottom: noLenOpen ? 8 : 0, cursor: "pointer" }} />
+                 {noLenOpen && (<>
+                   <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
+-                    Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Open a session below and set its length to fix that — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
++                    Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Set its length with Correct to fix that (it's logged) — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+                   </div>
+-                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6 }}>
+-                    {noLen.slice(0, 5).map((x) => `${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`).join("  ·  ")}
+-                    {noLen.length > 5 ? `  ·  …and ${noLen.length - 5} more` : ""}
++                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
++                    {noLen.slice(0, 5).map((x) => canManage
++                      ? <button key={x.id} style={{ ...Sbtn, padding: "5px 9px", fontSize: 12 }} onClick={() => { setEditSessionMode(true); openCorrect(x); }}><Pencil size={13} color={LbtnIcon} /> Set length · {`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</button>
++                      : <span key={x.id}>{`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</span>)}
++                    {noLen.length > 5 ? <span>…and {noLen.length - 5} more</span> : null}
+                   </div>
+                 </>)}
+               </div>
+@@ -25120,6 +25238,9 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+                         ? <>{canManage && <button style={Sbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
+                         : canManage && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
+                       {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
++                      {/* Slice 6: a LOCKED session isn't edited, it's corrected — gated, with a reason, logged. */}
++                      {canManage && editSessionMode && locked && <button title="Correct this session — logged, with a reason" aria-expanded={correctingId === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => (correctingId === s.id ? setCorrectingId(null) : openCorrect(s))}><Pencil size={14} color={LbtnIcon} /> Correct…</button>}
++                      {isLeader(role) && corrN(s.id) > 0 && <button aria-expanded={histOpenId === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setHistOpenId(histOpenId === s.id ? null : s.id)}><ClipboardList size={14} color={LbtnIcon} /> Corrections ({corrN(s.id)})</button>}
+                       {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
+                           attendance record; so is an open one somebody has already checked into, and deleting
+                           either cascades the roster away. Mirrors the RLS policy term for term
+@@ -25160,6 +25281,59 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+                       <button style={Lbtn} onClick={() => setEditingSessionId(null)}>Cancel</button>
+                     </div>
+                   )}
++                  {canManage && correctingId === s.id && corr && (
++                    <div data-testid="correct-panel" style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, borderColor: `${FIRE.amberText}66` }}>
++                      <div style={{ fontSize: 11, color: FIRE.amberText, marginBottom: 8, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Correct a locked session — logged</div>
++                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
++                        <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title</span><input style={Linput} value={corr.title} onChange={(e) => setCorr((b) => ({ ...b, title: e.target.value }))} /></label>
++                        <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Date</span><input type="date" style={Linput} value={corr.date} onChange={(e) => setCorr((b) => ({ ...b, date: e.target.value }))} /></label>
++                        <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={corr.startTime} onChange={(e) => setCorr((b) => ({ ...b, startTime: e.target.value }))} /></label>
++                        <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={corr.durationMin} onChange={(e) => setCorr((b) => ({ ...b, durationMin: e.target.value }))} /></label>
++                        <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={corr.planId} onChange={(e) => setCorr((b) => ({ ...b, planId: e.target.value }))}><option value="">One-off</option>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
++                        <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
++                          <select style={Linput} value={corr.audience} onChange={(e) => setCorr((b) => ({ ...b, audience: e.target.value }))}><option value="everyone">Everyone</option><option value="leadership">Leadership only</option><option value="board">Board only</option></select></label>
++                        <CountsAttendanceCheckbox checked={corr.countsAttendance} onChange={(v) => setCorr((b) => ({ ...b, countsAttendance: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />
++                        {corr.audience === "everyone" && <MeetingCheckbox checked={!!corr.isMeeting} onChange={(v) => setCorr((b) => ({ ...b, isMeeting: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} />}
++                        <OffsiteCheckbox checked={!!corr.isOffsite} onChange={(v) => setCorr((b) => ({ ...b, isOffsite: v }))} label={corr.offLabel} onLabelChange={(v) => setCorr((b) => ({ ...b, offLabel: v }))} fieldStyle={Lfield} labelStyle={LfieldLabel} inputStyle={Linput} />
++                      </div>
++                      <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "12px 0 6px", textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Who was there</div>
++                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
++                        {roll.map((m) => (
++                          <label key={m.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: corr.roll.has(m.id) ? FIRE.name : FIRE.textMuted2, cursor: "pointer" }}>
++                            <input type="checkbox" checked={corr.roll.has(m.id)} onChange={(e) => setCorr((b) => { const r = new Set(b.roll); if (e.target.checked) r.add(m.id); else r.delete(m.id); return { ...b, roll: r }; })} />{m.name}
++                          </label>
++                        ))}
++                      </div>
++                      <label style={{ ...Lfield, marginTop: 12 }}><span style={LfieldLabel}>Reason (required — it's kept on the log)</span>
++                        <textarea data-testid="correct-reason" style={{ ...Linput, minHeight: 54, resize: "vertical" }} value={corrReason} placeholder="e.g. The QR was opened on the wrong night — this drill ran on the 3rd" onChange={(e) => setCorrReason(e.target.value)} /></label>
++                      {corrErr && <div role="alert" style={{ ...NOIR_ERR, marginTop: 10 }}><b>{corrErr.title}.</b> {corrErr.text}</div>}
++                      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
++                        <button style={{ ...LprimaryBtn, opacity: corrBusy ? 0.7 : 1 }} disabled={corrBusy} onClick={() => submitCorrection(s)}><CheckCircle2 size={15} /> Save correction</button>
++                        <button style={Lbtn} disabled={corrBusy} onClick={() => { setCorrectingId(null); setCorr(null); }}>Cancel</button>
++                      </div>
++                    </div>
++                  )}
++                  {isLeader(role) && histOpenId === s.id && (
++                    <div data-testid="corrections-history" style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
++                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Corrections log — newest first</div>
++                      {(auditRows || []).filter((a) => a.session_id === s.id).map((a) => {
++                        const nm = (id) => members.find((m) => m.id === id)?.name || "a former member";
++                        const val = (k, v) => v == null || v === "" ? "—" : k === "plan_id" ? (plan.find((p) => String(p.id) === String(v))?.name || "a removed category")
++                          : typeof v === "boolean" ? (v ? "Yes" : "No") : typeof v === "object" ? "set" : String(v);
++                        const ch = Object.entries(a.changes || {});
++                        return (
++                          <div key={a.id} style={{ padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 12.5, color: FIRE.textSecondary }}>
++                            <div><b style={{ color: FIRE.textPrimary }}>{S6_ACTIONS[a.action] || a.action}</b> by {a.actor_name} · {new Date(a.at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div>
++                            {a.reason && <div style={{ marginTop: 2 }}>“{a.reason}”</div>}
++                            {ch.filter(([k]) => a.action === "correct" || k !== "done").map(([k, d]) => <div key={k} style={{ marginTop: 2, ...Lnum }}>{S6_FIELDS[k] || k}: {val(k, d?.old)} → {val(k, d?.new)}</div>)}
++                            {(a.roster_added || []).length > 0 && <div style={{ marginTop: 2, color: FIRE.greenText }}>+ {a.roster_added.map(nm).join(", ")}</div>}
++                            {(a.roster_removed || []).length > 0 && <div style={{ marginTop: 2, color: FIRE.redText }}>− {a.roster_removed.map(nm).join(", ")}</div>}
++                            {a.roster_before !== a.roster_after && <div style={{ marginTop: 2, ...Lnum }}>Roll {a.roster_before} → {a.roster_after}</div>}
++                          </div>
++                        );
++                      })}
++                    </div>
++                  )}
+                   {s.plans.length > 0 && openPlans === s.id && (
+                     <div style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12 }}>
+                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Plans &amp; materials ({s.plans.length})</div>
+@@ -25206,6 +25380,25 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
+                           </div>
+                         );
+                       })}
++                      {canManage && !s.done && (stationBy[s.id] || []).length > 0 && (() => {
++                        // Slice 6 R1 — standby check-ins overlapping this drill: suggestions, pre-ticked. Confirming marks them present
++                        // the ordinary way (plain session_attendance rows — an officer's mark, credited as attested, not as location-proven).
++                        const rows = stationBy[s.id], ticks = stationTicks[s.id] || new Set();
++                        const pick = rows.filter((r) => !att.includes(r.member_id) && ticks.has(r.member_id)).map((r) => r.member_id);
++                        return (
++                          <div data-testid="on-station" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, border: `1px dashed ${FIRE.amberText}66` }}>
++                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.amberText }}>On station during the drill ({rows.length})</div>
++                            <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "4px 0 8px" }}>Standby check-ins that overlap this drill. Untick anyone who wasn't at it, then confirm.</div>
++                            {rows.map((r) => { const on = att.includes(r.member_id); return (
++                              <label key={r.member_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", fontSize: 13, color: on ? FIRE.textMuted2 : FIRE.name }}>
++                                <input type="checkbox" checked={on || ticks.has(r.member_id)} disabled={on}
++                                  onChange={(e) => setStationTicks((t) => { const n = new Set(t[s.id] || []); if (e.target.checked) n.add(r.member_id); else n.delete(r.member_id); return { ...t, [s.id]: n }; })} />
++                                {r.member_name}{on ? " · already on the roll" : ""}
++                              </label>); })}
++                            {pick.length > 0 && <button style={{ ...Lbtn, marginTop: 8 }} onClick={() => addToRoll(s, pick)}><Users size={14} color={LbtnIcon} /> Mark {pick.length} present</button>}
++                          </div>
++                        );
++                      })()}
+                       {canManage && !s.done && (
+                         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                           <span style={{ flex: 1, minWidth: 180, fontSize: 12, color: FIRE.textMuted, lineHeight: 1.45 }}>Locking sets attendance and training credit. You can reopen it later if something's wrong.</span>
