@@ -1,0 +1,137 @@
+== PINS (mock md5 vs live pin)
+   VERBATIM  public.is_training_manager()
+   VERBATIM  public.is_training_officer()
+   VERBATIM  public.is_leadership()
+   VERBATIM  public.my_department_id()
+   VERBATIM  public.my_member_id()
+   VERBATIM  public.membership_window_allows(uuid,date)
+   VERBATIM  public.tg_session_attendance_membership_window()
+   VERBATIM  public.tg_training_session_date_membership_window()
+   VERBATIM  public.close_training_presence_on_done()
+   VERBATIM  public.attested_training(uuid,timestamptz,timestamptz)
+   VERBATIM  public.dept_station_shifts(timestamptz,timestamptz)
+   VERBATIM  public.dept_iso_hours(timestamptz,timestamptz)
+   VERBATIM  public.dept_iso_hours_for(uuid,timestamptz,timestamptz)
+   RE-PINNED  public.dept_iso_hours_by_station(timestamptz,timestamptz)  (live 5a895ed77425f86287ac9b9afa1dbf5e -> mock f22cce042efda3ced350e19f089a77db)
+   RE-PINNED  public.dept_member_iso_hours_by_month(uuid,timestamptz[],timestamptz[])  (live cb10fc24fcf25d0e919ead5299e71dcc -> mock 6b116e7af69c298d2c3054f65a39f920)
+   policy text as deparsed by the mock: {"qual":"((department_id = my_department_id()) AND is_training_manager())","with_check":"((department_id = my_department_id()) AND is_training_manager())"}
+
+== MIGRATION (fresh): OK
+   state: {"slice6_db_state":{"rpcs":["correct_training_session anon=false auth=true","drill_window_presence anon=false auth=true","finalize_training_session anon=false auth=true","recompute_training_plan_last_iso anon=false auth=false","reopen_training_session anon=false auth=true","tg_training_session_audit_append_only anon=false auth=false","tg_training_session_lock_guard anon=false auth=false"],"audit_rows":0,"audit_table":true,"attested_md5":"aff25333771cd38c1f473bcde5e1e96e","guard_trigger":true,"sessions_done":2,"update_policy":"((department_id = my_department_id()) AND is_training_manager() AND (done IS NOT TRUE))","verified_presence":6}}
+== RE-RUN refused -> PREFLIGHT: training_session_audit already exists — Slice 6-DB looks applied. Refusing to re-run.
+== RETEST
+PASS  O1 privileges: anon none; authenticated = the 4 RPCs only
+PASS  O2 audit table: RLS, one SELECT policy, authenticated SELECT only, anon nothing
+PASS  O3 UPDATE policy has done IS NOT TRUE (CHECK unchanged); guard trigger enabled
+PASS  O4 the 6 hours readers are byte-identical to their pins
+— Indian Harbor (mock)
+   (acting as a fixture training officer, a real DA)
+   PASS  T1 correct (title+date): one audit row, old->new + actor right, roll intact
+   PASS  T2 roster correction (+a3 −a2): attested_training follows; log right
+   PASS  T3 short reason -> REASON_REQUIRED
+   PASS  T4 no-op -> NO_CHANGE
+   PASS  T5 unknown keys (done, signin_open) -> UNKNOWN_FIELD
+   PASS  T6 unlocked session -> NOT_LOCKED (and T3–T6 wrote nothing)
+   PASS  T7 date outside an attendee's window -> MEMBERSHIP_WINDOW; date + log unchanged
+   PASS  T8 hybrid: TO refused on a 30-day drill and on a 20-day move back; DA allowed
+   PASS  T8b a Project Admin who is a training officer -> DA_ONLY on a 30-day drill (correct + reopen)
+   PASS  T9 direct UPDATE of a finalized session -> 0 rows (policy), unchanged
+   PASS  T10 direct date UPDATE of an attended, open session -> LOCKED_SESSION
+   PASS  T11 client finalize (done + first length) and sign-in open/close still work on attended rows
+   PASS  T12 finalize RPC: done + first length + one finalize row; last_iso -> the drill's date
+   PASS  T12b a different length -> USE_CORRECT; an empty-roll finalize leaves last_iso alone
+   PASS  T13 reopen needs a reason; logs the roll; the next finalize logs +a2 −a1 made while open
+   PASS  T14 Officer-not-TO / Board / PA / Member refused on all 4 RPCs
+   PASS  T15 another department's session -> NOT_FOUND on all 4 RPCs
+   PASS  T16 audit: no INSERT/UPDATE/DELETE for authenticated; owner append-only; Board reads own dept only; Member none
+   PASS  T17 drill_window_presence: the overlapping standby (a3, on the roll) in; the day-before one (a2) out
+   PASS  T18 flag reset after the RPCs: even the owner hits LOCKED_SESSION on a protected field
+   PASS  T19 station_presence byte-identical across all RPC calls; verified count 6 unchanged
+— North Hood (mock)
+   (acting as a REAL training officer, a real DA)
+   PASS  T1 correct (title+date): one audit row, old->new + actor right, roll intact
+   PASS  T2 roster correction (+a3 −a2): attested_training follows; log right
+   PASS  T3 short reason -> REASON_REQUIRED
+   PASS  T4 no-op -> NO_CHANGE
+   PASS  T5 unknown keys (done, signin_open) -> UNKNOWN_FIELD
+   PASS  T6 unlocked session -> NOT_LOCKED (and T3–T6 wrote nothing)
+   PASS  T7 date outside an attendee's window -> MEMBERSHIP_WINDOW; date + log unchanged
+   PASS  T8 hybrid: TO refused on a 30-day drill and on a 20-day move back; DA allowed
+   PASS  T8b a Project Admin who is a training officer -> DA_ONLY on a 30-day drill (correct + reopen)
+   PASS  T9 direct UPDATE of a finalized session -> 0 rows (policy), unchanged
+   PASS  T10 direct date UPDATE of an attended, open session -> LOCKED_SESSION
+   PASS  T11 client finalize (done + first length) and sign-in open/close still work on attended rows
+   PASS  T12 finalize RPC: done + first length + one finalize row; last_iso -> the drill's date
+   PASS  T12b a different length -> USE_CORRECT; an empty-roll finalize leaves last_iso alone
+   PASS  T13 reopen needs a reason; logs the roll; the next finalize logs +a2 −a1 made while open
+   PASS  T14 Officer-not-TO / Board / PA / Member refused on all 4 RPCs
+   PASS  T15 another department's session -> NOT_FOUND on all 4 RPCs
+   PASS  T16 audit: no INSERT/UPDATE/DELETE for authenticated; owner append-only; Board reads own dept only; Member none
+   PASS  T17 drill_window_presence: the overlapping standby (a3, on the roll) in; the day-before one (a2) out
+   PASS  T18 flag reset after the RPCs: even the owner hits LOCKED_SESSION on a protected field
+   PASS  T19 station_presence byte-identical across all RPC calls; verified count 6 unchanged
+46 passed, 0 failed, 0 skipped
+
+== PRE-FLIGHT DRIFT (each must refuse)
+   refused  is_training_manager body changed -> PREFLIGHT: public.is_training_manager() has drifted (live md5 4e3bfb6083a44ba1aa7bfa60ff11acb6, pinned 472b87b0abca586ba0a13cd615b376fe). Re-audit before applying.
+   refused  attested_training body changed -> PREFLIGHT: public.attested_training(uuid,timestamptz,timestamptz) has drifted (live md5 ca8bcd4f7a8d28bd899feef556aaad44, pinned aff25333771cd38c1f473bcde5e1e96e). Re-audit before applying.
+   refused  UPDATE policy text changed -> PREFLIGHT: "leaders update training_sessions" is not the audited text (USING/CHECK ((department_id = my_department_id()) AND is_training_manager())). Re-audit.
+   refused  a second UPDATE policy -> PREFLIGHT: expected exactly 1 UPDATE/ALL policy on training_sessions, found 2.
+   refused  station_presence gained a SELECT policy (R2 premise) -> PREFLIGHT: station_presence now has 1 SELECT/ALL policy(ies) — R2 premise changed. Re-audit.
+   refused  an extra trigger on training_sessions -> PREFLIGHT: training_sessions triggers differ from the audit (found 4). Re-audit.
+
+== MUTATIONS (each must FAIL the named RETEST line(s), or be refused)
+   M1 correct: gate removed:
+         FAIL  T14 role matrix: correct:s6rt-00000000-off@retest.invalid correct:NO_CHANGE: nothing to correct. correct:NO_CHANGE: nothing to correct. correct:NO_CHANGE: nothing to correct.
+         FAIL  T14 role matrix: correct:s6rt-00000000-off@retest.invalid correct:NO_CHANGE: nothing to correct. correct:NO_CHANGE: nothing to correct. correct:NO_CHANGE: nothing to correct.
+      44 passed, 2 failed, 0 skipped
+   M2 reason: 1 char is enough:
+         FAIL  T3 short reason: new row for relation "training_session_audit" violates check constraint "training_session_audit_reason_chk"
+         FAIL  T3 short reason: new row for relation "training_session_audit" violates check constraint "training_session_audit_reason_chk"
+      44 passed, 2 failed, 0 skipped
+   M3 C1 hybrid dropped (TO may correct any age):
+         FAIL  T8 hybrid: TO-old=ACCEPTED TO-move=MEMBERSHIP_WINDOW: a member recorded at this drill was not on the department roster on that date. DA={"changes": {"title": {"new": "S2 renamed by DA", "old": "S2 renamed by TO"}}, "audit_id": "8d82c569-8ca3-4b3f-ba94-40606fae40e9", "roster_added": [], "roster_after": 1, "roster_before": 1, "roster_removed": []}
+         FAIL  T8b PA+TO on an old drill: correct=ACCEPTED reopen=DA_ONLY: reopening a drill more than 14 days old is for a Department Admin.
+         FAIL  T8 hybrid: TO-old=ACCEPTED TO-move=MEMBERSHIP_WINDOW: a member recorded at this drill was not on the department roster on that date. DA={"changes": {"title": {"new": "S2 renamed by DA", "old": "S2 renamed by TO"}}, "audit_id": "0b2985c4-24ad-4d90-b393-c4fd3504f9e7", "roster_added": [], "roster_after": 1, "roster_before": 1, "roster_removed": []}
+         FAIL  T8b PA+TO on an old drill: correct=ACCEPTED reopen=DA_ONLY: reopening a drill more than 14 days old is for a Department Admin.
+      42 passed, 4 failed, 0 skipped
+   M4 guard ignores attendance (finalized only):
+         FAIL  T10 attended date UPDATE: ACCEPTED
+         FAIL  T10 attended date UPDATE: ACCEPTED
+      44 passed, 2 failed, 0 skipped
+   M5 correction flag never reset:
+         FAIL  T10 attended date UPDATE: ACCEPTED
+         FAIL  T18 flag leak: ACCEPTED
+         FAIL  T10 attended date UPDATE: ACCEPTED
+         FAIL  T18 flag leak: ACCEPTED
+      42 passed, 4 failed, 0 skipped
+   M6 audit append-only trigger removed:
+         FAIL  T16 audit table: owner-update owner-delete board-read 0/0
+         FAIL  T16 audit table: owner-update owner-delete board-read 0/0
+      44 passed, 2 failed, 0 skipped
+   M7 finalize ignores the roll since a Reopen:
+         FAIL  T13 reopen/finalize roster: reason-check=REASON_REQUIRED: say why (at least 10 characters). log wrong
+         FAIL  T13 reopen/finalize roster: reason-check=REASON_REQUIRED: say why (at least 10 characters). log wrong
+      44 passed, 2 failed, 0 skipped
+   M8 presence window read in UTC:
+         FAIL  T17 presence: in=0 out=0 
+         FAIL  T17 presence: in=0 out=0 
+      44 passed, 2 failed, 0 skipped
+   M9 finalize stamps today, not the drill's date:
+         FAIL  T12 finalize: state/log wrong (last_iso 2026-10-25)
+         FAIL  T12 finalize: state/log wrong (last_iso 2026-10-25)
+      44 passed, 2 failed, 0 skipped
+   M10 correct writes no audit row:
+         FAIL  T1 correct: state/log wrong
+         FAIL  T2 roster correction: attested/log wrong
+         FAIL  T16 audit table: owner-update owner-delete board-read 0/0
+         FAIL  T1 correct: state/log wrong
+         FAIL  T2 roster correction: attested/log wrong
+         FAIL  T16 audit table: owner-update owner-delete board-read 0/0
+      40 passed, 6 failed, 0 skipped
+   M11 policy keeps no done term: migration REFUSED -> POST: the training_sessions UPDATE policy is not the intended text.
+   M12 audit INSERT granted to authenticated: migration REFUSED -> POST: training_session_audit grants wrong (authenticated SELECT only; anon nothing).
+   M13 DA-only branch admits Project Admin (is_dept_admin):
+         FAIL  T8b PA+TO on an old drill: correct=ACCEPTED reopen=DA_ONLY: reopening a drill more than 14 days old is for a Department Admin.
+         FAIL  T8b PA+TO on an old drill: correct=ACCEPTED reopen=DA_ONLY: reopening a drill more than 14 days old is for a Department Admin.
+      44 passed, 2 failed, 0 skipped
