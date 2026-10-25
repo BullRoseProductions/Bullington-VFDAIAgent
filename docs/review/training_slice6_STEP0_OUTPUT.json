@@ -1,0 +1,237 @@
+{
+ "query_1": "slice6 audit (sha256 358ad377\u2026)",
+ "query_2": "slice6 audit part 2 (sha256 ea4e547b\u2026)",
+ "run": "2026-10-24, Supabase SQL editor, read-only",
+ "part1": {
+  "fns": [
+   {
+    "fn": "attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)",
+    "md5": "aff25333771cd38c1f473bcde5e1e96e",
+    "anon": false,
+    "auth": false,
+    "definer": false
+   },
+   {
+    "fn": "close_signin(p_session_id uuid)",
+    "md5": "6cb3a98bf74898f40963e9bafb3bb610",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "close_training_presence_on_done()",
+    "md5": "710973082e68dc14177879de7d10af75",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "close_training_presence_on_session_delete()",
+    "md5": "0970e958b1bdb83daafec972409ec887",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "dept_iso_hours(p_from timestamp with time zone, p_to timestamp with time zone)",
+    "md5": "306fa11b6473fefa9c737c3a59bfe826",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "dept_station_shifts(p_from timestamp with time zone, p_to timestamp with time zone)",
+    "md5": "894bbaa8f37ca95da454dd075aab1d41",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "geofence_confirm_presence(p_lat double precision, p_lng double precision, p_accuracy double precision)",
+    "md5": "55fb804c013be957a65e01bc1d4ed4f7",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "is_dept_admin()",
+    "md5": "c692e44f62923d2bf4c1a39a21a87bf7",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "is_leadership()",
+    "md5": "cc5861c24398fbf58147fee6f60cf410",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "is_training_manager()",
+    "md5": "472b87b0abca586ba0a13cd615b376fe",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "member_check_in(p_session_id uuid, p_token text, p_lat double precision, p_lng double precision, p_accuracy double precision)",
+    "md5": "089a9b4c37c911e632375294985ad150",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "my_department_id()",
+    "md5": "87f546659c3804a943b48e419e017f18",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "my_member_id()",
+    "md5": "3f66369c8af7bc07ec59831af6536fee",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "open_signin(p_session_id uuid)",
+    "md5": "38d66e034a5f0d8a71b9e668e358c446",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   {
+    "fn": "reopen_action_item(p_id uuid)",
+    "md5": "76513cd2c2468faad981e52f61db6408",
+    "anon": false,
+    "auth": true,
+    "definer": true
+   }
+  ],
+  "policies": [
+   "session_attendance | leaders delete session_attendance | DELETE | authenticated | USING ((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1\n   FROM training_sessions ts\n  WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false))))) | CHECK -",
+   "session_attendance | leaders insert session_attendance | INSERT | authenticated | USING - | CHECK ((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1\n   FROM training_sessions ts\n  WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false)))))",
+   "session_attendance | authenticated can read session_attendance | SELECT | authenticated | USING (department_id = my_department_id()) | CHECK -",
+   "training_plans | admins delete training_plans | DELETE | authenticated | USING ((department_id = my_department_id()) AND is_dept_admin()) | CHECK -",
+   "training_plans | leaders write training_plans | INSERT | authenticated | USING - | CHECK ((department_id = my_department_id()) AND is_training_manager())",
+   "training_plans | members read training_plans | SELECT | authenticated | USING (department_id = my_department_id()) | CHECK -",
+   "training_plans | leaders update training_plans | UPDATE | authenticated | USING ((department_id = my_department_id()) AND is_training_manager()) | CHECK ((department_id = my_department_id()) AND is_training_manager())",
+   "training_sessions | admins delete training_sessions | DELETE | authenticated | USING ((department_id = my_department_id()) AND is_dept_admin() AND (done IS NOT TRUE) AND (NOT (EXISTS ( SELECT 1\n   FROM session_attendance sa\n  WHERE (sa.session_id = training_sessions.id))))) | CHECK -",
+   "training_sessions | leaders write training_sessions | INSERT | authenticated | USING - | CHECK ((department_id = my_department_id()) AND is_training_manager())",
+   "training_sessions | authenticated can read training_sessions | SELECT | public | USING (department_id = my_department_id()) | CHECK -",
+   "training_sessions | leaders update training_sessions | UPDATE | authenticated | USING ((department_id = my_department_id()) AND is_training_manager()) | CHECK ((department_id = my_department_id()) AND is_training_manager())"
+  ],
+  "sep3_row": {
+   "att": 12,
+   "date": "2026-09-03",
+   "done": true,
+   "title": "Fire Training Week 1"
+  },
+  "triggers": [
+   "session_attendance | session_attendance_membership_window | CREATE TRIGGER session_attendance_membership_window BEFORE INSERT OR UPDATE OF session_id, member_id ON public.session_attendance FOR EACH ROW EXECUTE FUNCTION tg_session_attendance_membership_window()",
+   "station_presence | trg_station_id_station_presence | CREATE TRIGGER trg_station_id_station_presence BEFORE INSERT ON public.station_presence FOR EACH ROW EXECUTE FUNCTION set_default_station_id()",
+   "training_sessions | training_session_date_membership_window | CREATE TRIGGER training_session_date_membership_window BEFORE UPDATE OF date ON public.training_sessions FOR EACH ROW EXECUTE FUNCTION tg_training_session_date_membership_window()",
+   "training_sessions | trg_close_training_presence_on_delete | CREATE TRIGGER trg_close_training_presence_on_delete BEFORE DELETE ON public.training_sessions FOR EACH ROW EXECUTE FUNCTION close_training_presence_on_session_delete()",
+   "training_sessions | trg_close_training_presence_on_done | CREATE TRIGGER trg_close_training_presence_on_done AFTER UPDATE ON public.training_sessions FOR EACH ROW WHEN (((old.done IS DISTINCT FROM new.done) AND (new.done = true))) EXECUTE FUNCTION close_training_presence_on_done()"
+  ],
+  "sessions_done": 34,
+  "signature_cols": [
+   "equipment_issue_batch.signature_data",
+   "equipment_issue_batch.witness_signature",
+   "document_acknowledgments.signature_data"
+  ],
+  "audit_like_tables": [
+   "apparatus_maintenance_log",
+   "document_versions",
+   "duty_log",
+   "fundraiser_log",
+   "station_log"
+  ],
+  "station_presence_cols": [
+   "id uuid",
+   "department_id uuid",
+   "member_id uuid",
+   "checked_in_at timestamp with time zone",
+   "checked_out_at timestamp with time zone",
+   "verified boolean",
+   "source text",
+   "kind text",
+   "session_id uuid",
+   "created_at timestamp with time zone",
+   "auto_closed boolean",
+   "offsite_label text",
+   "location_confirmed boolean",
+   "approved_at timestamp with time zone",
+   "approved_by uuid",
+   "station_id uuid",
+   "fence_exit_at timestamp with time zone"
+  ],
+  "sessions_done_roll_le2": 2,
+  "training_sessions_cols": [
+   "id uuid",
+   "department_id uuid",
+   "plan_id uuid",
+   "title text",
+   "date date",
+   "done boolean",
+   "created_at timestamp with time zone",
+   "signin_token text",
+   "signin_open boolean",
+   "series_id uuid",
+   "audience text",
+   "start_time time without time zone",
+   "counts_toward_attendance boolean",
+   "location_lat double precision",
+   "location_lng double precision",
+   "location_radius_m integer",
+   "location_label text",
+   "is_offsite boolean",
+   "duration_min smallint",
+   "is_meeting boolean"
+  ],
+  "def_is_training_manager": "CREATE OR REPLACE FUNCTION public.is_training_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers \u2014 THE training-management gate: a Department Admin in the caller's department (not Project Admin \u2014\n  -- deliberately not is_dept_admin()) OR an active training officer there. Schedules / edits / completes / reopens sessions\n  -- (meetings and board events included), marks the roster, manages categories and the drill-plan library.\n    select exists (\n      select 1 from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n         and m.department_id = public.my_department_id()\n         and m.access && array['Department Admin']::text[]\n    ) or public.is_training_officer();\n  $function$\n",
+  "presence_by_kind_source": {
+   "standby/geo/verified=true": 111,
+   "standby/geo/verified=false": 44,
+   "training/geo/verified=true": 37,
+   "training/geo/verified=false": 2,
+   "standby/gps_geofence/verified=true": 793,
+   "standby/gps_geofence/verified=false": 135
+  },
+  "session_attendance_cols": [
+   "id uuid default gen_random_uuid()",
+   "department_id uuid",
+   "session_id uuid",
+   "member_id uuid",
+   "checked_in_at timestamp with time zone",
+   "created_at timestamp with time zone default now()"
+  ],
+  "station_presence_checks": [
+   "station_presence_kind_check | CHECK ((kind = ANY (ARRAY['training'::text, 'standby'::text, 'incident'::text, 'offsite'::text])))",
+   "station_presence_offsite_needs_label | CHECK (((kind <> 'offsite'::text) OR ((offsite_label IS NOT NULL) AND (btrim(offsite_label) <> ''::text))))",
+   "station_presence_offsite_needs_locflag | CHECK (((kind <> 'offsite'::text) OR (location_confirmed IS NOT NULL)))",
+   "station_presence_source_check | CHECK ((source = ANY ('{geo,gps_geofence}'::text[])))"
+  ],
+  "verified_presence_count": 941,
+  "sessions_done_empty_roll": 1,
+  "attested_training_callers": [
+   "dept_station_shifts",
+   "dept_iso_hours_by_station",
+   "dept_iso_hours_for"
+  ],
+  "def_session_has_attendance": null,
+  "dept_station_shifts_presence_kinds": "{in}",
+  "sessions_done_with_presence_overlap": 20,
+  "presence_members_not_on_roll_in_drill_window": 12
+ },
+ "part2": {
+  "done_sessions_no_duration": 11,
+  "done_sessions_no_start_time": 6,
+  "overlap_pairs_by_kind_onroll": {
+   "standby/onroll=true": 61,
+   "standby/onroll=false": 12
+  }
+ }
+}
