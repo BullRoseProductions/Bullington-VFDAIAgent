@@ -117,7 +117,9 @@ for (const [who, role, isTO, expect] of [
   const { host, unmount } = await mountTraining(role, isTO);
   const t = text(host);
   const view = t.includes("Your training calendar") ? "member" : t.includes("Keep training on schedule") ? "leader" : "?";
-  const sched = !!btn(host, "Schedule session"), ai = !!btn(host, "Draft with AI"), card = t.includes("Training officers ·"), qr = !!btn(host, "QR sign-in");
+  // Training Overhaul Slice 2 replaced the hero's "Draft with AI" button (+ inline planner) with a "Draft a plan →" link to the
+  // Training Plans tab — the same canPlanAI (= canManageTraining) gate, so the AI entry is checked through the link now.
+  const sched = !!btn(host, "Schedule session"), ai = !!btn(host, "Draft a plan →"), card = t.includes("Training officers ·"), qr = !!btn(host, "QR sign-in");
   await openPlans(host);
   const builder = text(host).includes("Draft a training plan with AI");
   ok(`${who}: view ${expect.view}; schedule / AI planner / plans builder ${expect.manage ? "shown" : "hidden"}; officers card ${expect.card ? "shown" : "hidden"}; QR ${expect.qr ? "shown" : "hidden"}`,

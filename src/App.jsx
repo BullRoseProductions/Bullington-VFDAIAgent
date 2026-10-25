@@ -23625,7 +23625,91 @@ function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel }) {
   );
 }
 
-function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle }) {
+/* TRAINING CATEGORIES — management (Training Overhaul Slice 2): add / edit / remove the department's training_plans rows
+   (name, cadence, colour), moved here from the Schedule landing page, which keeps a read-only status strip with the
+   Schedule buttons. The same three writes under the same RLS, carried over verbatim; the same gates — rendered only for
+   canManageTraining (the caller's canWrite), and Remove additionally behind useCanDeleteShared() + confirmDestructive. */
+function TrainingCategoriesCard({ S, categories, loadPlans, notify }) {
+  const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
+  const plan = categories || [];
+  const [addingPlan, setAddingPlan] = useState(false);
+  const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [ed, setEd] = useState({ name: "", cadence: "Monthly", color: CATEGORY_COLORS[0] });
+  useEditorOpen(addingPlan || editingPlanId != null);   // a half-typed category: a refresh must not drop it
+  async function addPlan() {
+    const name = pn.trim();
+    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before adding it." }); return; }
+    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
+    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
+    const { error } = await supabase.from("training_plans").insert({ department_id: deptId, name, cadence: pc, color: pcolor });
+    if (error) { notify({ kind: "error", title: "Couldn't add the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setPn(""); setPc("Monthly"); setPcolor(CATEGORY_COLORS[0]); setAddingPlan(false); loadPlans();
+  }
+  async function removePlan(id) {
+    const p = plan.find((x) => x.id === id);
+    if (!(await confirmDestructive({ noun: "training plan", name: p?.name || "this training", impact: "Sessions already scheduled from it stay on the calendar, but lose their link back to the plan — which is exactly what made the September deletions unrecoverable from the live database." }))) return;
+    const { error } = await supabase.from("training_plans").delete().eq("id", id);
+    if (error) { notify({ kind: "error", title: "Couldn't remove the training", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
+    loadPlans();
+  }
+  function startEditPlan(p) { setEditingPlanId(p.id); setEd({ name: p.name, cadence: p.cadence, color: p.color || CATEGORY_COLORS[0] }); }
+  async function updatePlan() {
+    const name = ed.name.trim();
+    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before saving it." }); return; }
+    const { error } = await supabase.from("training_plans").update({ name, cadence: ed.cadence, color: ed.color }).eq("id", editingPlanId);   // last_iso intentionally NOT updated
+    if (error) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setEditingPlanId(null); loadPlans();
+  }
+  const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
+  const swatches = (value, pick) => (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+      {CATEGORY_COLORS.map((col) => (
+        <button key={col} type="button" title={col} onClick={() => pick(col)}
+          style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: value === col ? `3px solid ${FIRE.textPrimary}` : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
+      ))}
+    </div>
+  );
+  return (
+    <div id="tp-categories" style={{ ...FS.cardNoir, padding: "12px 14px", marginBottom: 12 }}>
+      <CardHead icon={GraduationCap} title="Training categories" count={plan.length} />
+      <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-2px 0 10px" }}>The recurring trainings the Schedule tracks — what's on track or due shows there.</div>
+      {addingPlan ? (
+        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ ...S.field, flex: 1, minWidth: 170 }}>{lbl("Training")}<input style={FS.input} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
+          <label style={{ ...S.field, minWidth: 140 }}>{lbl("How often")}<select style={FS.input} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+          <div style={{ ...S.field, minWidth: 150 }}>{lbl("Color")}{swatches(pcolor, setPcolor)}</div>
+          <button style={FS.btnPrimary} onClick={addPlan}><Plus size={15} /> Add to plan</button>
+          <button style={FS.btn} onClick={() => setAddingPlan(false)}>Cancel</button>
+        </div>
+      ) : <button style={{ ...FS.btn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={FIRE.btnIcon} /> Add a training</button>}
+      {plan.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "6px 0" }}>No training requirements yet — add your first one to start tracking what's due.</div> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {plan.map((p) => editingPlanId === p.id ? (
+            <div key={p.id} style={{ ...NOIR_INSET, padding: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ ...S.field, flex: 1, minWidth: 170 }}>{lbl("Training")}<input style={FS.input} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
+              <label style={{ ...S.field, minWidth: 140 }}>{lbl("How often")}<select style={FS.input} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
+              <div style={{ ...S.field, minWidth: 150 }}>{lbl("Color")}{swatches(ed.color, (col) => setEd((v) => ({ ...v, color: col })))}</div>
+              <button style={FS.btnPrimary} onClick={updatePlan}>Save</button>
+              <button style={FS.btn} onClick={() => setEditingPlanId(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "9px 12px", minWidth: 0 }}>
+              <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color || FIRE.catBlue, flexShrink: 0 }} />
+              <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+              <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{p.cadence}</span>
+              <span style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
+                <button title="Edit" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={13} color={FIRE.btnIcon} /></button>
+                {canDeleteShared && <button title="Remove" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => removePlan(p.id)}><X size={13} color={FIRE.deleteRed} /></button>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans }) {
   const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
@@ -23853,6 +23937,8 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
             </div>
           </div>
         )}
+        {/* Slice 2: category management lives here now (writers only); the Schedule keeps the read-only status strip */}
+        {canWrite && loadPlans && <TrainingCategoriesCard S={S} categories={categories} loadPlans={loadPlans} notify={notify} />}
       </NoirSkin>
     </PageShell>
   );
@@ -23949,38 +24035,38 @@ function Training(props) {
   const [view, setView] = useState("schedule");
   const [plansSeen, setPlansSeen] = useState(false);
   const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); }} style={{ marginBottom: 12 }} />;
+  // Slice 2: the Schedule's "Draft a plan →" and "Manage in Training Plans →" flip to the Training Plans tab (and, for the
+  // latter, land on its Training categories card).
+  const goPlans = (anchor) => { setView("plans"); setPlansSeen(true); if (anchor) setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80); };
   // The client twin of is_training_manager(): a Department Admin (NOT Project Admin — not isDeptAdmin) OR an active
   // training officer. Every training write below keys on it; running a QR sign-in does not (canRunSignin, decision 3).
   const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
-    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} /></div>}
+    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} /></div>
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} /></div>}
   </>);
 }
 
 // CardHead paints its icon red; the "no length recorded" notice keeps its amber accent, so its icon overrides the colour.
 const AmberClockIcon = (props) => <Clock {...props} color={FIRE.amberText} />;
-function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle, canManageTraining, isTrainingOfficer, onTrainingOfficersChanged }) {
+function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle, canManageTraining, isTrainingOfficer, onTrainingOfficersChanged, onDraftPlan, onManageCategories }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = !!canManageTraining;   // create/edit/complete/Reopen sessions, roster attendance, categories — is_training_manager() (a Department Admin or a training officer; not PA)
   const canRunSignin = hasAny(role, SIGNIN_ROLES);   // QR generate-gate (NOT Board Member, NOT Member)
-  const canPlanAI = !!canManageTraining;   // AI drill planner — its only outputs (save to a session / schedule on a date) are writes is_training_manager() gates
+  const canPlanAI = !!canManageTraining;   // AI drill planner — its only outputs (save to a session / schedule on a date) are writes is_training_manager() gates. Slice 2: gates the hero's "Draft a plan →" link (drafting lives on the Training Plans tab)
   const memberView = !isLeader(role) && !isTrainingOfficer;   // a training officer who is a plain Member gets the management view (the isEqMgr analogue)
   const today = new Date();
   const me = members.find((m) => m.id === meId);
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [showAllMissed, setShowAllMissed] = useState(false);   // member view: catch-up list condensed to 3 until expanded
-  const [upOpen, setUpOpen] = useState(null);                  // member view: "Up next" row whose Details are open
+  // member view "Up next" (Slice 2): this month's rows open their Details by default, later ones are closed — upFlip holds
+  // the rows the member has flipped from that default; laterOpen expands the collapsed "Later (N)" group.
+  const [upFlip, setUpFlip] = useState(() => new Set());
+  const [laterOpen, setLaterOpen] = useState(false);
   const [plansOpen, setPlansOpen] = useState(null);            // leader view: session whose Register plans (names) are open — "hero" for the Next training card
-  const [addingPlan, setAddingPlan] = useState(false);
-  const [editPlanMode, setEditPlanMode] = useState(false);   // false = clean text; true = reveal Add + per-plan Edit/Remove. Schedule stays at rest (ops).
-  function togglePlanEdit() { setEditPlanMode((v) => { if (v) { setEditingPlanId(null); setAddingPlan(false); } return !v; }); }
   const [editSessionMode, setEditSessionMode] = useState(false);   // false = clean session rows; true = reveal per-session Edit/Remove + detach-plan. Attendance/QR/Complete/Attach stay at rest (ops).
   function toggleSessionEdit() { setEditSessionMode((v) => { if (v) setEditingSessionId(null); return !v; }); }
-  const [pn, setPn] = useState(""); const [pc, setPc] = useState("Monthly"); const [pcolor, setPcolor] = useState(CATEGORY_COLORS[0]);
-  const [editingPlanId, setEditingPlanId] = useState(null);
-  const [ed, setEd] = useState({ name: "", cadence: "Monthly", color: CATEGORY_COLORS[0] });
   const [showSess, setShowSess] = useState(false);
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
@@ -24033,10 +24119,11 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   }, [canRunSignin, (sessions || []).filter((s) => s.signinOpen && !s.done).map((s) => s.id).sort().join(",")]);
   async function openSI(s) {
     const { data, error } = await supabase.rpc("open_signin", { p_session_id: s.id });   // generates/rotates; gated DA/TO/PA at the DB
-    if (error) { notify({ kind: "error", title: "Couldn't open sign-in", text: error.message || "Please try again.", details: error.message }); return; }
+    if (error) { notify({ kind: "error", title: "Couldn't open sign-in", text: error.message || "Please try again.", details: error.message }); return null; }
     setSigninTokens((t) => ({ ...t, [s.id]: data }));
     setOpenSignin(s.id);
     loadSessions();   // refresh signin_open
+    return data;      // the live code — Slice 2's hero QR opens the fullscreen overlay with it
   }
   const rotateSI = openSI;   // open_signin rotates on every call
   // ---- off-site drill location ----
@@ -24083,6 +24170,9 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const checkinURL = (s, token) => (token ? `${APP_ORIGIN}/checkin?checkin=${s.id}&t=${token}` : null);
   // Full-screen QR overlay + hi-res PNG export for the sign-in code
   const [expandQR, setExpandQR] = useState(null);   // { s, token } | null
+  // Slice 2: the inline code is ~260px (was 172) — a bigger scan target at arm's length; capped by the viewport so it
+  // still fits (and the panel wraps) on a phone. The 720px download copy and the fullscreen overlay are unchanged.
+  const qrInline = typeof window !== "undefined" ? Math.max(160, Math.min(260, (window.innerWidth || 1024) - 120)) : 260;
   const dlQRRef = useRef(null);                      // wraps the hidden 720px export QR (only one panel open at a time)
   function downloadSigninPNG(s, token) {
     const src = dlQRRef.current?.querySelector("canvas");
@@ -24137,7 +24227,6 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [rOrd, setROrd] = useState(1);                      // monthly ordinal: 1..4 or "last"
   const [rCount, setRCount] = useState("26");               // N occurrences (the end condition)
   // AI training-plan drafter (Card 2) + ai_text viewer
-  const [draftOpen, setDraftOpen] = useState(false);
   const [noLenOpen, setNoLenOpen] = useState(false);   // the "finished drills with no length" notice: tucked by default; the count stays in its header
   const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);
   async function toggleAttend(s, mid) {
@@ -24172,30 +24261,6 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const soon = planView.filter((x) => x.info.label === "Due soon").length;
   const ok = planView.length - over - soon;
 
-  async function addPlan() {
-    const name = pn.trim();
-    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before adding it." }); return; }
-    const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
-    if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
-    const { error } = await supabase.from("training_plans").insert({ department_id: deptId, name, cadence: pc, color: pcolor });
-    if (error) { notify({ kind: "error", title: "Couldn't add the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setPn(""); setPc("Monthly"); setPcolor(CATEGORY_COLORS[0]); setAddingPlan(false); loadPlans();
-  }
-  async function removePlan(id) {
-    const p = plan.find((x) => x.id === id);
-    if (!(await confirmDestructive({ noun: "training plan", name: p?.name || "this training", impact: "Sessions already scheduled from it stay on the calendar, but lose their link back to the plan — which is exactly what made the September deletions unrecoverable from the live database." }))) return;
-    const { error } = await supabase.from("training_plans").delete().eq("id", id);
-    if (error) { notify({ kind: "error", title: "Couldn't remove the training", text: "Something went wrong removing that. Please try again.", details: error.message }); return; }
-    loadPlans();
-  }
-  function startEditPlan(p) { setEditingPlanId(p.id); setEd({ name: p.name, cadence: p.cadence, color: p.color || CATEGORY_COLORS[0] }); }
-  async function updatePlan() {
-    const name = ed.name.trim();
-    if (!name) { notify({ kind: "error", title: "Training needs a name", text: "Give the training a name before saving it." }); return; }
-    const { error } = await supabase.from("training_plans").update({ name, cadence: ed.cadence, color: ed.color }).eq("id", editingPlanId);   // last_iso intentionally NOT updated
-    if (error) { notify({ kind: "error", title: "Couldn't save the training", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
-    setEditingPlanId(null); loadPlans();
-  }
   function scheduleFor(p) {
     const info = dueInfo(p); setSpid(p.id); setStitle("");
     if (info.next) { const nd = info.next; setCur({ y: nd.getFullYear(), m: nd.getMonth() }); setSd(Math.min(nd.getDate(), new Date(nd.getFullYear(), nd.getMonth() + 1, 0).getDate())); }
@@ -24482,7 +24547,12 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     const sessColor = (s) => s.audience === "board" ? FIRE.blueText : s.audience === "leadership" ? FIRE.amberText : (catOf(s)?.color || FIRE.catBlue);   // saved category colour
     const dowTime = (s) => [sessDate(s).toLocaleDateString("en-US", { weekday: "short" }), s.startTime ? fmtTime(s.startTime) : null, s.isOffsite && s.locLabel ? s.locLabel : null].filter(Boolean).join(" · ");
     // UP NEXT — the member's own upcoming sessions (restricted events only if they're on that roll), soonest first.
-    const upcoming = sessions.filter((s) => !s.done && sessDate(s) >= t0 && (!isRestrictedEvent(s) || rollFor(s, me))).sort((x, y) => sessDate(x) - sessDate(y)).slice(0, 3);
+    const upcomingAll = sessions.filter((s) => !s.done && sessDate(s) >= t0 && (!isRestrictedEvent(s) || rollFor(s, me))).sort((x, y) => sessDate(x) - sessDate(y));
+    // Slice 2: every remaining session of THIS month shows (Details open); later months sit under a collapsed "Later (N)"
+    // row — the 3-item cap applies only there (the calendar beside it shows the rest).
+    const isThisMonth = (s) => s.y === t0.getFullYear() && s.m === t0.getMonth();
+    const thisMonthUp = upcomingAll.filter(isThisMonth), laterUp = upcomingAll.filter((s) => !isThisMonth(s)), laterShown = laterUp.slice(0, 3);
+    const flipUp = (id) => setUpFlip((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
     // Month trend — the same "recorded" rule as the 90-day figure, bucketed by month (last 8 months, from loaded sessions).
     const trend = Array.from({ length: 8 }, (_, i) => {
       const d = new Date(t0.getFullYear(), t0.getMonth() - 7 + i, 1);
@@ -24516,8 +24586,9 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
             </div>
             <div style={{ flex: "1 1 260px", maxWidth: 360, minWidth: 0, display: "flex", flexDirection: "column", gap: 9 }}>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.textMuted }}>Up next for you</div>
-              {upcoming.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Nothing scheduled for you yet.</div> : upcoming.map((s, i) => {
-                const col = sessColor(s); const open = upOpen === s.id; const cat = catOf(s);
+              {(() => {
+                const renderUp = (s, i) => {
+                const col = sessColor(s); const open = isThisMonth(s) !== upFlip.has(s.id); const cat = catOf(s);
                 return (
                   <div key={s.id} style={{ background: i === 0 ? "linear-gradient(180deg, rgba(224,58,68,.07), transparent)" : FIRE.card2Noir, border: `1px solid ${i === 0 ? "rgba(224,58,68,.4)" : FIRE.lineNoir}`, borderRadius: 10, padding: "10px 11px" }}>
                     <div style={{ display: "flex", gap: 11, alignItems: "flex-start" }}>
@@ -24531,7 +24602,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                         <span style={{ display: "inline-block", marginTop: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 4, padding: "2px 7px", background: `${col}29`, color: col }}>{s.audience === "board" ? "Board only" : s.audience === "leadership" ? "Leadership only" : (cat?.name || "One-off")}</span>
                       </div>
                       {/* Details expands what we know about the session (unchanged). Register — the plan — sits below. */}
-                      <button onClick={() => setUpOpen(open ? null : s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
+                      <button onClick={() => flipUp(s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
                     </div>
                     {/* REGISTER — the member's own plan (never a count). A heads-up, not attendance. */}
                     <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px dashed ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -24548,7 +24619,19 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                     )}
                   </div>
                 );
-              })}
+                };
+                return upcomingAll.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted }}>Nothing scheduled for you yet.</div> : (<>
+                  {thisMonthUp.length === 0 ? <div style={{ fontSize: 12, color: FIRE.textMuted }}>Nothing else this month.</div> : thisMonthUp.map((s, i) => renderUp(s, i))}
+              {laterUp.length > 0 && (<>
+                <button onClick={() => setLaterOpen((v) => !v)} aria-expanded={laterOpen}
+                  style={{ ...cubtn, justifyContent: "space-between", width: "100%", padding: "8px 11px" }}>
+                  <span>Later ({laterUp.length})</span>{laterOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                {laterOpen && laterShown.map((s, i) => renderUp(s, thisMonthUp.length + i))}
+                {laterOpen && laterUp.length > laterShown.length && <div style={{ fontSize: 11, color: FIRE.textMuted }}>+{laterUp.length - laterShown.length} more on the calendar</div>}
+              </>)}
+                </>);
+              })()}
             </div>
           </div>
         </div>
@@ -24692,6 +24775,18 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         const goToNext = (then) => { setCur({ y: nextSession.y, m: nextSession.m }); then && then(); setTimeout(() => { const el = document.getElementById(`ts-${nextSession.id}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60); };
         const thbtn = { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, borderRadius: 9, padding: "9px 15px", cursor: "pointer", border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textPrimary, fontFamily: "inherit" };
         const small = (t) => <span style={{ fontSize: 13, color: FIRE.textMuted }}>{t}</span>;
+        // Slice 2: the hero's QR sign-in goes straight to the fullscreen code. A live code -> show it; not open yet -> the
+        // same open_signin the row's "Open sign-in" calls, then show it. An off-site drill with no location, or an open
+        // sign-in whose code couldn't be restored, falls back to the row's inline panel — set the location / mint a new
+        // code there deliberately (the hero never silently rotates a live code).
+        const openHeroQR = async () => {
+          const s = nextSession, tok = signinTokens[s.id];
+          if (tok) { setExpandQR({ s, token: tok }); return; }
+          const needsLoc = s.isOffsite && (s.locLat == null || s.locLng == null);
+          if (needsLoc || s.signinOpen) { goToNext(() => setOpenSignin(s.id)); return; }
+          const token = await openSI(s);
+          if (token) setExpandQR({ s, token });
+        };
         return (
           <section className="tr-hero" style={{ position: "relative", overflow: "hidden", border: `1px solid ${FIRE.lineNoir}`, borderRadius: 16, background: "radial-gradient(120% 150% at 88% 0%, rgba(200,50,58,.34), rgba(200,50,58,0) 46%), linear-gradient(105deg, #05070A, #0B0E13 55%, #140A0D)", padding: "22px 26px", marginBottom: 12, display: "flex", gap: 24, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", boxShadow: FIRE.cardShadowNoir }}>
             <div style={{ position: "relative", flex: "1 1 340px", minWidth: 0 }}>
@@ -24715,10 +24810,10 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                 </div>
               )}
               <div style={{ display: "flex", gap: 9, marginTop: 17, flexWrap: "wrap" }}>
-                {nextSession && canRunSignin && !nextSession.done && <button style={thbtn} onClick={() => goToNext(() => setOpenSignin(nextSession.id))}><QrCode size={14} color={FIRE.redText} /> QR sign-in</button>}
+                {nextSession && canRunSignin && !nextSession.done && <button style={thbtn} onClick={openHeroQR}><QrCode size={14} color={FIRE.redText} /> QR sign-in</button>}
                 {nextSession && nextPlans.length > 0 && <button style={thbtn} onClick={() => openSessionPlans(nextSession)}><FileText size={14} color={FIRE.textMuted} /> View plan</button>}
-                {canPlanAI && <button style={thbtn} onClick={() => setDraftOpen((v) => !v)}><Sparkles size={14} color={FIRE.redText} /> {draftOpen ? "Close planner" : "Draft with AI"}</button>}
                 {nextSession && !nextSession.done && <button style={thbtn} aria-expanded={plansOpen === "hero"} onClick={() => setPlansOpen(plansOpen === "hero" ? null : "hero")}><Users size={14} color={FIRE.textMuted} /> {plansOpen === "hero" ? "Hide plans" : "Who's planning to come"}</button>}
+                {canPlanAI && onDraftPlan && <button style={{ background: "none", border: "none", padding: "9px 4px", color: FIRE.redText, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }} onClick={onDraftPlan}>Draft a plan →</button>}
                 {canManage && !showSess && <button style={{ ...thbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: FIRE.white }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); setTimeout(() => { const el = document.getElementById("tr-schedule"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }}><Plus size={14} color={FIRE.white} /> Schedule session</button>}
               </div>
               {nextSession && !nextSession.done && plansOpen === "hero" && (
@@ -24754,121 +24849,15 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         );
       })()}
 
-      {draftOpen && canPlanAI && <AIDrillPlanner S={S} addFeedback={addFeedback} sessions={sessions} loadSessions={loadSessions} notify={notify} dept={dept} me={me} role={role} categories={plan} canManageTraining={canManage} />}
       {agendaSession && <AttachAgendaModal S={S} session={agendaSession} byName={me?.name} notify={notify} onAttached={loadSessions} onClose={() => setAgendaSession(null)} />}
       {mounts}
       {/* overdue banner — kept as-is (light alert, per instruction) */}
       {over > 0 && (
         <div style={{ display: "flex", gap: 9, alignItems: "center", background: FIRE.card2Noir, border: `1px solid ${FIRE.redText}55`, borderLeft: `3px solid ${FIRE.redText}`, color: FIRE.redText, borderRadius: 10, padding: "10px 13px", fontSize: 13.5, marginBottom: 16 }}>
           <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see the plan below and schedule a session.</span>
+          <span><b>{over}</b> training{over === 1 ? "" : "s"} overdue or never logged — see Training categories below and schedule a session.</span>
         </div>
       )}
-
-      {isDeptAdmin(role) && <TrainingOfficersCard S={S} members={members} meId={meId} notify={notify} onChanged={onTrainingOfficersChanged} />}
-
-      {/* TRAINING CATEGORIES — one card: head (Edit trainings on the right, the mock's .chead .right), then the add
-          form when open, then the category grid. */}
-      <div style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
-      <CardHead icon={GraduationCap} title="Training categories"
-        right={canManage && planView.length > 0 ? (
-          <button onClick={togglePlanEdit} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>
-            {editPlanMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit trainings</>}
-          </button>) : null} />
-      {canManage && (editPlanMode || planView.length === 0) && (addingPlan ? (
-        <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={pn} placeholder="e.g. Ladder operations" onChange={(e) => setPn(e.target.value)} /></label>
-          <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={pc} onChange={(e) => setPc(e.target.value)}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
-              {CATEGORY_COLORS.map((col) => (
-                <button key={col} title={col} onClick={() => setPcolor(col)}
-                  style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: pcolor === col ? `3px solid ${FIRE.textPrimary}` : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
-              ))}
-            </div>
-          </div>
-          <button style={LprimaryBtn} onClick={addPlan}><Plus size={15} /> Add to plan</button>
-          <button style={Lbtn} onClick={() => setAddingPlan(false)}>Cancel</button>
-        </div>
-      ) : <button style={{ ...Lbtn, marginBottom: 12 }} onClick={() => setAddingPlan(true)}><Plus size={15} color={LbtnIcon} /> Add a training</button>)}
-        {planView.length === 0 ? (
-          <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "6px 0" }}>No training requirements yet{canManage ? " — add your first one to start tracking what's due." : "."}</div>
-        ) : (
-        <div className="tr-catgrid">
-        {planView.map(({ p, info }) => {
-          // Progress through the cadence window since the last session (dueInfo's own clock): overdue / never
-          // logged fill the bar in their status colour; on track fills in the category's colour.
-          const span = CADENCE_DAYS[p.cadence] || 30;
-          const sinceLast = p.lastISO ? Math.max(0, Math.round((t0n - new Date(p.lastISO + "T00:00:00")) / 86400000)) : null;
-          const bad = info.label === "Overdue" || info.label === "Not logged";
-          const prog = p.cadence === "One-off" ? (p.lastISO ? 100 : 0) : bad ? 100 : sinceLast == null ? 0 : Math.min(100, Math.round((sinceLast / span) * 100));
-          const barColor = bad || info.label === "Due soon" ? statusColor(info.label) : (p.color || FIRE.catBlue);
-          return (
-          editingPlanId === p.id ? (
-            <div key={p.id} style={{ ...Lcard, gridColumn: "1 / -1", marginBottom: 0, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ ...Lfield, flex: 1, minWidth: 170 }}><span style={LfieldLabel}>Training</span><input style={Linput} value={ed.name} onChange={(e) => setEd((v) => ({ ...v, name: e.target.value }))} /></label>
-              <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>How often</span><select style={Linput} value={ed.cadence} onChange={(e) => setEd((v) => ({ ...v, cadence: e.target.value }))}>{CADENCES.map((c) => <option key={c}>{c}</option>)}</select></label>
-              <div style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Color</span>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
-                  {CATEGORY_COLORS.map((col) => (
-                    <button key={col} title={col} onClick={() => setEd((v) => ({ ...v, color: col }))}
-                      style={{ width: 24, height: 24, borderRadius: 999, background: col, cursor: "pointer", border: ed.color === col ? `3px solid ${FIRE.textPrimary}` : "2px solid transparent", boxShadow: "0 0 0 1px rgba(255,255,255,.12)" }} />
-                  ))}
-                </div>
-              </div>
-              <button style={LprimaryBtn} onClick={updatePlan}>Save</button>
-              <button style={Lbtn} onClick={() => setEditingPlanId(null)}>Cancel</button>
-            </div>
-          ) : (
-            <div key={p.id} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, padding: "14px 15px", minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color || FIRE.catBlue, flexShrink: 0 }} />
-                <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 9px", borderRadius: 999, color: statusColor(info.label), background: `${statusColor(info.label)}1A`, border: `1px solid ${statusColor(info.label)}66` }}>{info.label.charAt(0).toUpperCase() + info.label.slice(1).toLowerCase()}</span>
-              </div>
-              <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "9px 0 10px", ...Lnum }}>
-                {p.cadence} · Last <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "never"}</b> · <span style={{ color: statusColor(info.label) }}>{info.rel}</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ flex: 1, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${prog}%`, height: "100%", borderRadius: 999, background: barColor }} /></div>
-                {canManage && <button style={{ ...Lbtn, padding: "5px 10px", fontSize: 11 }} onClick={() => scheduleFor(p)}><CalendarCheck size={13} color={LbtnIcon} /> Schedule</button>}
-                {canManage && editPlanMode && (<>
-                  <button title="Edit" style={{ ...Lbtn, padding: "5px 8px" }} onClick={() => startEditPlan(p)}><Pencil size={13} color={LbtnIcon} /></button>
-                  {canDeleteShared && <button title="Remove" style={{ ...Lbtn, padding: "5px 8px" }} onClick={() => removePlan(p.id)}><X size={13} color={FIRE.deleteRed} /></button>}
-                </>)}
-              </div>
-            </div>
-          ));
-        })}
-        </div>
-        )}
-      </div>
-
-      {/* ATTENDANCE TREND — the last 8 completed training sessions, attendees ÷ counted roster (doneTraining). */}
-      {doneTraining.length > 1 && (() => {
-        const pts = doneTraining.slice(0, 8).reverse().map((x) => ({ s: x, v: totalMembers ? Math.min(1, (x.attendance || []).length / totalMembers) : 0 }));
-        const W = 820, H = 150, x0 = 14, x1 = W - 14, top = 18, base = 136;
-        const xAt = (i) => (pts.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (pts.length - 1));
-        const yAt = (v) => base - v * (base - top);
-        const line = pts.map((pt, i) => `${xAt(i).toFixed(1)},${yAt(pt.v).toFixed(1)}`).join(" ");
-        const avg = pts.reduce((t, pt) => t + pt.v, 0) / pts.length;
-        return (
-          <div style={{ ...Lcard, marginBottom: 12 }}>
-            <CardHead icon={BarChart3} title="Attendance trend" right={<span>last {pts.length} sessions · of {totalMembers}</span>} />
-            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 150, display: "block" }}
-              aria-label={`Attendance, last ${pts.length} sessions: ${pts.map((pt) => `${pt.s.title} ${(pt.s.attendance || []).length} of ${totalMembers}`).join(", ")}`}>
-              <defs><linearGradient id="tr-trend" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgba(200,50,58,.35)" /><stop offset="1" stopColor="rgba(200,50,58,0)" /></linearGradient></defs>
-              <line x1={x0} y1={yAt(avg)} x2={x1} y2={yAt(avg)} stroke="rgba(255,255,255,.08)" strokeDasharray="4 4" />
-              <polygon points={`${x0},${base} ${line} ${x1},${base}`} fill="url(#tr-trend)" />
-              <polyline points={line} fill="none" stroke={FIRE.redBright} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-              {pts.map((pt, i) => <circle key={pt.s.id} cx={xAt(i)} cy={yAt(pt.v)} r="3.4" fill={FIRE.card} stroke={FIRE.redBright} strokeWidth="2.2"><title>{`${pt.s.title} · ${(pt.s.attendance || []).length}/${totalMembers}`}</title></circle>)}
-            </svg>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9.5, color: FIRE.textMuted }}>
-              {pts.map((pt) => <span key={pt.s.id}>{sessDate(pt.s).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>)}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* TRAINING CALENDAR — one card (the mock's .calhead + .cal tiles): month header with Schedule a session on the
           right; the schedule form opens inside the card, under the header. Same form, same handlers. */}
@@ -25129,7 +25118,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                         <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
                           <div style={{ textAlign: "center" }}>
                             <div style={{ background: "#fff", padding: 10, border: "1px solid #E7E5EE", borderRadius: 12, display: "inline-block" }}>
-                              <QRCodeCanvas value={checkinURL(s, liveToken)} size={172} />
+                              <QRCodeCanvas value={checkinURL(s, liveToken)} size={qrInline} />
                             </div>
                             {/* offscreen hi-res QR — read by downloadSigninPNG, never shown */}
                             <div ref={dlQRRef} aria-hidden style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }}>
@@ -25166,6 +25155,73 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
               );
             })}
         </div>
+      </div>
+
+      {/* ATTENDANCE TREND — the last 8 completed training sessions, attendees ÷ counted roster (doneTraining). */}
+      {doneTraining.length > 1 && (() => {
+        const pts = doneTraining.slice(0, 8).reverse().map((x) => ({ s: x, v: totalMembers ? Math.min(1, (x.attendance || []).length / totalMembers) : 0 }));
+        const W = 820, H = 150, x0 = 14, x1 = W - 14, top = 18, base = 136;
+        const xAt = (i) => (pts.length < 2 ? (x0 + x1) / 2 : x0 + (i * (x1 - x0)) / (pts.length - 1));
+        const yAt = (v) => base - v * (base - top);
+        const line = pts.map((pt, i) => `${xAt(i).toFixed(1)},${yAt(pt.v).toFixed(1)}`).join(" ");
+        const avg = pts.reduce((t, pt) => t + pt.v, 0) / pts.length;
+        return (
+          <div style={{ ...Lcard, marginBottom: 12 }}>
+            <CardHead icon={BarChart3} title="Attendance trend" right={<span>last {pts.length} sessions · of {totalMembers}</span>} />
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 150, display: "block" }}
+              aria-label={`Attendance, last ${pts.length} sessions: ${pts.map((pt) => `${pt.s.title} ${(pt.s.attendance || []).length} of ${totalMembers}`).join(", ")}`}>
+              <defs><linearGradient id="tr-trend" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgba(200,50,58,.35)" /><stop offset="1" stopColor="rgba(200,50,58,0)" /></linearGradient></defs>
+              <line x1={x0} y1={yAt(avg)} x2={x1} y2={yAt(avg)} stroke="rgba(255,255,255,.08)" strokeDasharray="4 4" />
+              <polygon points={`${x0},${base} ${line} ${x1},${base}`} fill="url(#tr-trend)" />
+              <polyline points={line} fill="none" stroke={FIRE.redBright} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+              {pts.map((pt, i) => <circle key={pt.s.id} cx={xAt(i)} cy={yAt(pt.v)} r="3.4" fill={FIRE.card} stroke={FIRE.redBright} strokeWidth="2.2"><title>{`${pt.s.title} · ${(pt.s.attendance || []).length}/${totalMembers}`}</title></circle>)}
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9.5, color: FIRE.textMuted }}>
+              {pts.map((pt) => <span key={pt.s.id}>{sessDate(pt.s).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>)}
+            </div>
+          </div>
+        );
+      })()}
+
+      {isDeptAdmin(role) && <TrainingOfficersCard S={S} members={members} meId={meId} notify={notify} onChanged={onTrainingOfficersChanged} />}
+
+      {/* TRAINING CATEGORIES — read-only status strip (Slice 2): each recurring training's on-track / due / overdue status
+          and its Schedule button. Managing the categories (add / edit / remove) moved to the Training Plans tab. */}
+      <div id="tr-categories" style={{ ...Lcard, padding: "12px 14px", marginBottom: 12 }}>
+      <CardHead icon={GraduationCap} title="Training categories"
+        right={canManage && onManageCategories ? (
+          <button onClick={onManageCategories} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>Manage in Training Plans →</button>) : null} />
+        {planView.length === 0 ? (
+          <div style={{ fontSize: 13, color: FIRE.textMuted2, padding: "6px 0" }}>No training requirements yet{canManage ? " — add your first one in Training Plans." : "."}</div>
+        ) : (
+        <div className="tr-catgrid">
+        {planView.map(({ p, info }) => {
+          // Progress through the cadence window since the last session (dueInfo's own clock): overdue / never
+          // logged fill the bar in their status colour; on track fills in the category's colour.
+          const span = CADENCE_DAYS[p.cadence] || 30;
+          const sinceLast = p.lastISO ? Math.max(0, Math.round((t0n - new Date(p.lastISO + "T00:00:00")) / 86400000)) : null;
+          const bad = info.label === "Overdue" || info.label === "Not logged";
+          const prog = p.cadence === "One-off" ? (p.lastISO ? 100 : 0) : bad ? 100 : sinceLast == null ? 0 : Math.min(100, Math.round((sinceLast / span) * 100));
+          const barColor = bad || info.label === "Due soon" ? statusColor(info.label) : (p.color || FIRE.catBlue);
+          return (
+            <div key={p.id} style={{ background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 12, padding: "14px 15px", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color || FIRE.catBlue, flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".03em", padding: "3px 9px", borderRadius: 999, color: statusColor(info.label), background: `${statusColor(info.label)}1A`, border: `1px solid ${statusColor(info.label)}66` }}>{info.label.charAt(0).toUpperCase() + info.label.slice(1).toLowerCase()}</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "9px 0 10px", ...Lnum }}>
+                {p.cadence} · Last <b style={{ color: FIRE.textSecondary, fontWeight: 600 }}>{p.lastISO ? new Date(p.lastISO + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "never"}</b> · <span style={{ color: statusColor(info.label) }}>{info.rel}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, height: 6, borderRadius: 999, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${prog}%`, height: "100%", borderRadius: 999, background: barColor }} /></div>
+                {canManage && <button style={{ ...Lbtn, padding: "5px 10px", fontSize: 11 }} onClick={() => scheduleFor(p)}><CalendarCheck size={13} color={LbtnIcon} /> Schedule</button>}
+              </div>
+            </div>
+          );
+        })}
+        </div>
+        )}
       </div>
       {expandQR && (
         <div onClick={() => setExpandQR(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 80, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, cursor: "pointer" }}>
