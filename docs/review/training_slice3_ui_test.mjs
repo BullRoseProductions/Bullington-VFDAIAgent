@@ -192,14 +192,18 @@ for (const [val, label, lo, hi, capToday] of [["thisMonth", "this month", T, T, 
 
 // 6 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+// Structural fences are PINNED to Slice 3's own release (b71e5ca, a --no-ff merge whose first parent 63fcc1c is the main it
+// landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "b71e5ca";
+const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = appAt(REL), relParent = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 3 (b71e5ca) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-ok("no new RPC", [...rpcSet(src)].every((n) => rpcSet(main).has(n)), JSON.stringify([...rpcSet(src)].filter((n) => !rpcSet(main).has(n))));
+ok("Slice 3 (b71e5ca) added no RPC vs its parent", [...rpcSet(rel)].every((n) => rpcSet(relParent).has(n)), JSON.stringify([...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n))));
 ok("the Sessions row label reads the session's month (no TRAIN_MONTHS[cur.m] in the row)", !src.includes("TRAIN_MONTHS[cur.m].slice(0, 3).toUpperCase()") && !src.includes("{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}") && src.includes("{TRAIN_MONTHS[s.m].slice(0, 3)} {s.d}"));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Slice 3 (b71e5ca) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
