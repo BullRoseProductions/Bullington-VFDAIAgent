@@ -24262,7 +24262,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const ok = planView.length - over - soon;
 
   function scheduleFor(p) {
-    const info = dueInfo(p); setSpid(p.id); setStitle("");
+    const info = dueInfo(p); setSpid(p.id); setStitle(""); setListFilter("month");
     if (info.next) { const nd = info.next; setCur({ y: nd.getFullYear(), m: nd.getMonth() }); setSd(Math.min(nd.getDate(), new Date(nd.getFullYear(), nd.getMonth() + 1, 0).getDate())); }
     setShowSess(true);
   }
@@ -24502,6 +24502,40 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   }
 
   const monthSessions = sessions.filter((s) => s.y === cur.y && s.m === cur.m).sort((a, b) => a.d - b.d);
+  /* SESSIONS "SHOW" FILTER (Training Overhaul Slice 3) — the leader Sessions card can show COMPLETED sessions over a named
+     period instead of the calendar month: this month / last month / this year / a custom whole-month range. Done-only,
+     newest first, grouped by month (newest month first), leadership / board events included as the list always has. The
+     calendar keeps showing cur; the list snaps back to "Calendar month" when the hero's goToNext, scheduleFor or the
+     calendar's own ← / → moves cur, so every #ts-<id> scroll target is on screen. Filters what loadSessions already holds —
+     no new read. Session-only state; nothing persisted. */
+  const [listFilter, setListFilter] = useState("month");          // "month" | "thisMonth" | "lastMonth" | "thisYear" | "custom"
+  const [rangeDraft, setRangeDraft] = useState(() => ({ fy: today.getFullYear(), fm: 0, ty: today.getFullYear(), tm: today.getMonth() }));
+  const [rangeApplied, setRangeApplied] = useState(null);       // { fy, fm, ty, tm } once Apply is pressed
+  const ymIdx = (y, m) => y * 12 + m;
+  const thisYM = ymIdx(today.getFullYear(), today.getMonth());
+  const listRange = listFilter === "thisMonth" ? [thisYM, thisYM]
+    : listFilter === "lastMonth" ? [thisYM - 1, thisYM - 1]
+    : listFilter === "thisYear" ? [ymIdx(today.getFullYear(), 0), thisYM]
+    : listFilter === "custom" && rangeApplied ? [ymIdx(rangeApplied.fy, rangeApplied.fm), ymIdx(rangeApplied.ty, rangeApplied.tm)]
+    : null;
+  const listEnd = new Date(today); listEnd.setHours(23, 59, 59, 999);   // "this year" = Jan 1 – today
+  const listGroups = [];
+  if (listRange) {
+    sessions.filter((s) => s.done && ymIdx(s.y, s.m) >= listRange[0] && ymIdx(s.y, s.m) <= listRange[1] && (listFilter !== "thisYear" || sessDate(s) <= listEnd))
+      .sort((a, b) => sessSort(b, a))
+      .forEach((s) => { const g = listGroups[listGroups.length - 1]; if (g && g.y === s.y && g.m === s.m) g.list.push(s); else listGroups.push({ y: s.y, m: s.m, list: [s] }); });
+  }
+  const listCount = listGroups.reduce((t, g) => t + g.list.length, 0);
+  const monLabel = (y, m) => `${TRAIN_MONTHS[m].slice(0, 3)} ${y}`;
+  const listTitle = listFilter === "thisMonth" ? "Completed · this month" : listFilter === "lastMonth" ? "Completed · last month"
+    : listFilter === "thisYear" ? "Completed · this year"
+    : rangeApplied ? `Completed · ${monLabel(rangeApplied.fy, rangeApplied.fm)} – ${monLabel(rangeApplied.ty, rangeApplied.tm)}` : "Completed · custom range";
+  const listEmpty = listFilter === "thisMonth" ? "No completed sessions this month." : listFilter === "lastMonth" ? "No completed sessions last month."
+    : listFilter === "thisYear" ? "No completed sessions this year."
+    : rangeApplied ? `No completed sessions between ${monLabel(rangeApplied.fy, rangeApplied.fm)} and ${monLabel(rangeApplied.ty, rangeApplied.tm)}.` : "";
+  const rangeYears = Array.from(new Set([today.getFullYear(), ...sessions.map((s) => s.y)])).sort((a, b) => b - a);
+  const rangeOk = ymIdx(rangeDraft.fy, rangeDraft.fm) <= ymIdx(rangeDraft.ty, rangeDraft.tm);
+  const setCurFromCalendar = (v) => { setListFilter("month"); setCur(v); };   // the calendar's ← / → : back to the calendar month
   // REGISTER (plans, not attendance) — one read for the upcoming sessions + this month's open ones. Top level so
   // the hook order never changes with the member/leader branch. Nothing below feeds it into any attendance figure.
   const regToday = new Date(); regToday.setHours(0, 0, 0, 0);
@@ -24772,7 +24806,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         const R = 49, C = 2 * Math.PI * R;
         const nextPlans = nextSession ? (nextSession.plans || []) : [];
         const nextCatName = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId))?.name : null;
-        const goToNext = (then) => { setCur({ y: nextSession.y, m: nextSession.m }); then && then(); setTimeout(() => { const el = document.getElementById(`ts-${nextSession.id}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60); };
+        const goToNext = (then) => { setListFilter("month"); setCur({ y: nextSession.y, m: nextSession.m }); then && then(); setTimeout(() => { const el = document.getElementById(`ts-${nextSession.id}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60); };
         const thbtn = { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, borderRadius: 9, padding: "9px 15px", cursor: "pointer", border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textPrimary, fontFamily: "inherit" };
         const small = (t) => <span style={{ fontSize: 13, color: FIRE.textMuted }}>{t}</span>;
         // Slice 2: the hero's QR sign-in goes straight to the fullscreen code. A live code -> show it; not open yet -> the
@@ -24864,7 +24898,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
       <div id="tr-schedule" />
       <div style={{ ...Lcard, marginBottom: 12 }}>
           <MonthCalendar
-            cur={cur} setCur={setCur} dark tiles
+            cur={cur} setCur={setCurFromCalendar} dark tiles
             headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
             belowHeader={canManage && showSess ? (
         <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -24925,14 +24959,42 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
 
       {/* SESSIONS — the month's full session list in its own card; every control below is unchanged. */}
       <div style={{ ...Lcard, marginBottom: 16 }}>
-        <CardHead icon={ClipboardList} title={`Sessions · ${TRAIN_MONTHS[cur.m]} ${cur.y}`} count={monthSessions.length}
-          right={canManage && monthSessions.length > 0 ? (
+        <CardHead icon={ClipboardList} title={listFilter === "month" ? `Sessions · ${TRAIN_MONTHS[cur.m]} ${cur.y}` : listTitle} count={listFilter === "month" ? monthSessions.length : listCount}
+          right={<span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <select aria-label="Show" value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ ...Linput, width: "auto", padding: "5px 9px", fontSize: 12 }}>
+              <option value="month">Calendar month</option>
+              <option value="thisMonth">Completed this month</option>
+              <option value="lastMonth">Completed last month</option>
+              <option value="thisYear">Completed this year</option>
+              <option value="custom">Custom range…</option>
+            </select>
+            {/* only in the calendar month — filter views are done-only, and a done session is locked from editing */}
+            {canManage && listFilter === "month" && monthSessions.length > 0 && (
             <button onClick={toggleSessionEdit} style={{ ...Lbtn, display: "inline-flex", alignItems: "center", gap: 5 }}>
               {editSessionMode ? <><CheckCircle2 size={13} color={FIRE.green} /> Done</> : <><Pencil size={13} color={LbtnIcon} /> Edit sessions</>}
-            </button>) : null} />
+            </button>)}
+          </span>} />
+        {listFilter === "custom" && (
+          <div style={{ ...NOIR_INSET, padding: 12, margin: "8px 0 4px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {[["From", "fm", "fy"], ["To", "tm", "ty"]].map(([lab, mk, yk]) => (
+              <div key={lab} style={{ ...Lfield, minWidth: 0 }}><span style={LfieldLabel}>{lab}</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <select aria-label={`${lab} month`} style={{ ...Linput, width: "auto" }} value={rangeDraft[mk]} onChange={(e) => setRangeDraft((r) => ({ ...r, [mk]: Number(e.target.value) }))}>
+                    {TRAIN_MONTHS.map((mn, i) => <option key={mn} value={i}>{mn}</option>)}
+                  </select>
+                  <select aria-label={`${lab} year`} style={{ ...Linput, width: "auto" }} value={rangeDraft[yk]} onChange={(e) => setRangeDraft((r) => ({ ...r, [yk]: Number(e.target.value) }))}>
+                    {rangeYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+            ))}
+            <button style={{ ...LprimaryBtn, opacity: rangeOk ? 1 : 0.5 }} disabled={!rangeOk} onClick={() => setRangeApplied({ ...rangeDraft })}>Apply</button>
+            {!rangeOk && <span style={{ fontSize: 11.5, color: FIRE.amberText }}>From must be on or before To.</span>}
+          </div>
+        )}
         <div>
-          {monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> :
-            monthSessions.map((s) => {
+          {(() => {
+            const renderSessionRow = (s) => {
               const att = s.attendance || [];
               const open = openAtt === s.id;
               const restricted = isRestrictedEvent(s);
@@ -24946,7 +25008,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                 <div key={s.id} id={`ts-${s.id}`}>
                   <div style={{ ...Lrow, padding: "12px 2px", gap: 13, borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                     <div style={{ width: 42, textAlign: "center", flexShrink: 0 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".06em", color: plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue }}>{TRAIN_MONTHS[cur.m].slice(0, 3).toUpperCase()}</div>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".06em", color: plan.find((p) => String(p.id) === String(s.planId))?.color || FIRE.catBlue }}>{TRAIN_MONTHS[s.m].slice(0, 3).toUpperCase()}{s.y !== today.getFullYear() ? ` ’${String(s.y).slice(2)}` : ""}</div>
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...Lnum }}>{s.d}</div>
                     </div>
                     <div style={FS.rowTitle}>
@@ -24954,7 +25016,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                         {/* the mock's .spill.done — the status sits with the title, not in the button cluster */}
                         {s.done && <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", padding: "2px 8px", borderRadius: 999, color: FIRE.greenText, background: "rgba(47,168,105,.10)", border: "1px solid rgba(47,168,105,.4)", verticalAlign: "1px" }}>Done</span>}
                       </span>
-                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[cur.m].slice(0, 3)} {s.d}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[s.m].slice(0, 3)} {s.d}{s.y !== today.getFullYear() ? `, ${s.y}` : ""}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
                     <div style={{ ...FS.rowActions, gap: 6 }}>
@@ -25153,7 +25215,19 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                   })()}
                 </div>
               );
-            })}
+            };
+            if (listFilter === "month") return monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> : monthSessions.map(renderSessionRow);
+            if (!listRange) return <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>Pick a From and To month, then Apply.</div>;
+            if (!listGroups.length) return <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>{listEmpty}</div>;
+            return listGroups.map((g) => (
+              <React.Fragment key={`${g.y}-${g.m}`}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "14px 0 2px", fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>
+                  <span>{TRAIN_MONTHS[g.m]} {g.y}</span><span style={{ ...Lnum, fontWeight: 600, letterSpacing: 0 }}>{g.list.length} completed</span>
+                </div>
+                {g.list.map(renderSessionRow)}
+              </React.Fragment>
+            ));
+          })()}
         </div>
       </div>
 
