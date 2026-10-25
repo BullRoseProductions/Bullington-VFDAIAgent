@@ -1,0 +1,196 @@
+{
+ "run": "2026-10-25, Supabase SQL editor, read-only",
+ "audit": {
+  "sessions": {
+   "done": 34,
+   "total": 176,
+   "in_series": 148,
+   "with_plans": 21,
+   "future_not_done": 131,
+   "past_not_done_no_att": 9,
+   "past_not_done_with_att": 2
+  },
+  "audit_cols": [
+   "id uuid",
+   "seq int8",
+   "department_id uuid",
+   "session_id uuid",
+   "action text",
+   "actor_id uuid",
+   "actor_name text",
+   "at timestamptz",
+   "reason text",
+   "changes jsonb",
+   "roster_added _uuid",
+   "roster_removed _uuid",
+   "roster_before int4",
+   "roster_after int4",
+   "roster_snapshot _uuid"
+  ],
+  "title_hints": null,
+  "signature_sizes": {
+   "n": 8,
+   "avg_len": 37562,
+   "max_len": 80790,
+   "data_url": true
+  },
+  "leaders_per_dept": {
+   "B4C Demo Department": {
+    "da": 2,
+    "to": 0,
+    "to_not_da": 0
+   },
+   "Granbury Fire Station": {
+    "da": 2,
+    "to": 0,
+    "to_not_da": 0
+   },
+   "Lipan Volunteer Fire Department": {
+    "da": 2,
+    "to": 2,
+    "to_not_da": 2
+   },
+   "Indian Harbor Volunteer Fire Department": {
+    "da": 7,
+    "to": 1,
+    "to_not_da": 1
+   },
+   "North Hood County Volunteer Fire Department": {
+    "da": 3,
+    "to": 5,
+    "to_not_da": 5
+   }
+  },
+  "witnessed_batches": 0,
+  "audit_action_check": "CHECK ((action = ANY (ARRAY['correct'::text, 'reopen'::text, 'finalize'::text])))",
+  "ts_status_like_cols": null,
+  "audit_rows_by_action": {},
+  "fk_into_training_sessions": [
+   "session_attendance.session_attendance_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE CASCADE",
+   "session_plans.session_plans_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+   "station_presence.station_presence_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+   "ai_outputs.ai_outputs_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+   "session_registrations.session_registrations_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE CASCADE",
+   "training_session_audit.training_session_audit_session_id_fkey FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE RESTRICT"
+  ],
+  "equipment_issue_batch_cols": [
+   "id uuid",
+   "department_id uuid",
+   "member_id uuid",
+   "signed_name text",
+   "signed_at timestamptz",
+   "signature_data text",
+   "witness_signature text",
+   "witness_name text",
+   "item_count int4",
+   "issued_by uuid",
+   "issued_by_name text",
+   "created_at timestamptz"
+  ],
+  "fns_reading_training_sessions": [
+   "attach_drill_plan_to_session(p_plan_id uuid, p_session_id uuid)",
+   "attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)",
+   "close_signin(p_session_id uuid)",
+   "correct_training_session(p_session_id uuid, p_changes jsonb, p_add uuid[], p_remove uuid[], p_reason text)",
+   "current_signin_token(p_session_id uuid)",
+   "drill_window_presence(p_session_id uuid)",
+   "finalize_training_session(p_session_id uuid, p_duration_min integer)",
+   "guard_ai_outputs_session_id()",
+   "member_check_in(p_session_id uuid, p_token text, p_lat double precision, p_lng double precision, p_accuracy double precision)",
+   "move_week(p_day_id uuid, p_dir text)",
+   "my_department_rollup()",
+   "open_signin(p_session_id uuid)",
+   "pa_department_radar()",
+   "probation_item_states(p_member uuid, p_dept uuid)",
+   "readiness_verdict(p_dept uuid, p_member uuid)",
+   "recompute_training_plan_last_iso(p_plan_id uuid)",
+   "reopen_training_session(p_session_id uuid, p_reason text)",
+   "set_member_termination(p_member uuid, p_date date)",
+   "set_my_session_registration(p_session_id uuid, p_status text)",
+   "set_session_location(p_session_id uuid, p_lat double precision, p_lng double precision, p_radius_m integer, p_label text)",
+   "swap_week_dates(p_a uuid, p_b uuid)",
+   "tg_session_attendance_membership_window()"
+  ],
+  "views_reading_training_sessions": null,
+  "issue_equipment_batch_witness_lines": [
+   "CREATE OR REPLACE FUNCTION public.issue_equipment_batch(p_member_id uuid, p_equipment_ids uuid[], p_signature_data text, p_signed_name text, p_witness_member_id uuid DEFAULT NULL::uuid, p_witness_signature text DEFAULT NULL::text)",
+   "  v_witness public.members;",
+   "  if v_actor.id is null then raise exception 'No member record for the signed-in user'; end if;",
+   "  if v_actor.status = 'Inactive' then raise exception 'Inactive members cannot issue equipment'; end if;",
+   "    raise exception 'Only an assigned equipment manager or a Department Admin can issue equipment';",
+   "  if coalesce(btrim(p_signature_data), '') = '' then raise exception 'A signature is required to issue equipment'; end if;",
+   "  if coalesce(btrim(p_signed_name), '')    = '' then raise exception 'The signer''s name is required'; end if;",
+   "  if v_target.id is null then raise exception 'Recipient not found'; end if;",
+   "  if v_target.department_id <> v_actor.department_id then raise exception 'Not authorized: that member belongs to another department'; end if;",
+   "  if v_target.status = 'Inactive' then raise exception 'Cannot issue equipment to an inactive member'; end if;",
+   "    if coalesce(btrim(p_witness_signature), '') = '' then raise exception 'Issuing to yourself requires a second (witness) signature'; end if;",
+   "    select * into v_witness from public.members where id = p_witness_member_id;",
+   "    if v_witness.id is null then raise exception 'A witness must be identified for a self-issue'; end if;",
+   "    if v_witness.id = v_actor.id then raise exception 'The witness must be someone other than you'; end if;",
+   "    if v_witness.department_id <> v_actor.department_id then raise exception 'The witness must be in your department'; end if;",
+   "    if not (exists (select 1 from public.equipment_manager em where em.member_id = v_witness.id and em.removed_at is null)",
+   "            or (v_witness.access && array['Department Admin','Project Admin']::text[]))",
+   "    then raise exception 'The witness must be another equipment manager or a Department Admin'; end if;",
+   "  if p_equipment_ids is null or array_length(p_equipment_ids, 1) is null then raise exception 'No items to issue'; end if;",
+   "    (department_id, member_id, signed_name, signed_at, signature_data, witness_signature, witness_name, item_count, issued_by, issued_by_name)",
+   "    (v_actor.department_id, p_member_id, btrim(p_signed_name), now(), p_signature_data,",
+   "     nullif(btrim(coalesce(p_witness_signature,'')), ''), v_witness.name, 0, v_actor.id, v_actor.name)",
+   "    if v_e.id is null then raise exception 'Equipment item not found'; end if;",
+   "    if v_e.department_id <> v_actor.department_id then raise exception 'Not authorized: an item belongs to another department'; end if;",
+   "    if v_e.status <> 'in_inventory' then raise exception 'An item is not available to issue (currently %). Nothing was issued.', v_e.status; end if;"
+  ]
+ },
+ "audit2": {
+  "move_week": {
+   "def": "CREATE OR REPLACE FUNCTION public.move_week(p_day_id uuid, p_dir text)\n RETURNS text\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_dept  uuid := public.my_department_id();\n  v_me    public.training_sessions;\n  v_other public.training_sessions;\nbegin\n  if not public.is_admin() then raise exception 'Only an admin can reorder the schedule.'; end if;\n  select * into v_me from public.training_sessions where id = p_day_id and department_id = v_dept;\n  if v_me.id is null then raise exception 'That week is no longer on the schedule.'; end if;\n\n  if p_dir = 'up' then\n    select * into v_other from public.training_sessions\n      where department_id = v_dept and week_number < v_me.week_number\n      order by week_number desc limit 1;\n  else\n    select * into v_other from public.training_sessions\n      where department_id = v_dept and week_number > v_me.week_number\n      order by week_number asc limit 1;\n  end if;\n  if v_other.id is null then return 'edge'; end if;   -- already first / last\n\n  -- Swap the two week numbers, and rewrite any leading \"Week N\" in each title to match.\n  update public.training_sessions\n     set week_number = v_other.week_number,\n         title = regexp_replace(title, '^Week [0-9]+', 'Week ' || v_other.week_number)\n   where id = v_me.id;\n  update public.training_sessions\n     set week_number = v_me.week_number,\n         title = regexp_replace(title, '^Week [0-9]+', 'Week ' || v_me.week_number)\n   where id = v_other.id;\n  return 'ok';\nend; $function$\n",
+   "auth": true
+  },
+  "reader_lines": {
+   "readiness_verdict": [
+    "join public.training_sessions t on t.id = a.session_id and t.department_id = p_dept"
+   ],
+   "pa_department_radar": [
+    "RETURNS TABLE(department_id uuid, department_name text, station text, city text, admin_name text, admin_email text, health text, last_activity timestamp with time zone, days_since_activity integer, active_members_30d bigint, member_count bigint, documents_count bigint, apparatus_count bigint, training_sessions_count bigint, profile_complete boolean, members_no_email_count bigint, documents_no_text_count bigint, expiring_certs_count bigint, expired_certs_count bigint, overdue_duties_count bigint, open_action_items_count bigint, open_long_shifts_count bigint, profile_missing text[])",
+    "(select max(ts.created_at)    from training_sessions ts where ts.department_id = d.id)",
+    "(select count(*) from training_sessions ts where ts.department_id = d.id) as training_sessions_count,",
+    "b.active_members_30d, b.member_count, b.documents_count, b.apparatus_count, b.training_sessions_count,"
+   ],
+   "my_department_rollup": [
+    "RETURNS TABLE(department_id uuid, department_name text, station text, city text, can_manage boolean, admin_name text, admin_email text, health text, last_activity timestamp with time zone, days_since_activity integer, active_members_30d bigint, member_count bigint, documents_count bigint, apparatus_count bigint, training_sessions_count bigint, profile_complete boolean, members_no_email_count bigint, documents_no_text_count bigint, expiring_certs_count bigint, expired_certs_count bigint, overdue_duties_count bigint, open_action_items_count bigint, my_attendance_pct integer, my_attendance_total integer, my_attendance_attended integer, my_certs_current integer, my_certs_expiring integer, my_certs_expired integer, my_open_duties integer, my_overdue_duties integer, my_next_event_date date, my_next_event_title text, my_next_event_type text)",
+    "(select max(ts.created_at)    from training_sessions ts where ts.department_id = d.id)",
+    "(select count(*) from training_sessions ts where ts.department_id = d.id) as training_sessions_count,",
+    "(select count(*) from training_sessions ts",
+    "where ts.department_id = d.id and ts.done",
+    "and date_trunc('month', ts.date) = date_trunc('month', current_date)",
+    "and coalesce(ts.counts_toward_attendance, true) <> false",
+    "or coalesce(ts.audience,'everyone') not in ('leadership','board'))",
+    "(select count(*) from training_sessions ts",
+    "where ts.department_id = d.id and ts.done",
+    "and date_trunc('month', ts.date) = date_trunc('month', current_date)",
+    "and coalesce(ts.counts_toward_attendance, true) <> false",
+    "or coalesce(ts.audience,'everyone') not in ('leadership','board'))",
+    "select ts.date as d, ts.title as t, 'Training'::text as k",
+    "from training_sessions ts",
+    "where ts.department_id = d.id and ts.date >= current_date",
+    "or coalesce(ts.audience,'everyone') not in ('leadership','board'))",
+    "case when b.can_manage then b.training_sessions_count end,"
+   ],
+   "probation_item_states": [
+    "join public.training_sessions t on t.id = a.session_id and t.department_id = p_dept"
+   ],
+   "set_member_termination": [
+    "join public.training_sessions ts on ts.id = sa.session_id"
+   ],
+   "guard_ai_outputs_session_id": [
+    "select department_id, audience, is_meeting into v_dept, v_aud, v_ismtg from public.training_sessions where id = new.session_id;"
+   ],
+   "set_my_session_registration": [
+    "select department_id, audience, done into v_sess from public.training_sessions where id = p_session_id;"
+   ]
+  },
+  "swap_week_dates": {
+   "def": "CREATE OR REPLACE FUNCTION public.swap_week_dates(p_a uuid, p_b uuid)\n RETURNS text\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_dept uuid := public.my_department_id();\n  v_da date; v_db date; v_na int; v_nb int;\nbegin\n  if not public.is_admin() then raise exception 'Only an admin can move the schedule.'; end if;\n  select date into v_da from public.training_sessions where id = p_a and department_id = v_dept;\n  select date into v_db from public.training_sessions where id = p_b and department_id = v_dept;\n  select 1 into v_na from public.training_sessions where id = p_a and department_id = v_dept;\n  select 1 into v_nb from public.training_sessions where id = p_b and department_id = v_dept;\n  if v_na is null or v_nb is null then raise exception 'One of those days is no longer on the schedule.'; end if;\n  update public.training_sessions set date = v_db where id = p_a and department_id = v_dept;\n  update public.training_sessions set date = v_da where id = p_b and department_id = v_dept;\n  return 'ok';\nend; $function$\n",
+   "auth": true
+  }
+ }
+}
