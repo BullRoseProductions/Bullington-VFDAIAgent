@@ -270,19 +270,21 @@ for (const [who, role, isTO, meId, want] of [
 
 // 7 — the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// Structural fences are PINNED to Slice 6-UI's own release (0b7ee95, a --no-ff merge whose first parent 7092a60 is the main
+// it landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "0b7ee95";
 const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const base = appAt(BASE);
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("Slice 6-UI changes only src/App.jsx (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const rel = appAt(REL), base = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 6-UI (0b7ee95) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-const added = [...rpcSet(src)].filter((n) => !rpcSet(base).has(n)).sort();
-ok("the only new RPCs are the four 6-DB ones", JSON.stringify(added) === JSON.stringify(["correct_training_session", "drill_window_presence", "finalize_training_session", "reopen_training_session"]), JSON.stringify(added));
+const added = [...rpcSet(rel)].filter((n) => !rpcSet(base).has(n)).sort();
+ok("Slice 6-UI (0b7ee95): the only new RPCs are the four 6-DB ones", JSON.stringify(added) === JSON.stringify(["correct_training_session", "drill_window_presence", "finalize_training_session", "reopen_training_session"]), JSON.stringify(added));
 ok("the direct finalize / reopen updates and the client last_iso stamp are gone",
   !src.includes('update({ done: true, ...(dur == null ? {} : { duration_min: dur }) })') && !src.includes('.update({ done: false })') && !src.includes('update({ last_iso: iso })'));
-ok("no station_presence write anywhere new", (src.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
+ok("Slice 6-UI (0b7ee95) added no station_presence write", (rel.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by Slice 6-UI (0b7ee95) vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
