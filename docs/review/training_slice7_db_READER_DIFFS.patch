@@ -1,0 +1,111 @@
+--- live/open_signin
++++ slice7/open_signin
+@@ -24,6 +24,10 @@
+   end if;
+   if v_session.done then
+     raise exception 'This session is complete — you cannot open a sign-in.';
++  end if;
++  -- B4C:slice7 — a cancelled session takes no sign-in.
++  if v_session.status = 'cancelled' then
++    raise exception 'CANCELLED: this session was cancelled — it can''t take a sign-in.';
+   end if;
+ 
+   /* THE SIGN-IN WINDOW — see the file header for why both bounds exist and why
+--- live/current_signin_token
++++ slice7/current_signin_token
+@@ -21,6 +21,10 @@
+     raise exception 'That training session was not found in your department.';
+   end if;
+   -- ---- end copied gate ----
++  -- B4C:slice7 — a cancelled session has no live code (not an error: the page asks for every session it shows).
++  if v_session.status = 'cancelled' then
++    return null;
++  end if;
+ 
+   -- No live sign-in, no code. Not an error: the officer's page asks for every
+   -- session it is showing, and most of them are legitimately closed.
+--- live/member_check_in
++++ slice7/member_check_in
+@@ -27,6 +27,10 @@
+ 
+   IF v_session.done THEN
+     RAISE EXCEPTION 'This session is complete — attendance is locked.';
++  END IF;
++  -- B4C:slice7 — nobody checks in to a cancelled session.
++  IF v_session.status = 'cancelled' THEN
++    RAISE EXCEPTION 'CANCELLED: this session was cancelled — there is nothing to check in to.';
+   END IF;
+ 
+   -- ---- ADDED: the sign-in must be OPEN, not merely hold a matching code ----
+--- live/set_session_location
++++ slice7/set_session_location
+@@ -23,6 +23,10 @@
+   end if;
+   if v_session.done then
+     raise exception 'This session is complete — its location can no longer be changed.';
++  end if;
++  -- B4C:slice7 — a cancelled session's location is frozen with it.
++  if v_session.status = 'cancelled' then
++    raise exception 'CANCELLED: this session was cancelled — restore it before changing its location.';
+   end if;
+ 
+   -- clear: back to verifying against the station. Allowed whatever the flag says.
+--- live/set_my_session_registration
++++ slice7/set_my_session_registration
+@@ -24,6 +24,10 @@
+   if coalesce(v_sess.done, false) then
+     raise exception 'This session is closed';
+   end if;
++  -- B4C:slice7 — no RSVPs to a cancelled session (existing ones are kept, unchanged).
++  if exists (select 1 from public.training_sessions where id = p_session_id and status = 'cancelled') then
++    raise exception 'CANCELLED: this session was cancelled';
++  end if;
+   select access into v_access from public.members where id = v_me and department_id = v_my_dept;
+   if not found then
+     raise exception 'Not in your department';
+--- live/finalize_training_session
++++ slice7/finalize_training_session
+@@ -23,6 +23,8 @@
+       select * into s from public.training_sessions where id = p_session_id and department_id = v_dept for update;
+       if not found then raise exception 'NOT_FOUND: that session is not in your department.' using errcode = 'P0002'; end if;
+       if s.done then raise exception 'ALREADY_FINALIZED: this session is already finalized.'; end if;
++      -- B4C:slice7 — a cancelled drill didn't happen: nothing to finalize.
++      if s.status = 'cancelled' then raise exception 'CANCELLED: this session was cancelled — restore it before finalizing.'; end if;
+       if s.signin_open then raise exception 'SIGNIN_OPEN: close the QR sign-in first.'; end if;
+       if p_duration_min is not null then
+         if p_duration_min < 1 or p_duration_min > 1440 then raise exception 'BAD_VALUE: a length is 1–1440 minutes.'; end if;
+--- live/correct_training_session
++++ slice7/correct_training_session
+@@ -30,6 +30,8 @@
+       end if;
+       select * into s from public.training_sessions where id = p_session_id and department_id = v_dept for update;
+       if not found then raise exception 'NOT_FOUND: that session is not in your department.' using errcode = 'P0002'; end if;
++      -- B4C:slice7 — a cancelled session is restored (two-person), not corrected.
++      if s.status = 'cancelled' then raise exception 'CANCELLED: this session was cancelled — restore it before correcting it.'; end if;
+       if not (s.done or s.signin_open or exists (select 1 from public.session_attendance sa where sa.session_id = s.id)) then
+         raise exception 'NOT_LOCKED: this session can still be edited normally — no correction needed.';
+       end if;
+--- live/attach_drill_plan_to_session
++++ slice7/attach_drill_plan_to_session
+@@ -16,6 +16,10 @@
+     if not found then raise exception 'That drill plan is not in your department.'; end if;
+     if not exists (select 1 from public.training_sessions where id = p_session_id and department_id = v_dept) then
+       raise exception 'That session is not in your department.';
++    end if;
++    -- B4C:slice7 — no plans onto a cancelled session (R7).
++    if exists (select 1 from public.training_sessions where id = p_session_id and status = 'cancelled') then
++      raise exception 'CANCELLED: that session was cancelled — restore it before attaching a plan.';
+     end if;
+     if exists (select 1 from public.session_plans where session_id = p_session_id and drill_plan_id = p_plan_id) then
+       raise exception 'That plan is already attached to this session.';
+--- live/my_department_rollup
++++ slice7/my_department_rollup
+@@ -151,7 +151,7 @@
+         from (
+           select ts.date as d, ts.title as t, 'Training'::text as k
+             from training_sessions ts
+-           where ts.department_id = d.id and ts.date >= current_date
++           where ts.department_id = d.id and ts.date >= current_date and coalesce(ts.status, 'scheduled') <> 'cancelled'
+              and (coalesce(me.my_access && array['Project Admin','Department Admin','Board Member','Officer']::text[], false)
+                   or coalesce(ts.audience,'everyone') not in ('leadership','board'))
+           union all

@@ -1,0 +1,192 @@
+{
+ "_note": "Live pg_get_functiondef bodies + md5s, read-only, 2026-10-25 (Supabase ifeptqnlucmvhlvadcpj). Used verbatim by training_slice6_db_dryrun_harness.mjs.",
+ "defs": {
+  "my_member_id()": {
+   "md5": "3f66369c8af7bc07ec59831af6536fee",
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n"
+  },
+  "is_dept_admin()": {
+   "md5": "c692e44f62923d2bf4c1a39a21a87bf7",
+   "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n"
+  },
+  "is_leadership()": {
+   "md5": "cc5861c24398fbf58147fee6f60cf410",
+   "def": "CREATE OR REPLACE FUNCTION public.is_leadership()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n"
+  },
+  "my_department_id()": {
+   "md5": "87f546659c3804a943b48e419e017f18",
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n"
+  },
+  "is_training_manager()": {
+   "md5": "472b87b0abca586ba0a13cd615b376fe",
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers \u2014 THE training-management gate: a Department Admin in the caller's department (not Project Admin \u2014\n  -- deliberately not is_dept_admin()) OR an active training officer there. Schedules / edits / completes / reopens sessions\n  -- (meetings and board events included), marks the roster, manages categories and the drill-plan library.\n    select exists (\n      select 1 from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n         and m.department_id = public.my_department_id()\n         and m.access && array['Department Admin']::text[]\n    ) or public.is_training_officer();\n  $function$\n"
+  },
+  "is_training_officer()": {
+   "md5": "248392a51fe913771f725b2a51013302",
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_officer()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers \u2014 an ACTIVE registry row for the caller's member row in the caller's department. Department-scoped\n  -- (unlike is_equipment_manager()): an officer of one department is not one in another.\n    select exists (\n      select 1 from public.training_officer t\n       where t.member_id = public.my_member_id()\n         and t.department_id = public.my_department_id()\n         and t.removed_at is null\n    );\n  $function$\n"
+  },
+  "set_default_station_id()": {
+   "md5": "dd7b8d13f9845f09057061391703a6c9",
+   "def": "CREATE OR REPLACE FUNCTION public.set_default_station_id()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  if new.station_id is null and new.department_id is not null then\n    -- 1) the caller's ACTIVE station, but only if it is in this row's department\n    select s.id into new.station_id\n      from stations s\n     where s.id = public.my_active_station_id()\n       and s.department_id = new.department_id;\n\n    -- 2) else this row's department's default station (Phase A behaviour)\n    if new.station_id is null then\n      select s.id into new.station_id\n        from stations s\n       where s.department_id = new.department_id\n         and s.is_default\n       limit 1;\n    end if;\n  end if;\n  return new;\nend;\n$function$\n"
+  },
+  "close_training_presence_on_done()": {
+   "md5": "710973082e68dc14177879de7d10af75",
+   "def": "CREATE OR REPLACE FUNCTION public.close_training_presence_on_done()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  update public.station_presence\n     set checked_out_at = now()\n   where session_id = new.id\n     and kind = 'training'\n     and checked_out_at is null;\n  return null;   -- AFTER trigger: return value is ignored\nend;\n$function$\n"
+  },
+  "tg_session_attendance_membership_window()": {
+   "md5": "3cebc508f04b88fcdbba2c11d07ca25e",
+   "def": "CREATE OR REPLACE FUNCTION public.tg_session_attendance_membership_window()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:membership_window \u2014 refuse attendance on a drill dated outside the member's membership window. No date in the message.\ndeclare v_date date;\nbegin\n  select ts.\"date\" into v_date from public.training_sessions ts where ts.id = NEW.session_id;\n  if v_date is not null and not public.membership_window_allows(NEW.member_id, v_date) then\n    raise exception 'MEMBERSHIP_WINDOW: this member was not on the department roster on that date.';\n  end if;\n  return NEW;\nend;\n$function$\n"
+  },
+  "close_training_presence_on_session_delete()": {
+   "md5": "0970e958b1bdb83daafec972409ec887",
+   "def": "CREATE OR REPLACE FUNCTION public.close_training_presence_on_session_delete()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nBEGIN\n  UPDATE public.station_presence\n     SET checked_out_at = now()\n   WHERE session_id = OLD.id\n     AND kind = 'training'\n     AND checked_out_at IS NULL;\n  RETURN OLD;\nEND;\n$function$\n"
+  },
+  "tg_training_session_date_membership_window()": {
+   "md5": "2729b8d90a36eeed3d617e5e98235ae9",
+   "def": "CREATE OR REPLACE FUNCTION public.tg_training_session_date_membership_window()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:membership_window \u2014 a drill can't be moved to a date on which one of its recorded attendees was not a member.\nbegin\n  if NEW.\"date\" is distinct from OLD.\"date\" and NEW.\"date\" is not null and exists (\n       select 1 from public.session_attendance sa\n        where sa.session_id = NEW.id and not public.membership_window_allows(sa.member_id, NEW.\"date\")) then\n    raise exception 'MEMBERSHIP_WINDOW: a member recorded at this drill was not on the department roster on that date.';\n  end if;\n  return NEW;\nend;\n$function$\n"
+  },
+  "membership_window_allows(p_member uuid, p_date date)": {
+   "md5": "8f38fbf3f99e1580d13d2b33fa806191",
+   "def": "CREATE OR REPLACE FUNCTION public.membership_window_allows(p_member uuid, p_date date)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:membership_window \u2014 start = joined_date, else Jan 1 of members.joined's leading year, else none (== joinCutoff);\n  -- end = member_separation.terminated_on, inclusive. Unknown member -> true (FKs police existence, not this).\n  select coalesce((\n    select (s.start_on is null or p_date >= s.start_on)\n       and (s.end_on   is null or p_date <= s.end_on)\n      from (select coalesce(mp.joined_date,\n                            make_date(nullif(substring(m.joined::text from '^\\s*(\\d{4})'), '')::int, 1, 1)) as start_on,\n                   ms.terminated_on as end_on\n              from public.members m\n              left join public.member_private    mp on mp.member_id = m.id\n              left join public.member_separation ms on ms.member_id = m.id\n             where m.id = p_member) s\n  ), true);\n$function$\n"
+  },
+  "attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)": {
+   "md5": "aff25333771cd38c1f473bcde5e1e96e",
+   "def": "CREATE OR REPLACE FUNCTION public.attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)\n RETURNS TABLE(member_id uuid, session_id uuid, start_at timestamp with time zone, end_at timestamp with time zone, optional boolean)\n LANGUAGE sql\n STABLE\n SET search_path TO 'public'\nAS $function$\n  with drill as (\n    select\n      ts.id,\n      ts.department_id,\n      -- wall clock -> instant, in the department's zone. See the header.\n      (ts.date + coalesce(ts.start_time, '00:00'::time)) at time zone 'America/Chicago' as start_at,\n      -- flat 90 minutes, never more than the drill itself ran\n      least(interval '90 minutes', make_interval(mins => ts.duration_min))               as credited_len,\n      (coalesce(ts.counts_toward_attendance, true) = false)                              as optional\n    from public.training_sessions ts\n    where ts.department_id = p_dept\n      and ts.done                                     -- a drill that has not happened has no hours\n      and ts.duration_min is not null                 -- no recorded length, no estimate\n      and coalesce(ts.audience, 'everyone') <> 'board' -- a board meeting is not training\n      and coalesce(ts.is_offsite, false) = false      -- off-site stays out of station hours\n  )\n  select\n    sa.member_id,\n    d.id                       as session_id,\n    d.start_at,\n    d.start_at + d.credited_len as end_at,\n    d.optional\n  from drill d\n  join public.session_attendance sa on sa.session_id = d.id\n  -- LOOSE PREFILTER, on purpose. This is an OVERLAP test, not a containment test:\n  -- dept_station_shifts wants drills that START inside the window, while dept_iso_hours\n  -- wants any interval that TOUCHES it so a straddling drill can be clipped rather than\n  -- dropped. Narrowing this to start_at >= p_from would silently rob the ISO caller of\n  -- exactly those rows, so the wider test lives here and each caller narrows its own way.\n  and d.start_at < p_to\n  and d.start_at + d.credited_len > p_from\n  -- OBSERVED WINS. A member who actually checked in has a real interval; the attestation\n  -- is not emitted for them at all, which is what stops the same drill being counted twice.\n  and not exists (\n    select 1 from public.station_presence sp\n     where sp.kind = 'training'\n       and sp.session_id = sa.session_id\n       and sp.member_id  = sa.member_id\n  );\n$function$\n"
+  }
+ },
+ "readers": {
+  "dept_station_shifts": "CREATE OR REPLACE FUNCTION public.dept_station_shifts(p_from timestamp with time zone DEFAULT date_trunc('month'::text, now()), p_to timestamp with time zone DEFAULT now())\n RETURNS TABLE(member_id uuid, member_name text, checked_in_at timestamp with time zone, checked_out_at timestamp with time zone, hours numeric, kind text, verified boolean, auto_closed boolean, source text, optional boolean, officer_attested boolean, station_id uuid, station_name text)\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_dept uuid := public.my_department_id();\nbegin\n  if not public.is_leadership() then\n    raise exception 'Not authorized';\n  end if;\n  return query\n    -- A. OBSERVED \u2014 unchanged except for the two new columns. A real punch is\n    -- never \"attested\": it was measured, and the distinction is the whole point.\n    select m.id, m.name, sp.checked_in_at, sp.checked_out_at,\n           round((extract(epoch from (sp.checked_out_at - sp.checked_in_at)) / 3600.0)::numeric, 2) as hours,\n           sp.kind, sp.verified, sp.auto_closed,\n           coalesce(sp.source, 'geo')::text as source,\n           false as optional,\n           false as officer_attested,\n           sp.station_id,\n           st.name::text as station_name\n    from public.station_presence sp\n    join public.members m on m.id = sp.member_id\n    left join public.stations st on st.id = sp.station_id     -- LEFT: never drops a row\n    where sp.department_id = v_dept\n      and sp.checked_out_at is not null\n      and sp.kind in ('standby','training')\n      and sp.checked_in_at >= p_from\n      and sp.checked_in_at <  p_to\n    union all\n    -- B. OFFICER-ATTESTED \u2014 sourced from attested_training so this and\n    -- dept_iso_hours cannot disagree about what an attested interval is. The cap,\n    -- the timezone, the four gates and the observed-wins dedup all live there.\n    --\n    -- hours is the CAPPED interval, not the drill's length: end_at is already\n    -- start_at + least(90 min, duration).\n    --\n    -- The station columns are NULL LITERALS \u2014 there is no station to look up.\n    select m.id, m.name,\n           att.start_at                                  as checked_in_at,\n           att.end_at                                    as checked_out_at,\n           round((extract(epoch from (att.end_at - att.start_at)) / 3600.0)::numeric, 2) as hours,\n           'training'::text                             as kind,\n           false                                        as verified,   -- attested, NOT location-verified\n           false                                        as auto_closed,\n           'officer_manual'::text                       as source,\n           att.optional                                  as optional,\n           true                                         as officer_attested,\n           null::uuid                                   as station_id,\n           null::text                                   as station_name\n    from public.attested_training(v_dept, p_from, p_to) att\n    join public.members m on m.id = att.member_id\n    where att.start_at >= p_from\n      and att.start_at <  p_to\n    order by 3 desc;                                     -- positional: checked_in_at, unchanged\nend;\n$function$\n",
+  "dept_iso_hours_for": "CREATE OR REPLACE FUNCTION public.dept_iso_hours_for(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)\n RETURNS TABLE(member_id uuid, member_name text, training_hours numeric, standby_hours numeric, iso_total_hours numeric)\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  if p_dept is null then raise exception 'A department is required.'; end if;\n  if p_from is null or p_to is null then raise exception 'A start and end date are both required.'; end if;\n  if p_from >= p_to then raise exception 'The start of the period must come before the end.'; end if;\n  return query\n  with clipped as (\n    select sp.member_id as mid, (sp.kind = 'training') as is_training,\n      tstzrange(greatest(sp.checked_in_at, p_from), least(sp.checked_out_at, p_to), '[)') as span\n    from public.station_presence sp\n    where sp.department_id = p_dept and sp.verified and sp.checked_out_at is not null\n      and not sp.auto_closed and sp.kind in ('standby','training')\n      and sp.checked_in_at < p_to and sp.checked_out_at > p_from\n    union all\n    select att.member_id as mid, true as is_training,\n      tstzrange(greatest(att.start_at, p_from), least(att.end_at, p_to), '[)') as span\n    from public.attested_training(p_dept, p_from, p_to) att\n    where not att.optional and att.start_at < p_to and att.end_at > p_from\n  ),\n  live as (select * from clipped where not isempty(span)),\n  agg as (\n    select c.mid,\n      range_agg(c.span) filter (where c.is_training) as training_mr,\n      range_agg(c.span) as all_mr\n    from live c group by c.mid\n  ),\n  secs as (\n    select a.mid,\n      coalesce((select sum(extract(epoch from (upper(r) - lower(r)))) from unnest(a.training_mr) r), 0) as training_secs,\n      coalesce((select sum(extract(epoch from (upper(r) - lower(r)))) from unnest(a.all_mr) r), 0) as total_secs\n    from agg a\n  ),\n  final as (\n    select s.mid as mid, m.name as mname,\n      round((s.training_secs / 3600.0)::numeric, 2) as t_hours,\n      round(((s.total_secs - s.training_secs) / 3600.0)::numeric, 2) as s_hours,\n      round((s.total_secs / 3600.0)::numeric, 2) as tot_hours\n    from secs s join public.members m on m.id = s.mid\n  )\n  select f.mid, f.mname, f.t_hours, f.s_hours, f.tot_hours from final f\n  order by f.tot_hours desc, f.mname;\nend;\n$function$\n",
+  "dept_iso_hours": "CREATE OR REPLACE FUNCTION public.dept_iso_hours(p_from timestamp with time zone, p_to timestamp with time zone)\n RETURNS TABLE(member_id uuid, member_name text, training_hours numeric, standby_hours numeric, iso_total_hours numeric)\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  if not public.is_leadership() then raise exception 'Not authorized'; end if;\n  return query select * from public.dept_iso_hours_for(public.my_department_id(), p_from, p_to);\nend;\n$function$\n"
+ },
+ "reader_md5": {
+  "dept_iso_hours(p_from timestamp with time zone, p_to timestamp with time zone)": "306fa11b6473fefa9c737c3a59bfe826",
+  "dept_station_shifts(p_from timestamp with time zone, p_to timestamp with time zone)": "894bbaa8f37ca95da454dd075aab1d41",
+  "dept_iso_hours_by_station(p_from timestamp with time zone, p_to timestamp with time zone)": "5a895ed77425f86287ac9b9afa1dbf5e",
+  "dept_iso_hours_for(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone)": "91ceb031497e2e70d64f07540f7bd0a9",
+  "dept_member_iso_hours_by_month(p_member_id uuid, p_starts timestamp with time zone[], p_ends timestamp with time zone[])": "cb10fc24fcf25d0e919ead5299e71dcc"
+ },
+ "policies": [
+  {
+   "t": "session_attendance",
+   "cmd": "SELECT",
+   "name": "authenticated can read session_attendance",
+   "check": null,
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(department_id = my_department_id())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "session_attendance",
+   "cmd": "DELETE",
+   "name": "leaders delete session_attendance",
+   "check": null,
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1\n   FROM training_sessions ts\n  WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false)))))",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "session_attendance",
+   "cmd": "INSERT",
+   "name": "leaders insert session_attendance",
+   "check": "((department_id = my_department_id()) AND is_training_manager() AND (EXISTS ( SELECT 1\n   FROM training_sessions ts\n  WHERE ((ts.id = session_attendance.session_id) AND (ts.department_id = my_department_id()) AND (ts.done = false)))))",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_plans",
+   "cmd": "DELETE",
+   "name": "admins delete training_plans",
+   "check": null,
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((department_id = my_department_id()) AND is_dept_admin())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_plans",
+   "cmd": "UPDATE",
+   "name": "leaders update training_plans",
+   "check": "((department_id = my_department_id()) AND is_training_manager())",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((department_id = my_department_id()) AND is_training_manager())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_plans",
+   "cmd": "INSERT",
+   "name": "leaders write training_plans",
+   "check": "((department_id = my_department_id()) AND is_training_manager())",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_plans",
+   "cmd": "SELECT",
+   "name": "members read training_plans",
+   "check": null,
+   "roles": [
+    "authenticated"
+   ],
+   "using": "(department_id = my_department_id())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_sessions",
+   "cmd": "DELETE",
+   "name": "admins delete training_sessions",
+   "check": null,
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((department_id = my_department_id()) AND is_dept_admin() AND (done IS NOT TRUE) AND (NOT (EXISTS ( SELECT 1\n   FROM session_attendance sa\n  WHERE (sa.session_id = training_sessions.id)))))",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_sessions",
+   "cmd": "SELECT",
+   "name": "authenticated can read training_sessions",
+   "check": null,
+   "roles": [
+    "public"
+   ],
+   "using": "(department_id = my_department_id())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_sessions",
+   "cmd": "UPDATE",
+   "name": "leaders update training_sessions",
+   "check": "((department_id = my_department_id()) AND is_training_manager())",
+   "roles": [
+    "authenticated"
+   ],
+   "using": "((department_id = my_department_id()) AND is_training_manager())",
+   "permissive": "PERMISSIVE"
+  },
+  {
+   "t": "training_sessions",
+   "cmd": "INSERT",
+   "name": "leaders write training_sessions",
+   "check": "((department_id = my_department_id()) AND is_training_manager())",
+   "roles": [
+    "authenticated"
+   ],
+   "using": null,
+   "permissive": "PERMISSIVE"
+  }
+ ]
+}

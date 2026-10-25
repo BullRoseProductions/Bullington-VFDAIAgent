@@ -1,0 +1,133 @@
+== PINS (mock md5 vs live pin)
+   VERBATIM   public.my_member_id()
+   VERBATIM   public.is_leadership()
+   VERBATIM   public.my_department_id()
+   VERBATIM   public.is_training_manager()
+   VERBATIM   public.is_training_officer()
+   RE-PINNED  public.pa_department_radar()  (live eb835b33d5dc8dae514b1d74af3de3c4 -> mock eaea5cfc7e17e5ecf01b6e08a20a3627)
+   VERBATIM   public.close_training_presence_on_done()
+   VERBATIM   public.tg_session_attendance_membership_window()
+   VERBATIM   public.tg_training_session_date_membership_window()
+   RE-PINNED  public.readiness_verdict(uuid,uuid)  (live e72e20424e274308e62dd2ad170b8c7f -> mock e60f21268d7d56693e4a8fbd1d193722)
+   RE-PINNED  public.probation_item_states(uuid,uuid)  (live ab5eebbcdc06fd7d0610c7ccf42d7a64 -> mock 98efd117390844075c81f956ced20818)
+   VERBATIM   public.membership_window_allows(uuid,date)
+   VERBATIM   public.dept_iso_hours(timestamptz,timestamptz)
+   VERBATIM   public.dept_station_shifts(timestamptz,timestamptz)
+   RE-PINNED  public.dept_iso_hours_by_station(timestamptz,timestamptz)  (live 5a895ed77425f86287ac9b9afa1dbf5e -> mock f22cce042efda3ced350e19f089a77db)
+   VERBATIM   public.attested_training(uuid,timestamptz,timestamptz)
+   VERBATIM   public.dept_iso_hours_for(uuid,timestamptz,timestamptz)
+   RE-PINNED  public.dept_member_iso_hours_by_month(uuid,timestamptz[],timestamptz[])  (live cb10fc24fcf25d0e919ead5299e71dcc -> mock 6b116e7af69c298d2c3054f65a39f920)
+   VERBATIM   public.reopen_training_session(uuid,text)
+   VERBATIM   public.drill_window_presence(uuid)
+   VERBATIM   public.recompute_training_plan_last_iso(uuid)
+   VERBATIM   public.tg_training_session_audit_append_only()
+   VERBATIM   public.swap_week_dates(uuid,uuid)
+   VERBATIM   public.move_week(uuid,text)
+   VERBATIM   public.tg_training_session_lock_guard()
+   VERBATIM   public.open_signin(uuid)
+   VERBATIM   public.current_signin_token(uuid)
+   VERBATIM   public.member_check_in(uuid,text,double precision,double precision,double precision)
+   VERBATIM   public.set_session_location(uuid,double precision,double precision,integer,text)
+   VERBATIM   public.set_my_session_registration(uuid,text)
+   VERBATIM   public.finalize_training_session(uuid,integer)
+   VERBATIM   public.correct_training_session(uuid,jsonb,uuid[],uuid[],text)
+   VERBATIM   public.attach_drill_plan_to_session(uuid,uuid)
+   VERBATIM   public.my_department_rollup()
+
+== MIGRATION (fresh): OK
+   state: {"slice7_db_state":{"rpcs":["approve_session_change anon=false auth=true","reject_session_change anon=false auth=true","request_session_change anon=false auth=true","session_change_signatures anon=false auth=true","withdraw_session_change anon=false auth=true"],"dropped":true,"attested_md5":"aff25333771cd38c1f473bcde5e1e96e","guard_trigger":true,"requests_rows":0,"status_column":"'scheduled'::text / NO","requests_table":true,"verified_presence":6,"audit_action_check":"CHECK ((action = ANY (ARRAY['correct'::text, 'reopen'::text, 'finalize'::text, 'cancel'::text, 'restore'::text])))","sessions_by_status":{"scheduled":2}}}
+== RE-RUN refused -> PREFLIGHT: training_sessions.status already exists — Slice 7-DB looks applied. Refusing.
+== RETEST
+PASS  O1 privileges: 5 RPCs auth-only; 9 readers kept their ACL; guard owner-only
+PASS  O2 swap_week_dates + move_week are gone
+PASS  O3 the 6 hours readers are byte-identical to their pins
+PASS  O4 status: NOT NULL, default scheduled, CHECK scheduled|cancelled
+PASS  O5 audit actions: correct, reopen, finalize, cancel, restore
+PASS  O6 requests: RLS, one SELECT policy, no write grant, signatures not selectable
+PASS  O7 lock guard: BEFORE INSERT OR UPDATE, enabled
+— Indian Harbor (mock)
+   PASS  T1 #1 files a cancel -> pending; session untouched; nothing logged yet
+   PASS  T2 the initiator can't approve their own request (SAME_PERSON)
+   PASS  T3 one pending request per session (PENDING)
+   PASS  T4 #2 approves -> cancelled, QR closed, ONE cancel log row (old->new, request_id, actor #2)
+   PASS  T5 the 8 readers refuse a cancelled session (7 CANCELLED; current_signin_token -> no code)
+   PASS  T6 my_department_rollup: the cancelled drill is no longer the next event
+   PASS  T7 raw status UPDATE (owner + authenticated) / cancelled INSERT -> STATUS_LOCKED; a cancelled row is locked
+   PASS  T8 restore: #2 files, #1 approves -> scheduled + a restore log row
+   PASS  T9 refusals: ATTENDED / FINALIZED / NOT_UPCOMING / NOT_CANCELLED / BAD_KIND / REASON_REQUIRED / BAD_SIGNATURE x2
+   PASS  T10 reject (another manager, reason) + withdraw (initiator only); the session untouched, nothing logged
+   PASS  T11 a request past its drill date -> approve returns expired; nothing applied or logged
+   PASS  T12 Officer-not-TO / Board / PA / Member refused on request / approve / reject / withdraw
+   PASS  T13 another department's session / request / signatures -> NOT_FOUND
+   PASS  T14 requests: Board + plain-Member TO read (own dept only); Member none; signatures RPC-only; no INSERT
+   PASS  T15 station_presence byte-identical across every RPC call; verified count 6 unchanged
+— North Hood (mock)
+   PASS  T1 #1 files a cancel -> pending; session untouched; nothing logged yet
+   PASS  T2 the initiator can't approve their own request (SAME_PERSON)
+   PASS  T3 one pending request per session (PENDING)
+   PASS  T4 #2 approves -> cancelled, QR closed, ONE cancel log row (old->new, request_id, actor #2)
+   PASS  T5 the 8 readers refuse a cancelled session (7 CANCELLED; current_signin_token -> no code)
+   PASS  T6 my_department_rollup: the cancelled drill is no longer the next event
+   PASS  T7 raw status UPDATE (owner + authenticated) / cancelled INSERT -> STATUS_LOCKED; a cancelled row is locked
+   PASS  T8 restore: #2 files, #1 approves -> scheduled + a restore log row
+   PASS  T9 refusals: ATTENDED / FINALIZED / NOT_UPCOMING / NOT_CANCELLED / BAD_KIND / REASON_REQUIRED / BAD_SIGNATURE x2
+   PASS  T10 reject (another manager, reason) + withdraw (initiator only); the session untouched, nothing logged
+   PASS  T11 a request past its drill date -> approve returns expired; nothing applied or logged
+   PASS  T12 Officer-not-TO / Board / PA / Member refused on request / approve / reject / withdraw
+   PASS  T13 another department's session / request / signatures -> NOT_FOUND
+   PASS  T14 requests: Board + plain-Member TO read (own dept only); Member none; signatures RPC-only; no INSERT
+   PASS  T15 station_presence byte-identical across every RPC call; verified count 6 unchanged
+37 passed, 0 failed, 0 skipped
+== Slice 6 RETEST after 7-DB (regression check)
+46 passed, 0 failed, 0 skipped
+
+== PRE-FLIGHT DRIFT (each must refuse)
+   refused  open_signin body changed -> PREFLIGHT: public.open_signin(uuid) has drifted (live md5 72ca1b65e1b0affec2bedb123e4029c3, pinned 38d66e034a5f0d8a71b9e668e358c446). Re-audit.
+   refused  attested_training body changed -> PREFLIGHT: public.attested_training(uuid,timestamptz,timestamptz) has drifted (live md5 ca8bcd4f7a8d28bd899feef556aaad44, pinned aff25333771cd38c1f473bcde5e1e96e). Re-audit.
+   refused  audit action CHECK changed -> PREFLIGHT: training_session_audit_action_check is not the audited text. Re-audit.
+   refused  a training_sessions policy changed -> PREFLIGHT: training_sessions policy "leaders write training_sessions" is not the audited text. Re-audit.
+   refused  something now calls swap_week_dates -> PREFLIGHT: something now calls swap_week_dates / move_week. Re-audit before dropping.
+   refused  status column already there (double apply) -> PREFLIGHT: training_sessions.status already exists — Slice 7-DB looks applied. Refusing.
+
+== MUTATIONS (each must FAIL the named RETEST line(s), or be refused)
+   M1 self-approve allowed:
+         FAIL  T2 self-approve: new row for relation "training_session_requests" violates check constraint "training_session_requests_approved_chk"
+      35 passed, 2 failed, 0 skipped
+   M2 request gate removed:
+         FAIL  T12 role matrix: request:NOT_UPCOMING: only an upcoming session can be cancelled or restored. request:NOT_UPCOMING: only an upcoming session can be cancelled or restored. request:NOT_UPCOMING: only an upcoming session can be cancelled or restored. request:NOT_UPCOMING: only an upcoming session can be cancelled or restored.
+      35 passed, 2 failed, 0 skipped
+   M3 guard ignores status:
+         FAIL  T7 guard: owner-update:ACCEPTED auth-update:ACCEPTED cancelled-edit:ACCEPTED
+         FAIL  T8 restore: NOT_CANCELLED: only a cancelled session can be restored. {"state": "approved", "status": "cancelled", "audit_id": "ab9d8249-e8bf-4a7c-8f18-2e6ffb522d16", "request_id": "0af12cd9-bef7-481b-9008-9fab56bfcb46"}
+         FAIL  department block aborted: ALREADY_CANCELLED: this session is already cancelled.
+         FAIL  T8 restore: NOT_CANCELLED: only a cancelled session can be restored. {"state": "approved", "status": "cancelled", "audit_id": "a362de12-aa51-4329-93a5-8e02e58e77df", "request_id": "48d0cd5f-c928-4712-baeb-52e23d1cc911"}
+      21 passed, 6 failed, 0 skipped
+   M4 approve writes no audit row:
+         FAIL  T4 approve:  {"state": "approved", "status": "cancelled", "audit_id": null, "request_id": "d3d2f6f9-7fba-442c-8b29-01c8405edfbb"}
+         FAIL  T8 restore:  {"state": "approved", "status": "scheduled", "audit_id": null, "request_id": "d4039c35-ee0a-43b5-94f0-955a7a974015"}
+         FAIL  T4 approve:  {"state": "approved", "status": "cancelled", "audit_id": null, "request_id": "ea0e2990-9a59-45c4-8d5c-c50ac6f95cd2"}
+         FAIL  T8 restore:  {"state": "approved", "status": "scheduled", "audit_id": null, "request_id": "a187a677-d14c-4c52-977f-ca240873f9c2"}
+      33 passed, 4 failed, 0 skipped
+   M5 a second pending allowed:
+         FAIL  T3 second pending: ACCEPTED
+      35 passed, 2 failed, 0 skipped
+   M6 requests readable by leadership only (D2 reverted):
+         FAIL  T14 requests table: plain-member-TO 0
+      35 passed, 2 failed, 0 skipped
+   M7 expiry raised (rolls itself back):
+         FAIL  T11 expiry: EXPIRED 
+      35 passed, 2 failed, 0 skipped
+   M8 initiator may reject:
+         FAIL  department block aborted: NOT_PENDING: this request is already rejected.
+      25 passed, 2 failed, 0 skipped
+   M9 signatures column-selectable: migration REFUSED -> POST: training_session_requests RLS / grants wrong (signatures must not be selectable).
+   M10 open_signin left unrepointed: migration REFUSED -> POST: public.open_signin(uuid) is not exactly the live body + its slice7 block.
+   M11 approve skips the cancel's QR close (D5):
+         FAIL  T4 approve:  {"state": "approved", "status": "cancelled", "audit_id": "a9254d99-6366-45fd-b25a-55abcf3b6b16", "request_id": "24ed4731-bd09-43c6-a26f-5c663910dba4"}
+         FAIL  T4 approve:  {"state": "approved", "status": "cancelled", "audit_id": "fc843f64-f37f-45d2-adaa-c636bdece564", "request_id": "b4ed38cd-4781-4d29-9cea-2a7b150d2540"}
+      35 passed, 2 failed, 0 skipped
+   M12 typed name accepted as a signature:
+         FAIL  T9 refusals: BAD_SIGNATURE:ACCEPTED BAD_SIGNATURE:PENDING: a sign-off is already waiting on this session.
+         FAIL  department block aborted: PENDING: a sign-off is already waiting on this session.
+      27 passed, 4 failed, 0 skipped
+   M13 swap_week_dates kept: migration REFUSED -> POST: swap_week_dates / move_week still exist.
