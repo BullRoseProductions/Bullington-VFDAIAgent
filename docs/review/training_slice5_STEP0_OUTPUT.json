@@ -1,0 +1,15 @@
+{
+ "attach_gate": "is_training_manager()",
+ "set_drill_plan_gate": "is_training_manager()",
+ "drill_plans_source_check": "CHECK ((source = ANY (ARRAY['ai'::text, 'manual'::text])))",
+ "session_plans_from_library": 0,
+ "training_sessions_policies": [
+  "leaders write training_sessions | INSERT |  | ((department_id = my_department_id()) AND is_training_manager())"
+ ],
+ "drill_plans_by_source_status": null,
+ "set_drill_plan_accepts_manual": true,
+ "drill_plan_categories_vs_training_plans": {
+  "plans_with_category": 0,
+  "category_matches_a_training_plan": 0
+ }
+}
