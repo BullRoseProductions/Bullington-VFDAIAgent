@@ -1,0 +1,58 @@
+{
+ "by_type_kind": [
+  {
+   "n": 6,
+   "kind": "agenda",
+   "type": "board",
+   "done_sessions": 3
+  },
+  {
+   "n": 3,
+   "kind": "upload",
+   "type": "board",
+   "done_sessions": 2
+  },
+  {
+   "n": 11,
+   "kind": "legacy AI planner",
+   "type": "training",
+   "done_sessions": 11
+  },
+  {
+   "n": 3,
+   "kind": "other (ai)",
+   "type": "training",
+   "done_sessions": 0
+  },
+  {
+   "n": 6,
+   "kind": "upload",
+   "type": "training",
+   "done_sessions": 6
+  }
+ ],
+ "other_titles": [
+  "training · EMS Skills Refresher — Plan",
+  "training · Live Fire / RIT — Plan",
+  "training · Vehicle Extrication (Live)"
+ ],
+ "attach_rpc_gate": "is_training_manager()",
+ "audience_values": [
+  "board",
+  "everyone",
+  "leadership"
+ ],
+ "sessions_by_type": {
+  "board": 13,
+  "training": 150,
+  "leadership": 13
+ },
+ "attach_rpc_checks_type": false,
+ "session_plans_policies": [
+  "canmanage delete session_plans | DELETE | ((department_id = my_department_id()) AND is_training_manager()) | ",
+  "canmanage insert session_plans | INSERT |  | ((department_id = my_department_id()) AND is_canmanage())",
+  "canmanage update session_plans | UPDATE | ((department_id = my_department_id()) AND is_training_manager()) | ((department_id = my_department_id()) AND is_training_manager())",
+  "members read session_plans | SELECT | (department_id = my_department_id()) | "
+ ],
+ "restricted_with_is_meeting": 0
+}
