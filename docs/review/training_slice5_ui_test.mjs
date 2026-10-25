@@ -11,7 +11,7 @@
 //   5. Start blank -> the plan editor, empty -> set_drill_plan(p_id null, p_source 'manual') -> a draft, no "Manual" tag
 //   6. "Describe your goals (focus & notes)" sits right under Topic
 //   7. the role matrix: Start blank / Schedule with this plan for DA + training officer only
-//   8. the source: only src/App.jsx changed; no new RPC; verified unchanged; Notify crew held back
+//   8. the source (pinned to its release, 5546b7d): only src/App.jsx changed; no new RPC; verified unchanged; Notify crew held back
 import { mkdtempSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -229,20 +229,22 @@ for (const [who, role, isTO, meId, want] of [
   unmount();
 }
 
-// 8 — the source. Fences are "vs origin/main" until promote, then pinned to the release (as Slices 2–4).
+// 8 — the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// Structural fences are PINNED to Slice 5's own release (5546b7d, a --no-ff merge whose first parent 38ad62a is the main it
+// landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "5546b7d";
 const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const base = appAt(BASE);
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("Slice 5 changes only src/App.jsx (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const rel = appAt(REL), base = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 5 (5546b7d) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 // an RPC name counts as existing whether called directly (supabase.rpc("x") or through TrainingPlans' act("kind", "x", …)
 const rpcSet = (s) => new Set([...(s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)), ...[...s.matchAll(/\bact\("[a-z]+", "([a-z_]+)"/g)].map((m) => m[1])]);
-ok("Slice 5 adds no RPC vs origin/main", [...rpcSet(src)].every((n) => rpcSet(base).has(n)), JSON.stringify([...rpcSet(src)].filter((n) => !rpcSet(base).has(n))));
+ok("Slice 5 (5546b7d) added no RPC vs its parent", [...rpcSet(rel)].every((n) => rpcSet(base).has(n)), JSON.stringify([...rpcSet(rel)].filter((n) => !rpcSet(base).has(n))));
 ok("the writes are the existing paths: the same inserts + .select, attach_drill_plan_to_session, set_drill_plan 'manual'",
   src.includes('}).select("id");') && src.includes('.insert(rows).select("id, date");   // ONE bulk insert') && src.includes('supabase.rpc("attach_drill_plan_to_session", { p_plan_id: wp.id, p_session_id: sessionId })') && src.includes('p_content: v.content, p_source: "manual" }'));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by Slice 5 (5546b7d) vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
