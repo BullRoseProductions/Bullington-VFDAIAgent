@@ -163,17 +163,22 @@ for (const [who, role, seen] of [["Department Admin", ["Department Admin"], true
 
 // 7 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const base = execSync("git show HEAD:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
+// Structural fences are PINNED to the picker's own reviewed commit (84ff590, shipped in release ebfcb1c — which merged two
+// cert-UI changes at once, so the release's parent would also count Slice 1's RPCs): "vs HEAD" only held while the change was
+// uncommitted. Historical = 84ff590 vs its parent (bac9e83).
+const REL = "84ff590";
+const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = at(REL), base = at(`${REL}^1`);
 const rpcLines = (s, n) => (s.match(new RegExp(`.*supabase\\.rpc\\("${n}".*`, "g")) || []).join("\n");
-ok("set_cert_type / delete_cert_type / assign_cert_type / update_cert / delete_cert calls byte-identical to HEAD",
-  ["set_cert_type", "delete_cert_type", "assign_cert_type", "update_cert", "delete_cert"].every((n) => rpcLines(src, n) === rpcLines(base, n) && rpcLines(src, n).length > 0));
+ok("set_cert_type / delete_cert_type / assign_cert_type / update_cert / delete_cert calls untouched by the picker (84ff590 vs its parent)",
+  ["set_cert_type", "delete_cert_type", "assign_cert_type", "update_cert", "delete_cert"].every((n) => rpcLines(rel, n) === rpcLines(base, n) && rpcLines(rel, n).length > 0));
 const rpcNames = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-const added = [...rpcNames(src)].filter((n) => !rpcNames(base).has(n));
-ok("the only new RPC is add_standard_cert_type", JSON.stringify(added) === '["add_standard_cert_type"]', JSON.stringify(added));
+const added = [...rpcNames(rel)].filter((n) => !rpcNames(base).has(n));
+ok("the only new RPC in the picker (84ff590 vs its parent) is add_standard_cert_type; still called today", JSON.stringify(added) === '["add_standard_cert_type"]' && rpcNames(src).has("add_standard_cert_type"), JSON.stringify(added));
 const i = src.indexOf("function StandardCertPicker("), j = src.indexOf("\nfunction ", i + 10);
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 ok("no hex literal in the new component", i > 0 && (strip(src.slice(i, j)).match(/#[0-9A-Fa-f]{3,8}\b/g) || []).length === 0);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count in App.jsx unchanged vs HEAD", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count in App.jsx unchanged by the picker (84ff590 vs its parent)", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

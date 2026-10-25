@@ -223,22 +223,27 @@ const canvasW = (h) => [...h.querySelectorAll("canvas")].map((c) => c.style.widt
 
 // 7 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+// Structural fences are PINNED to Slice 2's own release (e331e66, a --no-ff merge whose first parent 739d1cc is the main it
+// landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent; ongoing guards
+// compare what Slice 2 owns in today's tree with the release's copy.
+const REL = "e331e66";
+const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = appAt(REL), relParent = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 2 (e331e66) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-ok("no new RPC", [...rpcSet(src)].every((n) => rpcSet(main).has(n)), JSON.stringify([...rpcSet(src)].filter((n) => !rpcSet(main).has(n))));
+ok("Slice 2 (e331e66) added no RPC vs its parent", [...rpcSet(rel)].every((n) => rpcSet(relParent).has(n)), JSON.stringify([...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n))));
 const fn = (s, name) => { const i = s.indexOf(`function ${name}(`); return s.slice(i, s.indexOf("\nfunction ", i + 10)); };
 const tcc = fn(src, "TrainingCategoriesCard"), tsched = fn(src, "TrainingSchedule");
 const writes = (s) => (s.match(/from\("training_plans"\)\.(insert|update|delete)\(/g) || []).length;
-ok("the three category writes moved verbatim into TrainingCategoriesCard (none left in TrainingSchedule's category code)",
-  ["async function addPlan() {", "async function removePlan(id) {", "async function updatePlan() {"].every((h) => fn(main, "TrainingSchedule").includes(h) && tcc.includes(h) && !tsched.includes(h))
-  && writes(tcc) === 3 && writes(src) === writes(main));
+ok("the three category writes moved verbatim into TrainingCategoriesCard by Slice 2 (vs its parent's TrainingSchedule); here = e331e66's card",
+  ["async function addPlan() {", "async function removePlan(id) {", "async function updatePlan() {"].every((h) => fn(relParent, "TrainingSchedule").includes(h) && fn(rel, "TrainingCategoriesCard").includes(h) && !fn(rel, "TrainingSchedule").includes(h))
+  && writes(rel) === writes(relParent) && tcc === fn(rel, "TrainingCategoriesCard") && writes(tcc) === 3 && !tsched.includes("async function addPlan() {"));
 ok("AIDrillPlanner still defined (its prompt is the builder's fence) but no longer mounted", src.includes("function AIDrillPlanner(") && !src.includes("<AIDrillPlanner") && !tsched.includes("Draft with AI"));
 const sig = (s) => (s.match(/.*const canRunSignin = .*/) || [""])[0];
-ok("canRunSignin (the QR gate) unchanged", sig(src) === sig(main) && sig(src).includes("SIGNIN_ROLES"));
+ok("canRunSignin (the QR gate) untouched by Slice 2 (e331e66 vs its parent); here = e331e66's", sig(rel) === sig(relParent) && sig(src) === sig(rel) && sig(src).includes("SIGNIN_ROLES"));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Slice 2 (e331e66) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

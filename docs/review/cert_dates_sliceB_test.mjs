@@ -218,8 +218,12 @@ ok("digest: never-expires = flag OR same-department type; another department's t
 
 // 8 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
-ok("runtime changes: only App.jsx, shared/expiry.js, api/digest.js, api/assistant.js", JSON.stringify(changed) === JSON.stringify(["api/assistant.js", "api/digest.js", "shared/expiry.js", "src/App.jsx"]), JSON.stringify(changed));
+// Structural fences are PINNED to cert dates Slice B's own release (739d1cc, a --no-ff merge whose first parent 2a94baa is the
+// main it landed on): "vs origin/main" was true only until the next slice merged. Historical = the release vs its parent.
+const REL = "739d1cc";
+const atRef = (ref, p) => execSync(`git show ${ref}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("Slice B (739d1cc) runtime changes vs its parent: only App.jsx, shared/expiry.js, api/digest.js, api/assistant.js", JSON.stringify(changed) === JSON.stringify(["api/assistant.js", "api/digest.js", "shared/expiry.js", "src/App.jsx"]), JSON.stringify(changed));
 ok("both cert loaders read no_expiry + achieved_on", (src.match(/from\("certs"\)\.select\("id, member_id, name, exp, proof_path, cert_type_id, no_expiry, achieved_on"\)/g) || []).length === 2);
 ok("the client still never writes certs directly", !/from\("certs"\)\.(insert|update|upsert|delete)/.test(src));
 ok("update_cert is called with the two new named args", /rpc\("update_cert", \{ cert_id: c\.id, new_name: name, new_exp: expTrim \|\| null, new_no_expiry: draft\.noExpiry, new_achieved_on: achTrim \}\)/.test(src));
@@ -228,8 +232,7 @@ ok("assistant my_certs reads no_expiry + achieved_on + the type, and reports \"d
 const block = src.slice(src.indexOf("function CertDatesFields("), src.indexOf("\nfunction ", src.indexOf("function CertDatesFields(") + 10));
 ok("no hex in CertDatesFields (FIRE / FS tokens)", !/#[0-9A-Fa-f]{3,8}\b/.test(block) && block.length > 500);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-const main = (p) => execSync(`git show origin/main:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-ok("locked-token counts unchanged vs origin/main (App.jsx, api/digest.js, api/assistant.js)", ["src/App.jsx", "api/digest.js", "api/assistant.js"].every((p) => tok(readFileSync(join(root, p), "utf8")) === tok(main(p))));
+ok("locked-token counts unchanged by Slice B (739d1cc) vs its parent (App.jsx, api/digest.js, api/assistant.js)", ["src/App.jsx", "api/digest.js", "api/assistant.js"].every((p) => tok(atRef(REL, p)) === tok(atRef(`${REL}^1`, p))));
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

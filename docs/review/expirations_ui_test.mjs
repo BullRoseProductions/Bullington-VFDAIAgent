@@ -3,10 +3,12 @@
 //    expiryBucket() (shared/expiry.js) on a dept_expirations-shaped cert row, for every month offset -2..+8.
 // 2. The reminder plan (api/expiration-reminders.js planReminders): who gets what.
 import { readFileSync } from "fs";
-import { expiryBucket, monthIndex, EXPIRING_MONTHS } from "../../shared/expiry.js";
+import { expiryBucket, monthIndex, EXPIRING_MONTHS, validExpYM } from "../../shared/expiry.js";
 const app = readFileSync(new URL("../../src/App.jsx", import.meta.url), "utf8");
 const grab = (name) => { const i = app.indexOf(`function ${name}(`); if (i < 0) throw new Error(`${name} not found in App.jsx`); let d = 0, j = app.indexOf("{", i); for (; j < app.length; j++) { if (app[j] === "{") d++; else if (app[j] === "}" && --d === 0) break; } return app.slice(i, j + 1); };
-const certStatus = new Function("EXPIRING_MONTHS", `${grab("nowYM")}\n${grab("certStatus")}\nreturn certStatus;`)(EXPIRING_MONTHS);
+// certStatus has read the shared validExpYM (shared/expiry.js) since the malformed-date fix (9e2b170) — inject the real one,
+// as EXPIRING_MONTHS is, so the extracted function runs exactly as it does in the app.
+const certStatus = new Function("EXPIRING_MONTHS", "validExpYM", `${grab("nowYM")}\n${grab("certStatus")}\nreturn certStatus;`)(EXPIRING_MONTHS, validExpYM);
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const now = new Date(); const todayYM = now.getFullYear() * 12 + now.getMonth() + 1;
 const ymOf = (k) => { const y = Math.floor((k - 1) / 12), m = k - y * 12; return `${y}-${String(m).padStart(2, "0")}`; };
