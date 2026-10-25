@@ -23584,7 +23584,7 @@ const tpSplit = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(B
 
 /* Edit a library plan: the documented content keys as plain text (one item per line; a run-of-show line is
    "step | details"). Unknown content keys are carried through untouched. */
-function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel }) {
+function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel, saveLabel = "Save changes" }) {
   const c = p.content || {};
   const [f, setF] = useState({
     title: p.title || "", category: p.category || "", duration: p.duration_min ? String(p.duration_min) : "", audience: p.audience || "",
@@ -23618,7 +23618,7 @@ function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel }) {
         {area("safety", "Safety — one per line")}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Save changes</button>
+        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saveLabel}</button>
         <button style={FS.btn} disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -23709,7 +23709,7 @@ function TrainingCategoriesCard({ S, categories, loadPlans, notify }) {
     </div>
   );
 }
-function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans }) {
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan }) {
   const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
@@ -23721,6 +23721,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const [catFilter, setCatFilter] = useState("");
   const [busy, setBusy] = useState(null);               // the action in flight
   const [editing, setEditing] = useState(false);
+  const [creating, setCreating] = useState(false);       // Slice 5: "Start blank" — the plan editor, empty, saving a manual draft
   const [attachOpen, setAttachOpen] = useState(false);
   const [attachSess, setAttachSess] = useState("");
   const [lastAttached, setLastAttached] = useState(null);   // the session_plans row attach returned — opens in the real plan viewer
@@ -23780,6 +23781,18 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     const r = await act("edit", "set_drill_plan", { p_id: p.id, p_title: v.title.trim(), p_category: v.category || null, p_duration_min: v.duration_min, p_audience: v.audience.trim() || null, p_content: v.content, p_source: p.source }, "Plan updated.");
     if (!r.error) setEditing(false);
   }
+  // Slice 5: "Start blank" saves through the same create path as an AI draft — set_drill_plan with no id — as source
+  // 'manual', a draft awaiting review like any other. It then opens selected, ready to Edit / Approve / Schedule / Attach.
+  async function saveNew(v) {
+    if (!v.title.trim()) { notify({ kind: "error", title: "A plan needs a title" }); return; }
+    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Duration must be a positive number of minutes" }); return; }
+    const r = await act("create", "set_drill_plan", { p_id: null, p_title: v.title.trim(), p_category: v.category || null, p_duration_min: v.duration_min, p_audience: v.audience.trim() || null, p_content: v.content, p_source: "manual" }, "Saved — it's in your library as a draft, awaiting review.");
+    if (!r.error) { setCreating(false); if (r.data?.id) select(r.data.id); }
+  }
+  const startBlank = () => { setCreating(true); setEditing(false); setAttachOpen(false); setTimeout(() => document.getElementById("tp-start-blank")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  // Slice 5: hand the plan to the Schedule's own form, pre-filled; the officer confirms there and the plan is attached
+  // to the new session (a series: its first occurrence only).
+  const scheduleWith = (p) => onScheduleWithPlan && onScheduleWithPlan({ planId: p.id, planTitle: p.title, title: p.title, duration: p.duration_min, category: p.category });
   async function attach(p) {
     const s = (sessions || []).find((x) => String(x.id) === String(attachSess));
     if (!s) { notify({ kind: "error", title: "Pick a session", text: "Choose which session to attach this plan to." }); return; }
@@ -23800,7 +23813,10 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   return (
     <PageShell band watermark="PLANS" above={mounts} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
       sub="Build a plan for any topic with AI — save it, reuse it, and attach it to any session."
-      actions={canWrite ? <button style={FS.btnPrimary} onClick={() => { topicRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); topicRef.current?.focus(); }}><Sparkles size={14} /> Draft with AI</button> : null}>
+      actions={canWrite ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={FS.btnPrimary} onClick={() => { topicRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); topicRef.current?.focus(); }}><Sparkles size={14} /> Draft with AI</button>
+        <button style={FS.btn} onClick={startBlank} aria-expanded={creating}><Pencil size={14} color={FIRE.btnIcon} /> Start blank</button>
+      </div> : null}>
       <NoirSkin>
         {viewToggle}{/* Schedule | Training Plans — first in the body, under the band, the same spot on all three views */}
         {canWrite && (
@@ -23809,13 +23825,13 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
             <div style={{ fontSize: 12, color: FIRE.textSecondary, marginBottom: 14 }}>Tell it what you want to train on — any topic, not just what's next on the calendar.</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12, margin: "4px 0 14px" }}>
               {field("Topic / drill", <input ref={topicRef} style={FS.input} value={form.topic} onChange={up("topic")} placeholder="e.g. Tanker shuttle for a rural water supply" />, true)}
+              {field("Describe your goals (focus & notes)", <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={form.focus} onChange={up("focus")} placeholder="props available, specific objectives, what to emphasize or avoid…" />, true)}
               {field("Type", <select style={FS.input} value={form.type} onChange={up("type")}>{TP_TYPES.map((t) => <option key={t}>{t}</option>)}</select>)}
               {field("Duration", <select style={FS.input} value={form.duration} onChange={up("duration")}>{TP_DURATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
               {field("Category", <select style={FS.input} value={form.category} onChange={up("category")}><option value="">No category</option>{(categories || []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}</select>)}
               {field("Members expected", <input style={FS.input} inputMode="numeric" value={form.members} onChange={up("members")} placeholder="8" />)}
               {field("Skill level", <select style={FS.input} value={form.level} onChange={up("level")}>{TP_LEVELS.map((t) => <option key={t}>{t}</option>)}</select>)}
               {field("Standard / SOG (optional)", <input style={FS.input} value={form.standard} onChange={up("standard")} placeholder="ISO rural PPC…" />)}
-              {field("Focus & notes (optional)", <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={form.focus} onChange={up("focus")} placeholder="props available, specific objectives, what to emphasize or avoid…" />, true)}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
               <button style={{ ...FS.btnPrimary, padding: "11px 20px", fontSize: 13, opacity: drafting ? 0.7 : 1 }} onClick={draft} disabled={drafting}>{drafting ? <><Loader2 size={15} className="spin" /> Drafting…</> : <><Sparkles size={15} /> Draft plan</>}</button>
@@ -23826,6 +23842,13 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
             </div>
             {draftErr && <div role="alert" style={NOIR_ERR}>{draftErr}</div>}
             <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 14, display: "flex", alignItems: "center", gap: 7 }}><ShieldCheck size={13} color={FIRE.amberText} /> AI drafts the plan — a qualified officer reviews and approves it before it's used. Always verify against your SOGs.</div>
+          </div>
+        )}
+
+        {canWrite && creating && (
+          <div id="tp-start-blank" style={{ marginBottom: 18 }}>
+            <div style={tpSecLab}><Pencil size={16} color={FIRE.redBright} />Start a plan from scratch</div>
+            <DrillPlanEditForm S={S} p={{ title: "", category: "", duration_min: null, audience: "", content: { summary: "", objectives: [], run_of_show: [], materials: [], safety: [] } }} categories={categories} busy={busy === "create"} saveLabel="Save draft" onSave={saveNew} onCancel={() => setCreating(false)} />
           </div>
         )}
 
@@ -23878,6 +23901,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                 {canWrite && !editing && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
                     <button style={FS.btn} disabled={!!busy} onClick={() => { setEditing(true); setAttachOpen(false); }}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>
+                    <button style={FS.btn} disabled={!!busy} onClick={() => scheduleWith(sel)}><Plus size={14} color={FIRE.btnIcon} /> Schedule with this plan</button>
                     <button style={FS.btn} disabled={!!busy} onClick={() => setAttachOpen((v) => !v)} aria-expanded={attachOpen}><Calendar size={14} color={FIRE.btnIcon} /> Attach to session</button>
                     {sel.status === "draft"
                       ? <button style={{ ...FS.btnPrimary, opacity: busy === "approve" ? 0.7 : 1 }} disabled={!!busy} onClick={() => act("approve", "approve_drill_plan", { p_id: sel.id }, "Plan approved.")}>{busy === "approve" ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />} Approve plan</button>
@@ -24038,18 +24062,22 @@ function Training(props) {
   // Slice 2: the Schedule's "Draft a plan →" and "Manage in Training Plans →" flip to the Training Plans tab (and, for the
   // latter, land on its Training categories card).
   const goPlans = (anchor) => { setView("plans"); setPlansSeen(true); if (anchor) setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80); };
+  // Slice 5: the Library's "Schedule with this plan" flips to the Schedule with a prefill for its own form (the nonce
+  // re-applies the same plan picked twice); scheduling it flips back to the Library.
+  const [schedPrefill, setSchedPrefill] = useState(null);
+  const goSchedule = (prefill) => { setSchedPrefill({ ...prefill, nonce: Date.now() + Math.random() }); setView("schedule"); };
   // The client twin of is_training_manager(): a Department Admin (NOT Project Admin — not isDeptAdmin) OR an active
   // training officer. Every training write below keys on it; running a QR sign-in does not (canRunSignin, decision 3).
   const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
-    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} /></div>}
+    <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} schedulePrefill={schedPrefill} onScheduledReturn={() => goPlans()} /></div>
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} /></div>}
   </>);
 }
 
 // CardHead paints its icon red; the "no length recorded" notice keeps its amber accent, so its icon overrides the colour.
 const AmberClockIcon = (props) => <Clock {...props} color={FIRE.amberText} />;
-function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle, canManageTraining, isTrainingOfficer, onTrainingOfficersChanged, onDraftPlan, onManageCategories }) {
+function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSessions, loadSessions, sessionsErr, members, meId, notify, dept, addFeedback, viewToggle, canManageTraining, isTrainingOfficer, onTrainingOfficersChanged, onDraftPlan, onManageCategories, schedulePrefill, onScheduledReturn }) {
   const canDeleteShared = useCanDeleteShared();   // Dept Admin / Project Admin only — see src/ConfirmDestructive.jsx
 
   const canManage = !!canManageTraining;   // create/edit/complete/Reopen sessions, roster attendance, categories — is_training_manager() (a Department Admin or a training officer; not PA)
@@ -24223,6 +24251,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [sCounts, setSCounts] = useState(true);   // create-session "counts toward attendance rate"; default ON, feeds addSession + scheduleRecurring
   const [sOffsite, setSOffsite] = useState(false);   // off-site flag; feeds BOTH addSession + scheduleRecurring
   const [sOffLabel, setSOffLabel] = useState("");
+  const [withPlan, setWithPlan] = useState(null);   // Slice 5: { id, title } — the Library plan the new session gets (✕ drops it)
   const [rPattern, setRPattern] = useState("biweekly");     // "weekly" | "biweekly" | "monthly"
   const [rDow, setRDow] = useState(new Date().getDay());    // day-of-week 0..6 (Sun..Sat)
   const [rOrd, setROrd] = useState(1);                      // monthly ordinal: 1..4 or "last"
@@ -24272,7 +24301,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     const title = stitle.trim() || pItem?.name || "Training session";
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
-    const { error } = await supabase.from("training_sessions").insert({
+    const { data: made, error } = await supabase.from("training_sessions").insert({
       department_id: deptId,
       plan_id: pItem ? pItem.id : null,                       // link the session to its training category (null = one-off)
       title,
@@ -24285,9 +24314,23 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
       is_meeting: sAudience === "everyone" && sMeeting,   // only an everyone session carries the flag (leadership/board are meetings already)
       is_offsite: sOffsite,
       location_label: sOffsite ? (sOffLabel.trim() || null) : null,   // coordinates come later, at open-sign-in
-    });
+    }).select("id");
     if (error) { notify({ kind: "error", title: "Couldn't schedule the session", text: "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    const attached = await attachWithPlan(made?.[0]?.id, "Session scheduled");
     setShowSess(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
+    if (attached) onScheduledReturn && onScheduledReturn();
+  }
+  /* Slice 5: after the insert, attach the Library plan to the new session — the existing attach_drill_plan_to_session.
+     Not atomic, by ruling: an attach that fails keeps the session and says so (it can be attached from the Library).
+     Returns true when a Library hand-off ran (attached or not), so the caller flips back to the Library. */
+  async function attachWithPlan(sessionId, title, extra = "") {
+    const wp = withPlan;
+    if (!wp) return false;
+    setWithPlan(null);
+    const { error } = sessionId ? await supabase.rpc("attach_drill_plan_to_session", { p_plan_id: wp.id, p_session_id: sessionId }) : { error: new Error("no session id") };
+    if (error) notify({ kind: "error", title: "Scheduled; the plan couldn't be attached", text: `Scheduled; the plan couldn't be attached — attach it from the Library.${extra}`, details: error.message });
+    else notify({ kind: "success", title, text: `Scheduled with “${wp.title}” attached.${extra}` });
+    return true;
   }
   function toggleRepeat() {
     if (!repeat) {   // opening: seed pattern from the selected category's cadence, day from today
@@ -24328,15 +24371,20 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     if (deptErr || !deptId) { notify({ kind: "error", title: "Couldn't find your department", text: "Please try again." }); return; }
     const sid = crypto.randomUUID();
     const rows = fresh.map((iso) => ({ department_id: deptId, plan_id: pItem ? pItem.id : null, title, date: iso, start_time: sTime || null, duration_min: sDurMin(), done: false, series_id: sid, audience: sAudience, counts_toward_attendance: sCounts, is_meeting: sAudience === "everyone" && sMeeting, is_offsite: sOffsite, location_label: sOffsite ? (sOffLabel.trim() || null) : null }));
-    const { error } = await supabase.from("training_sessions").insert(rows);   // ONE bulk insert
+    const { data: made, error } = await supabase.from("training_sessions").insert(rows).select("id, date");   // ONE bulk insert
     if (error) { notify({ kind: "error", title: "Couldn't schedule the series", text: "Something went wrong saving those. Please try again.", details: error.message }); return; }
     if (pItem && dates.length) await supabase.from("training_plans").update({ starts_on: dates[0] }).eq("id", pItem.id);
     const dow = WEEKDAY_LABELS[rDow];
     const ordName = (MONTH_ORDINALS.find(([, v]) => v === rOrd) || ["first"])[0];
     const desc = rPattern === "weekly" ? `weekly on ${dow}` : rPattern === "biweekly" ? `every other week on ${dow}` : `the ${ordName} ${dow} each month`;
     const skipped = dates.length - fresh.length;
-    notify({ kind: "success", title: "Sessions scheduled", text: `Added ${fresh.length} session${fresh.length === 1 ? "" : "s"} — ${desc}${skipped ? ` (${skipped} already existed)` : ""}.` });
+    const summary = `Added ${fresh.length} session${fresh.length === 1 ? "" : "s"} — ${desc}${skipped ? ` (${skipped} already existed)` : ""}.`;
+    // Slice 5: a series takes the Library plan on its FIRST new occurrence only (by ruling) — the earliest-dated row.
+    const first = [...(made || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+    const handedOff = await attachWithPlan(first?.id, "Sessions scheduled", ` ${summary} The plan is on the first session.`);
+    if (!handedOff) notify({ kind: "success", title: "Sessions scheduled", text: summary });
     setShowSess(false); setRepeat(false); setStitle(""); setSTime(""); setSDur(""); loadSessions();
+    if (handedOff) onScheduledReturn && onScheduledReturn();
   }
   // "Done for the night" — does NOT lock. Opens the roll writable so the officer can
   // confirm/complete attendance BEFORE finalizing. The lock/clock-reset moves to finalizeSession.
@@ -24509,7 +24557,23 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
      calendar keeps showing cur; the list snaps back to "Calendar month" when the hero's goToNext, scheduleFor or the
      calendar's own ← / → moves cur, so every #ts-<id> scroll target is on screen. Filters what loadSessions already holds —
      no new read. Session-only state; nothing persisted. */
-  const [listFilter, setListFilter] = useState("month");          // "month" | "thisMonth" | "lastMonth" | "thisYear" | "custom"
+  const [listFilter, setListFilter] = useState("month");
+  /* Slice 5: the Library's "Schedule with this plan" — open this form pre-filled from the plan: its title and length,
+     the category whose name matches the plan's (case-insensitive; else One-off), day = today. Audience, attendance,
+     meeting, off-site and repeat take the form's defaults; the officer confirms everything before anything is written. */
+  useEffect(() => {
+    const pf = schedulePrefill;
+    if (!pf || !canManage) return;
+    const want = String(pf.category || "").trim().toLowerCase();
+    const cat = want ? plan.find((p) => String(p.name || "").trim().toLowerCase() === want) : null;
+    const now = new Date();
+    setCur({ y: now.getFullYear(), m: now.getMonth() }); setSd(now.getDate()); setListFilter("month");
+    setStitle(pf.title || ""); setSDur(pf.duration > 0 ? String(pf.duration) : ""); setSpid(cat ? cat.id : 0); setSTime("");
+    setSAudience("everyone"); setSCounts(true); setSMeeting(false); setSOffsite(false); setSOffLabel(""); setRepeat(false);
+    setWithPlan(pf.planId ? { id: pf.planId, title: pf.planTitle || pf.title || "this plan" } : null);
+    setShowSess(true);
+    setTimeout(() => document.getElementById("tr-schedule")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }, [schedulePrefill?.nonce]);          // "month" | "thisMonth" | "lastMonth" | "thisYear" | "custom"
   const [rangeDraft, setRangeDraft] = useState(() => ({ fy: today.getFullYear(), fm: 0, ty: today.getFullYear(), tm: today.getMonth() }));
   const [rangeApplied, setRangeApplied] = useState(null);       // { fy, fm, ty, tm } once Apply is pressed
   const ymIdx = (y, m) => y * 12 + m;
@@ -24903,6 +24967,12 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
             headerExtra={canManage && !showSess ? <button style={{ ...Lbtn, padding: "6px 11px", fontSize: 12 }} onClick={() => { setSpid(plan[0]?.id || 0); setSd(Math.min(today.getDate(), dim)); setSAudience("everyone"); setSCounts(true); setSMeeting(false); setShowSess(true); }}><Plus size={14} color={LbtnIcon} /> Schedule a session</button> : null}
             belowHeader={canManage && showSess ? (
         <div style={{ ...NOIR_INSET, padding: 12, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {withPlan && <div data-testid="with-plan-chip" style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: FIRE.textSecondary }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 6px 4px 10px", borderRadius: 999, border: `1px solid ${FIRE.redBright}66`, background: `${FIRE.red}1f`, color: FIRE.textPrimary, fontWeight: 600 }}>
+              <BookOpen size={13} color={FIRE.redBright} /> With plan: {withPlan.title}
+              <button type="button" aria-label="Don't attach the plan" title="Don't attach the plan" onClick={() => setWithPlan(null)} style={{ border: "none", background: "transparent", color: FIRE.textMuted, cursor: "pointer", padding: "0 4px", fontSize: 13 }}>✕</button></span>
+            <span style={{ color: FIRE.textMuted }}>{repeat ? "It's attached to the first session of the series." : "It's attached to this session when you add it."}</span>
+          </div>}
           {!repeat && <label style={{ ...Lfield, minWidth: 90 }}><span style={LfieldLabel}>Day</span><select style={Linput} value={sd} onChange={(e) => setSd(e.target.value)}>{Array.from({ length: dim }, (_, i) => i + 1).map((d) => <option key={d}>{d}</option>)}</select></label>}
           <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={sTime} onChange={(e) => setSTime(e.target.value)} /></label>
                       {/* TOUCHPOINT 1 — set the length here. Optional and permanently so: a blank
@@ -24934,7 +25004,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
           {repeat
             ? <button style={LprimaryBtn} onClick={scheduleRecurring}><Plus size={15} /> Schedule {Math.min(Number(rCount) || 0, 104) || "…"} sessions</button>
             : <button style={LprimaryBtn} onClick={addSession}><Plus size={15} /> Add to {TRAIN_MONTHS[cur.m]}</button>}
-          <button style={Lbtn} onClick={() => setShowSess(false)}>Cancel</button>
+          <button style={Lbtn} onClick={() => { setShowSess(false); setWithPlan(null); }}>Cancel</button>
         </div>
             ) : null}
             items={monthSessions}
