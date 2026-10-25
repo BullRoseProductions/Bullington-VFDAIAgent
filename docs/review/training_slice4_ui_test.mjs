@@ -186,15 +186,19 @@ for (const [sid, label, titles, detachTitle] of [["bd", "Agenda (2)", ["October 
 
 // 6 the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime)", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+// Structural fences are PINNED to Slice 4's own release (f2386ae, a --no-ff merge whose first parent dd88f11 is the main it
+// landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "f2386ae";
+const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = appAt(REL), relParent = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Slice 4 (f2386ae) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-ok("no new RPC", [...rpcSet(src)].every((n) => rpcSet(main).has(n)), JSON.stringify([...rpcSet(src)].filter((n) => !rpcSet(main).has(n))));
+ok("Slice 4 (f2386ae) added no RPC vs its parent", [...rpcSet(rel)].every((n) => rpcSet(relParent).has(n)), JSON.stringify([...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n))));
 ok("the type decision is the existing Minutes helper isMeeting(s); the agenda gate is still canManage || isBoard(role)",
   src.includes("const meetingRow = isMeeting(s);") && src.includes("{meetingRow && (canManage || isBoard(role)) && (<>") && src.includes("{!meetingRow && canManage && ("));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(main), `${tok(src)} vs ${tok(main)}`);
+ok("locked-token count unchanged by Slice 4 (f2386ae) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
