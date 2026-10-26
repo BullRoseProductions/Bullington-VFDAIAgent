@@ -1,0 +1,50 @@
+PASS tombstone: a cancelled row's title is struck through + a Cancelled pill + its reason OCT26Pump nightCancelledOct 26 · 11:30 PM · part of Hose OpsCancelled — Storm warning — station closed Restore… Corrections (1)
+PASS tombstone: no Attendance / Plans / QR / Complete / Attach on a cancelled row 
+PASS …and a live row keeps them all 
+PASS Restore… is offered on an upcoming cancelled row (no pending request) 
+PASS calendar chip: "✕ Pump night" (greyed), not a live chip 
+PASS overdue clock: a category whose only upcoming session is cancelled is NOT "On track" 
+PASS the Show filter has a "Cancelled" bucket 
+PASS …which lists every cancelled session, any month (Pump night + Old cancelled), and no live ones TRAINTRAINING · Indian HarborKeep training on scheduleYour recurring training plan tracks itself — log a session and the
+PASS member Up-next: the cancelled drill shows struck through + Cancelled, with no Register ["Pump night"]
+PASS …a member makes no requests / log reads (RLS would return nothing) 
+PASS …and never a Cancel / Restore / sign-off control 
+PASS Cancel… only where it qualifies: on the upcoming, unattended, unfinalized row — not attended / finalized / pending / cancelled 
+PASS the panel: required reason + a SignaturePad 
+PASS a blank reason is refused before the RPC 
+PASS no signature drawn -> refused before the RPC 
+PASS the RPC's refusal shows inline (PENDING), panel kept open 
+PASS request_session_change(sX, 'cancel', reason, the drawn PNG) {"p_session_id":"sX","p_kind":"cancel","p_reason":"Storm warning — station closed tonight","p_signature":"data:image/png;base64,QUJDRA=="}
+PASS …says it's waiting on a second sign-off; nothing written directly 
+PASS Restore… -> request_session_change(sC, 'restore', …) {"p_session_id":"sC","p_kind":"restore","p_reason":"Storm passed — drill is back on","p_signature":"data:image/png;base64,QUJDRA=="}
+PASS a DA (not the initiator) sees "Needs your sign-off (1)": who asked, the session, the reason 
+PASS …the pending marker shows on the session row too 
+PASS signing off without drawing is refused before the RPC 
+PASS approve_session_change(rq-p, the approver's own drawn PNG) -> success [{"n":"approve_session_change","args":{"p_request_id":"rq-p","p_signature":"data:image/png;base64,QUJDRA=="}}]
+PASS …and it reloads requests + the log afterwards 
+PASS an expired return reads as "That request expired" — not a success, not a crash 
+PASS declining with a too-short reason is refused before the RPC 
+PASS Decline… -> reject_session_change(rq-p, reason) 
+PASS the initiator sees no approve for their own request ("Needs your sign-off (0)") — only "Your request … Withdraw" 
+PASS Withdraw -> withdraw_session_change(rq-p) 
+PASS …the row's pending marker offers the initiator Withdraw as well 
+PASS Board (leadership) sees "Corrections (1)" on the cancelled session 
+PASS the cancel row: "Cancelled by Ada DA", the reason, "Asked by Tom TO · signed off by Ada DA", Status scheduled → cancelled Corrections log — newest firstCancelled by Ada DA · Oct 26, 2026, 5:02 PM“Storm warning — station closed”Asked by Tom TO · signed off by Ada DAView signaturesStatus: scheduled → cancelled
+PASS signatures are NOT fetched with the list 
+PASS "View signatures" -> session_change_signatures(rq-c) once -> both drawn signatures 
+PASS Board has no Cancel / Restore / sign-off card (not a training manager) 
+PASS Department Admin: Cancel yes · Restore yes · sign-off card yes · history yes · tombstone reason yes {"cancel":true,"restore":true,"card":true,"hist":true,"reason":true}
+PASS training officer (plain Member): Cancel yes · Restore yes · sign-off card yes · history no · tombstone reason yes {"cancel":true,"restore":true,"card":true,"hist":false,"reason":true}
+PASS Officer, NOT a training officer: Cancel no · Restore no · sign-off card no · history yes · tombstone reason yes {"cancel":false,"restore":false,"card":false,"hist":true,"reason":true}
+PASS Board Member: Cancel no · Restore no · sign-off card no · history yes · tombstone reason yes {"cancel":false,"restore":false,"card":false,"hist":true,"reason":true}
+PASS Project Admin: Cancel no · Restore no · sign-off card no · history yes · tombstone reason yes {"cancel":false,"restore":false,"card":false,"hist":true,"reason":true}
+PASS Member: Cancel no · Restore no · sign-off card no · history no · tombstone reason no {"cancel":false,"restore":false,"card":false,"hist":false,"reason":false}
+PASS runtime changes: src/App.jsx + the two api read filters only ["api/assistant.js","api/pulse.js","src/App.jsx"]
+PASS the api changes are read filters only (.neq status cancelled) — no write path ["-        .gte(\"date\", today).lte(\"date\", until).order(\"date\", { ascending: true }).limit(40);","+        .gte(\"date\", today).lte(\"date\", until).neq(\"status\", \"cancelled\").order(\"date\", { ascending: true }).limit(40);   // Slice 7: cancelled drills aren't on anyone's schedule","-      .eq(\"done\", false);","+      .eq(\"done\", false)","+      .neq(\"status\", \"cancelled\");                 // Slice 7: never remind anyone about a cancelled drill"]
+PASS the only new RPCs are the five 7-DB ones ["approve_session_change","reject_session_change","request_session_change","session_change_signatures","withdraw_session_change"]
+PASS no direct status write: no training_sessions update/insert/upsert carries status (status moves only via the RPCs) 4 writes
+PASS the signature columns are never selected (only via session_change_signatures) 
+PASS no new station_presence write 
+PASS locked-token count unchanged vs origin/main (App.jsx) 132 vs 132
+PASS …and in api/assistant.js + api/digest.js 
+PASS Notify crew held back 

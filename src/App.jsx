@@ -2577,7 +2577,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting, status"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -2611,7 +2611,8 @@ export default function App() {
         const [yy, mm, dd] = r.date.split("-").map(Number);
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
-        return { id: r.id, planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+        return { id: r.id, status: r.status || "scheduled", cancelled: r.status === "cancelled",   // Slice 7: a cancelled session is a tombstone, never live
+          planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
           isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
@@ -3307,7 +3308,7 @@ function NeedsAttention({ S, me, meId, sessions, go }) {
   // in is still possible (scan the QR / see the training officer). A `done` session is locked and there
   // is nothing left to act on, so it is deliberately excluded: this is a to-do list, not a scolding.
   const unsigned = (sessions || [])
-    .filter((s) => !s.done && sessDate(s) <= t0 && rollFor(s, me) && expectedAfterJoin(me, s) && !(s.attendance || []).includes(meId))
+    .filter((s) => !s.done && !s.cancelled && sessDate(s) <= t0 && rollFor(s, me) && expectedAfterJoin(me, s) && !(s.attendance || []).includes(meId))
     .sort(sessSort);
   if (certs.length === 0 && unsigned.length === 0) return null;
   return (
@@ -3421,7 +3422,7 @@ function PersonalView({ S, me, meId, sessions, notify, go, dept, showClockCard =
     loadMine();
   }
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const upcoming = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
+  const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && sessDate(s) >= t0).sort(sessSort).slice(0, 4);   // next 4 only (display cap)
   // REGISTER on the card — the member's own plan only (no count). Read skipped when the card isn't shown.
   const reg = useSessionRegistrations(showUpcomingTraining ? upcoming.map((s) => s.id) : [], notify);
   return (
@@ -3825,7 +3826,7 @@ function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
   const { openSessionPlans, mounts } = usePlanViewer(S, notify);
   const todayISO = toISODate(new Date());
   const viewer = { access: role };
-  const next = (sessions || []).filter((s) => !s.done && isRestrictedEvent(s) && rollFor(s, viewer) && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const next = (sessions || []).filter((s) => !s.done && !s.cancelled && isRestrictedEvent(s) && rollFor(s, viewer) && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const kicker = next?.audience === "board" ? "NEXT BOARD MEETING" : "NEXT LEADERSHIP EVENT";
   if (!next) return null;
   return (
@@ -3851,7 +3852,7 @@ function NextLeadershipEventTile({ S, sessions, role, notify, style }) {
    to come. Nothing here reads or writes the roll, check-in, finalize, or any attendance figure. */
 function NextTrainingCard({ sessions, members, meId, notify, go, style }) {
   const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-  const next = (sessions || []).filter((s) => !s.done && sessDate(s) >= t0 && !isRestrictedEvent(s) && !s.isMeeting).sort(sessSort)[0] || null;
+  const next = (sessions || []).filter((s) => !s.done && !s.cancelled && sessDate(s) >= t0 && !isRestrictedEvent(s) && !s.isMeeting).sort(sessSort)[0] || null;
   const reg = useSessionRegistrations(next ? [next.id] : [], notify);
   const [showNames, setShowNames] = useState(false);
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
@@ -4056,7 +4057,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
   // Health numbers (attendance, board attendance, certs, duties, headcount) are derived inside DeptHealthCharts.
   const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
   const todayISO = toISODate(new Date());
-  const nextEvent = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const nextEvent = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nextReg = useSessionRegistrations(nextEvent ? [nextEvent.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
   const nameById = new Map((members || []).map((m) => [m.id, m.name]));
   const [duties, setDuties] = useState([]);
@@ -4408,7 +4409,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers are derived inside DeptHealthCharts — the same component the DA and Board dashboards render.
   const todayISO = toISODate(new Date());
-  const nextSession = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
+  const nextSession = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nextReg = useSessionRegistrations(nextSession ? [nextSession.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
   const planSnap = (() => { const r = nextSession ? nextReg.forSession(nextSession.id) : []; if (!r.length) return "";
     const n = (k) => r.filter((x) => x.status === k).length; return ` · plans: ${n("coming")} coming, ${n("maybe")} maybe, ${n("not_coming")} not coming`; })();
@@ -4994,7 +4995,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const loadUpcoming = () => {
     const todayIso = toISO(today);
     Promise.all([
-      supabase.from("training_sessions").select("id, title, date, start_time, audience"),
+      supabase.from("training_sessions").select("id, title, date, start_time, audience, status"),
       supabase.from("funding_events").select("title, date"),
       supabase.from("recruitment_events").select("title, date"),
       supabase.from("content_calendar").select("caption, date"),
@@ -5002,7 +5003,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       if (![tr, fu, rc, so].every((r) => !r.error && Array.isArray(r.data))) { setSnapErr(true); return; }   // keep last-known
       setSnapErr(false);
       const rows = [
-        ...(tr.data || []).map((r) => ({ id: r.id, title: r.title, date: r.date, startTime: r.start_time || null, type: "Training", audience: r.audience || "everyone" })),
+        ...(tr.data || []).filter((r) => r.status !== "cancelled").map((r) => ({ id: r.id, title: r.title, date: r.date, startTime: r.start_time || null, type: "Training", audience: r.audience || "everyone" })),   // Slice 7: never headline a cancelled drill (matches my_department_rollup)
         ...(fu.data || []).map((r) => ({ title: r.title, date: r.date, type: "Fundraiser" })),
         ...(rc.data || []).map((r) => ({ title: r.title, date: r.date, type: "Recruitment" })),
         ...(so.data || []).map((r) => ({ title: r.caption, date: r.date, type: "Social" })),
@@ -7962,7 +7963,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
   const loadAll = () => {
     Promise.all([
       supabase.from("content_calendar").select("id, date, caption"),
-      supabase.from("training_sessions").select("id, date, start_time, title, audience, session_plans(id, title, storage_path, ai_text, source, created_at)"),
+      supabase.from("training_sessions").select("id, date, start_time, title, audience, status, session_plans(id, title, storage_path, ai_text, source, created_at)"),
       supabase.from("recruitment_events").select("id, date, title"),
       supabase.from("funding_events").select("id, date, title"),
       supabase.from("action_items").select("id, text, due_date, status"),                      // 5th source (RLS: leaders only → members get [])
@@ -7982,7 +7983,7 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         .map((r) => { const [yy, mm, dd] = r.due_date.split("-").map(Number); return { source: "actionitem", id: `actionitem-${r.id}`, y: yy, m: (mm || 1) - 1, d: dd, label: r.text, color: SOURCE_COLORS.actionitem, tier: SOURCE_TIER.actionitem }; });
       setItems([
         ...mapRows(social, "social", (r) => r.caption || ""),
-        ...mapRows(training, "training", (r) => r.title, (r) => ({
+        ...mapRows(training, "training", (r) => (r.status === "cancelled" ? `Cancelled · ${r.title}` : r.title), (r) => ({
           title: r.title,   // SessionPlanChooser header reads session.title (chip items only have `label`)
           startTime: r.start_time || null,
           audience: r.audience || "everyone",
@@ -13155,7 +13156,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date YYYY-MM-DD → string compare
-  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+  const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const Unavail = ({ what, retry }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
       <AlertTriangle size={14} color={FIRE.redText} style={{ flexShrink: 0 }} />
@@ -13670,7 +13671,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
   const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 24), [range.from, range.to]);
   const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
   const hoursMonths = useMemo(() => monthsBetween(range.from, range.to, 12), [range.from, range.to]);
-  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+  const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
 
   // Duty completion — same read and same formula as the dashboards. null = no duties configured.
   const [duties, setDuties] = useState(null);   // null = not loaded yet
@@ -20050,7 +20051,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
      below, and the saved minutes list. "Carried" = open items that were extracted from the most recent
      minutes saved BEFORE this meeting's date (action_items.source_output_id), i.e. what the last meeting
      left open. The agenda is what was PLANNED — the prompt is told never to treat it as what happened. */
-  const meetings = (sessions || []).filter(isMeeting).sort((a, b) => sessSort(b, a));   // newest first — the Minutes-only helper, never the attendance one
+  const meetings = (sessions || []).filter((s) => isMeeting(s) && !s.cancelled).sort((a, b) => sessSort(b, a));   // newest first — the Minutes-only helper, never the attendance one
   // Minutes are written AFTER a meeting, so the picker leads with meetings already held (most recent first);
   // upcoming ones (recurring series run far ahead) follow, soonest first.
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -20686,7 +20687,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
   const todayISO = toISODate(new Date());
   const openDuties = duties.filter((d) => !isDoneThisPeriod(d, (dept?.week_start_day ?? 1)));
   const overdueDuties = openDuties.filter((d) => d.due_date && d.due_date < todayISO);                                                 // due_date is YYYY-MM-DD → string compare
-  const upcoming = (sessions || []).filter((s) => !s.done && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
+  const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort).slice(0, 5);
   const expired = certContext?.expired || [];
   const expiring = certContext?.expiring || [];
   /* Station hours for the meeting need a window, and the agenda screen has no range picker. Last 30
@@ -23173,7 +23174,12 @@ function toISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 const S6_TITLES = { DA_ONLY: "Department Admin only", MEMBERSHIP_WINDOW: "Not on the roster that day", LOCKED_SESSION: "This session is locked",
   REASON_REQUIRED: "A reason is required", NO_CHANGE: "Nothing changed", NOT_LOCKED: "No correction needed", BAD_ROSTER: "Check the roll",
   BAD_VALUE: "Check the details", NOT_FINALIZED: "Not finalized", ALREADY_FINALIZED: "Already finalized", SIGNIN_OPEN: "Sign-in still open",
-  USE_CORRECT: "Use Correct", NOT_FOUND: "Session not found", UNKNOWN_FIELD: "Can't change that here" };
+  USE_CORRECT: "Use Correct", NOT_FOUND: "Session not found", UNKNOWN_FIELD: "Can't change that here",
+  // Slice 7 — cancel / restore (request_session_change and friends) + the readers that refuse a cancelled session
+  CANCELLED: "This session was cancelled", ALREADY_CANCELLED: "Already cancelled", NOT_CANCELLED: "Not cancelled", NOT_UPCOMING: "Not upcoming",
+  ATTENDED: "It already happened", FINALIZED: "Already finalized", PENDING: "Already waiting on a sign-off", BAD_SIGNATURE: "Signature needed",
+  BAD_KIND: "Can't do that", SAME_PERSON: "A second person has to sign off", NOT_PENDING: "No longer pending", USE_WITHDRAW: "Withdraw it instead",
+  NOT_YOURS: "Not your request" };
 function s6Err(error) {
   const m = String(error?.message || "");
   const mm = m.match(/^([A-Z_]+):\s*([\s\S]*)$/);
@@ -23196,8 +23202,13 @@ function sessionCorrectionDiff(s, c) {
   return changes;
 }
 const S6_FIELDS = { title: "Title", date: "Date", start_time: "Start time", duration_min: "Length (min)", audience: "Audience", plan_id: "Category",
-  counts_toward_attendance: "Counts toward attendance", is_meeting: "Meeting", is_offsite: "Off-site", location_label: "Location", location: "Coordinates", done: "Finalized" };
-const S6_ACTIONS = { correct: "Corrected", reopen: "Reopened", finalize: "Finalized" };
+  counts_toward_attendance: "Counts toward attendance", is_meeting: "Meeting", is_offsite: "Off-site", location_label: "Location", location: "Coordinates", done: "Finalized", status: "Status" };
+const S6_ACTIONS = { correct: "Corrected", reopen: "Reopened", finalize: "Finalized", cancel: "Cancelled", restore: "Restored" };
+// Slice 7 — the tombstone pill on a cancelled session (leader list + member Up-next).
+function CancelledPill() {
+  return <span data-testid="cancelled-pill" style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", padding: "2px 8px", borderRadius: 999, color: FIRE.textMuted,
+    background: "rgba(255,255,255,.05)", border: `1px solid ${FIRE.lineNoir}`, verticalAlign: "1px", display: "inline-block" }}>Cancelled</span>;
+}
 function dueInfo(item) {
   if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? FIRE.green : FIRE.redText, rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
   const days = CADENCE_DAYS[item.cadence] || 30;
@@ -23838,7 +23849,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
 
   const field = (label, el, wide) => <label style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: wide ? "1 / -1" : undefined }}><span style={tpLabel}>{label}</span>{el}</label>;
   const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : "Draft"} tone="warn" />;
-  const upcoming = (sessions || []).filter((s) => !s.done && !isMeeting(s)).sort(sessSort);   // Slice 4: drill plans go on trainings — meetings take an agenda (their row's "Attach agenda")
+  const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && !isMeeting(s)).sort(sessSort);   // Slice 4: drill plans go on trainings — meetings take an agenda (their row's "Attach agenda")
 
   return (
     <PageShell band watermark="PLANS" above={mounts} kicker={dept?.name ? `TRAINING · PLANS · ${dept.name}` : "TRAINING · PLANS"} title="Training Plans"
@@ -24282,6 +24293,16 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [histOpenId, setHistOpenId] = useState(null);       // the row whose "Corrections (N)" history is open
   const [stationBy, setStationBy] = useState({});           // R1: sessionId -> drill_window_presence rows (fetched at Complete)
   const [stationTicks, setStationTicks] = useState({});     // R1: sessionId -> Set of on-station member ids ticked to mark present
+  // Slice 7 — cancel / restore: two people, each signed in, each drawing a signature.
+  const [requests, setRequests] = useState(null);           // training_session_requests (pending + approved; NO signature columns); null = not loaded
+  const [changePanel, setChangePanel] = useState(null);     // { id, kind: 'cancel' | 'restore' } — the request form open on a row
+  const [changeReason, setChangeReason] = useState("");
+  const [changeSig, setChangeSig] = useState("");
+  const [changeErr, setChangeErr] = useState(null);         // { title, text } — the RPC's own sentence, inline
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [approving, setApproving] = useState(null);         // request id whose approve pad is open (the "Needs your sign-off" card)
+  const [approveSig, setApproveSig] = useState("");
+  const [sigShown, setSigShown] = useState({});             // request id -> { initiator_signature, approver_signature, … } — fetched on demand only
   const [agendaMenu, setAgendaMenu] = useState(null);               // Slice 4: meeting row whose "Attach agenda" chooser is open (session id)
   const [agendaSession, setAgendaSession] = useState(null);         // leadership event whose "Attach agenda" picker is open
   const [sessEdit, setSessEdit] = useState({ title: "", date: "", startTime: "", durationMin: "", planId: "", audience: "everyone", countsAttendance: true, isMeeting: false });
@@ -24349,6 +24370,66 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   }
   useEffect(() => { loadAudit(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const corrN = (id) => (auditRows || []).filter((a) => a.session_id === id && a.action !== "finalize").length;   // a close isn't a correction
+  /* Slice 7 — cancel / restore requests. RLS reads them for leadership OR a training manager (dept-scoped); the two drawn
+     signatures are NOT selectable (column grants) and only ever come from session_change_signatures, on demand. A failed
+     read keeps the last-known list — and before the 7-DB migration exists it simply fails quietly. */
+  async function loadRequests() {
+    if (!canManage && !isLeader(role)) return;
+    const { data, error } = await supabase.from("training_session_requests")
+      .select("id, session_id, kind, reason, initiator_id, initiator_name, approver_id, approver_name, decision_reason, state, created_at, decided_at")
+      .in("state", ["pending", "approved"]).order("created_at", { ascending: false }).limit(500);
+    if (error) return;
+    setRequests(data || []);
+  }
+  useEffect(() => { loadRequests(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const pendingFor = (sid) => (requests || []).find((r) => r.session_id === sid && r.state === "pending") || null;
+  // the reason shown on a tombstone: the approved cancel request (managers) or the cancel log row (leadership)
+  const cancelReasonOf = (sid) => (requests || []).find((r) => r.session_id === sid && r.kind === "cancel" && r.state === "approved")?.reason
+    || (auditRows || []).find((a) => a.session_id === sid && a.action === "cancel")?.reason || "";
+  const reloadAfterChange = () => { loadRequests(); loadSessions(); loadAudit(); };
+  function openChange(s, kind) { setChangePanel({ id: s.id, kind }); setChangeReason(""); setChangeSig(""); setChangeErr(null); }
+  async function submitChange(s) {
+    const reason = changeReason.trim();
+    if (reason.length < 10) { setChangeErr({ title: "A reason is required", text: "Say why (at least 10 characters) — the second sign-off and the log both show it." }); return; }
+    if (!changeSig) { setChangeErr({ title: "Signature needed", text: "Draw your signature above." }); return; }
+    setChangeBusy(true); setChangeErr(null);
+    const { error } = await supabase.rpc("request_session_change", { p_session_id: s.id, p_kind: changePanel.kind, p_reason: reason, p_signature: changeSig });
+    setChangeBusy(false);
+    if (error) { setChangeErr(s6Err(error)); return; }
+    notify({ kind: "success", title: changePanel.kind === "cancel" ? "Cancellation requested" : "Restore requested",
+      text: `“${s.title}” is waiting on a second sign-off from another training officer or Department Admin. Nothing changes until they sign.` });
+    setChangePanel(null); loadRequests();
+  }
+  async function approveRequest(r) {
+    if (!approveSig) { notify({ kind: "error", title: "Signature needed", text: "Draw your signature to sign off." }); return; }
+    const { data, error } = await supabase.rpc("approve_session_change", { p_request_id: r.id, p_signature: approveSig });
+    if (error) { const e = s6Err(error); notify({ kind: "error", title: e.title, text: e.text, details: error.message }); return; }
+    setApproving(null); setApproveSig("");
+    if (data?.state === "expired") notify({ kind: "error", title: "That request expired", text: "This drill's date passed (or it was attended or changed since) — the request expired. Nothing was changed." });
+    else notify({ kind: "success", title: r.kind === "cancel" ? "Session cancelled" : "Session restored", text: "Signed off by two people — it's on the session's log." });
+    reloadAfterChange();
+  }
+  async function rejectRequest(r) {
+    const why = await noirPrompt({ title: "Decline this request?", body: `${r.initiator_name} asked to ${r.kind} it: “${r.reason}”. Say why you're declining.`, label: "Reason", required: true, confirmLabel: "Decline" });
+    if (why == null) return;
+    if (why.trim().length < 10) { notify({ kind: "error", title: "A reason is required", text: "Say a little more (at least 10 characters)." }); return; }
+    const { error } = await supabase.rpc("reject_session_change", { p_request_id: r.id, p_reason: why.trim() });
+    if (error) { const e = s6Err(error); notify({ kind: "error", title: e.title, text: e.text, details: error.message }); return; }
+    notify({ kind: "success", title: "Request declined", text: "Nothing about the session changed." });
+    loadRequests();
+  }
+  async function withdrawRequest(r) {
+    const { error } = await supabase.rpc("withdraw_session_change", { p_request_id: r.id });
+    if (error) { const e = s6Err(error); notify({ kind: "error", title: e.title, text: e.text, details: error.message }); return; }
+    notify({ kind: "success", title: "Request withdrawn", text: "Nothing about the session changed." });
+    loadRequests();
+  }
+  async function showSignatures(requestId) {
+    if (sigShown[requestId]) { setSigShown((m) => { const n = { ...m }; delete n[requestId]; return n; }); return; }
+    const { data, error } = await supabase.rpc("session_change_signatures", { p_request_id: requestId });
+    if (error || !data) { notify({ kind: "error", title: "Couldn't load the signatures", text: s6Err(error).text }); return; }
+    setSigShown((m) => ({ ...m, [requestId]: data }));
+  }
   /* R1/R2 — who was on standby while the drill ran (drill_window_presence: the window math lives server-side, matching
      attested_training). Cached per session; new names are pre-ticked. null = unavailable (no start time, or an error). */
   async function presenceFor(s) {
@@ -24362,7 +24443,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
 
   const rank = (l) => (l === "Overdue" || l === "Not logged") ? 0 : l === "Due soon" ? 1 : 2;
   const _t0 = new Date(today); _t0.setHours(0, 0, 0, 0);
-  const upcomingFor = (catId) => sessions.filter((s) => String(s.planId) === String(catId) && !s.done && sessDate(s) >= _t0).sort(sessSort)[0];
+  const upcomingFor = (catId) => sessions.filter((s) => String(s.planId) === String(catId) && !s.done && !s.cancelled && sessDate(s) >= _t0).sort(sessSort)[0];
   const reconcile = (p) => {   // a pre-scheduled future session overrides the derived last+cadence guess (no "overdue" while sessions sit on the calendar)
     const base = dueInfo(p), up = upcomingFor(p.id);
     if (!up) return base;
@@ -24447,7 +24528,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         m++; if (m > 11) { m = 0; y++; } guard++;
       }
     }
-    const existing = new Set((sessions || []).filter((s) => String(s.planId) === String(pItem?.id)).map((s) => toISO(sessDate(s))));
+    const existing = new Set((sessions || []).filter((s) => String(s.planId) === String(pItem?.id) && !s.cancelled).map((s) => toISO(sessDate(s))));   // a cancelled date may be re-scheduled
     const fresh = dates.filter((iso) => !existing.has(iso));   // DEDUPE (plan_id, date)
     if (!fresh.length) { notify({ kind: "error", title: "Already scheduled", text: "Those dates are already on the calendar." }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
@@ -24701,17 +24782,19 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     : null;
   const listEnd = new Date(today); listEnd.setHours(23, 59, 59, 999);   // "this year" = Jan 1 – today
   const listGroups = [];
-  if (listRange) {
-    sessions.filter((s) => s.done && ymIdx(s.y, s.m) >= listRange[0] && ymIdx(s.y, s.m) <= listRange[1] && (listFilter !== "thisYear" || sessDate(s) <= listEnd))
+  if (listRange || listFilter === "cancelled") {
+    // Slice 7: "Cancelled" lists every cancelled session (any date), newest first, through the same month groups
+    (listFilter === "cancelled" ? sessions.filter((s) => s.cancelled)
+      : sessions.filter((s) => s.done && ymIdx(s.y, s.m) >= listRange[0] && ymIdx(s.y, s.m) <= listRange[1] && (listFilter !== "thisYear" || sessDate(s) <= listEnd)))
       .sort((a, b) => sessSort(b, a))
       .forEach((s) => { const g = listGroups[listGroups.length - 1]; if (g && g.y === s.y && g.m === s.m) g.list.push(s); else listGroups.push({ y: s.y, m: s.m, list: [s] }); });
   }
   const listCount = listGroups.reduce((t, g) => t + g.list.length, 0);
   const monLabel = (y, m) => `${TRAIN_MONTHS[m].slice(0, 3)} ${y}`;
-  const listTitle = listFilter === "thisMonth" ? "Completed · this month" : listFilter === "lastMonth" ? "Completed · last month"
+  const listTitle = listFilter === "cancelled" ? "Cancelled sessions" : listFilter === "thisMonth" ? "Completed · this month" : listFilter === "lastMonth" ? "Completed · last month"
     : listFilter === "thisYear" ? "Completed · this year"
     : rangeApplied ? `Completed · ${monLabel(rangeApplied.fy, rangeApplied.fm)} – ${monLabel(rangeApplied.ty, rangeApplied.tm)}` : "Completed · custom range";
-  const listEmpty = listFilter === "thisMonth" ? "No completed sessions this month." : listFilter === "lastMonth" ? "No completed sessions last month."
+  const listEmpty = listFilter === "cancelled" ? "No cancelled sessions." : listFilter === "thisMonth" ? "No completed sessions this month." : listFilter === "lastMonth" ? "No completed sessions last month."
     : listFilter === "thisYear" ? "No completed sessions this year."
     : rangeApplied ? `No completed sessions between ${monLabel(rangeApplied.fy, rangeApplied.fm)} and ${monLabel(rangeApplied.ty, rangeApplied.tm)}.` : "";
   const rangeYears = Array.from(new Set([today.getFullYear(), ...sessions.map((s) => s.y)])).sort((a, b) => b - a);
@@ -24751,8 +24834,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         const to2 = (n) => n.toString(16).padStart(2, "0");
         return "#" + to2(Math.round(r + (tr - r) * tt)) + to2(Math.round(g + (tg - g) * tt)) + to2(Math.round(b + (tb - b) * tt));
       };
-      const color = s.done ? mix(base, 0.45) : base;
-      return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+      const color = s.cancelled ? FIRE.textMuted2 : s.done ? mix(base, 0.45) : base;
+      return { color, label: `${s.cancelled ? "✕ " : s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.cancelled ? " (cancelled)" : s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
     };
 
     const num = FS.num;
@@ -24812,19 +24895,20 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                         <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, lineHeight: 1, color: FIRE.textPrimary, ...num }}>{s.d}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: FIRE.textPrimary, lineHeight: 1.25 }}>{s.title}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: s.cancelled ? FIRE.textMuted2 : FIRE.textPrimary, lineHeight: 1.25 }}><span style={s.cancelled ? { textDecoration: "line-through" } : undefined}>{s.title}</span>{s.cancelled && <CancelledPill />}</div>
                         <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{dowTime(s)}</div>
                         <span style={{ display: "inline-block", marginTop: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", borderRadius: 4, padding: "2px 7px", background: `${col}29`, color: col }}>{s.audience === "board" ? "Board only" : s.audience === "leadership" ? "Leadership only" : (cat?.name || "One-off")}</span>
                       </div>
                       {/* Details expands what we know about the session (unchanged). Register — the plan — sits below. */}
                       <button onClick={() => flipUp(s.id)} aria-expanded={open} style={{ ...cubtn, padding: "5px 10px", alignSelf: "center" }}>{open ? "Close" : "Details"}</button>
                     </div>
-                    {/* REGISTER — the member's own plan (never a count). A heads-up, not attendance. */}
+                    {/* REGISTER — the member's own plan (never a count). A heads-up, not attendance. Not on a cancelled session (the RPC refuses it). */}
+                    {s.cancelled ? <div data-testid="up-cancelled" style={{ marginTop: 8, fontSize: 11, color: FIRE.textMuted }}>Cancelled{cancelReasonOf(s.id) ? ` — ${cancelReasonOf(s.id)}` : ""}. Nothing to register for.</div> : (
                     <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px dashed ${FIRE.lineNoir}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted }}>Register</span>
                       <RegisterControl compact value={reg.mine(s.id, meId)} busy={reg.busyId === s.id || reg.rows === null} onPick={(k) => reg.setMine(s.id, k)} />
-                    </div>
-                    {i === 0 && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Give whoever's running this training a heads-up if you're planning to come. This is a plan, not attendance — you'll still check in when you're there.</div>}
+                    </div>)}
+                    {i === 0 && !s.cancelled && <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 6, lineHeight: 1.4 }}>Give whoever's running this training a heads-up if you're planning to come. This is a plan, not attendance — you'll still check in when you're there.</div>}
                     {open && (
                       <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${FIRE.lineNoir}`, fontSize: 11.5, color: FIRE.textSecondary, lineHeight: 1.55 }}>
                         <div>{sessDate(s).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}</div>
@@ -24935,7 +25019,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
   // Card 3 — next not-done session from today forward (pure read)
   const t0n = new Date(today); t0n.setHours(0, 0, 0, 0);
-  const nextSession = sessions.filter((s) => !s.done && sessDate(s) >= t0n).sort(sessSort)[0];
+  const nextSession = sessions.filter((s) => !s.done && !s.cancelled && sessDate(s) >= t0n).sort(sessSort)[0];
   const nextCat = nextSession ? plan.find((p) => String(p.id) === String(nextSession.planId)) : null;
 
   return (
@@ -24944,6 +25028,47 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
       sub="Your recurring training plan tracks itself — log a session and the clock resets. The plan shows what's coming and what's overdue at a glance.">
       <NoirSkin>
       {viewToggle}{/* Schedule | Training Plans — first in the body, under the band, the same spot on all three views */}
+      {/* Slice 7 — "Needs your sign-off": other managers' pending cancel / restore requests (approve with your own drawn
+          signature, or decline with a reason) + your own pending ones (withdraw). The only surface — Notify is held. */}
+      {canManage && (requests || []).some((r) => r.state === "pending") && (() => {
+        const pend = (requests || []).filter((r) => r.state === "pending");
+        const theirs = pend.filter((r) => r.initiator_id !== meId), mine = pend.filter((r) => r.initiator_id === meId);
+        const sessOf = (r) => sessions.find((x) => x.id === r.session_id);
+        const line = (r) => { const ss = sessOf(r); return `${r.kind === "cancel" ? "Cancel" : "Restore"} · ${ss ? `${ss.title} · ${fmtSess(ss)}` : "a session"}`; };
+        return (
+          <div data-testid="signoff-card" style={{ ...Lcard, marginBottom: 14, borderLeft: `3px solid ${FIRE.amberText}` }}>
+            <CardHead icon={ClipboardCheck} title={`Needs your sign-off (${theirs.length})`} />
+            {theirs.map((r) => (
+              <div key={r.id} data-testid="signoff-item" style={{ padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 12.5, color: FIRE.textSecondary }}>
+                <div><b style={{ color: FIRE.textPrimary }}>{line(r)}</b></div>
+                <div style={{ marginTop: 2 }}>{r.initiator_name} asked · {new Date(r.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} — “{r.reason}”</div>
+                {approving === r.id ? (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ ...LfieldLabel, marginBottom: 4 }}>Your signature</div>
+                    <SignaturePad key={r.id} onChange={setApproveSig} height={110} />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      <button style={LprimaryBtn} onClick={() => approveRequest(r)}><CheckCircle2 size={15} /> Sign off — {r.kind === "cancel" ? "cancel it" : "restore it"}</button>
+                      <button style={Lbtn} onClick={() => { setApproving(null); setApproveSig(""); }}>Back</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <button style={Lbtn} onClick={() => { setApproving(r.id); setApproveSig(""); }}><CheckCircle2 size={14} color={LbtnIcon} /> Approve…</button>
+                    <button style={Lbtn} onClick={() => rejectRequest(r)}><X size={14} color={FIRE.deleteRed} /> Decline…</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {theirs.length === 0 && <div style={{ fontSize: 12, color: FIRE.textMuted }}>Nothing waiting on you.</div>}
+            {mine.map((r) => (
+              <div key={r.id} data-testid="mine-item" style={{ padding: "8px 0", fontSize: 12.5, color: FIRE.textSecondary, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>Your request — <b style={{ color: FIRE.textPrimary }}>{line(r)}</b> — waiting on a second sign-off.</span>
+                <button style={{ ...Lbtn, padding: "4px 9px", fontSize: 12 }} onClick={() => withdrawRequest(r)}>Withdraw</button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {/* Moved from the member view (2026-10-13): it addresses officers ("open a session and set its length"),
           but sat in the members-only branch — members saw an instruction they can't act on, officers never saw it. */}
           {(() => {
@@ -25138,8 +25263,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                 const to2 = (n) => n.toString(16).padStart(2, "0");
                 return "#" + to2(Math.round(r + (tr - r) * t)) + to2(Math.round(g + (tg - g) * t)) + to2(Math.round(b + (tb - b) * t));
               };
-              const color = s.done ? mix(base, 0.45) : base;
-              return { color, label: `${s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
+              const color = s.cancelled ? FIRE.textMuted2 : s.done ? mix(base, 0.45) : base;
+              return { color, label: `${s.cancelled ? "✕ " : s.done ? "✓ " : ""}${s.title}`, title: `${s.title}${s.audience === "board" ? " · Board only" : s.audience === "leadership" ? " · Leadership only" : ""}${s.cancelled ? " (cancelled)" : s.done ? " (completed)" : ""}${(s.plans || []).length ? " · click to view plan" : ""}`, onClick: () => openSessionPlans(s) };
             }}
             todayColor={FIRE.red}
             monthLabel={`${TRAIN_MONTHS[cur.m]} ${cur.y}`}
@@ -25156,6 +25281,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
               <option value="lastMonth">Completed last month</option>
               <option value="thisYear">Completed this year</option>
               <option value="custom">Custom range…</option>
+              <option value="cancelled">Cancelled</option>
             </select>
             {/* only in the calendar month — filter views are done-only, and a done session is locked from editing */}
             {canManage && listFilter === "month" && monthSessions.length > 0 && (
@@ -25205,21 +25331,28 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                       <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1, color: FIRE.textPrimary, ...Lnum }}>{s.d}</div>
                     </div>
                     <div style={FS.rowTitle}>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: FIRE.textPrimary }}>{s.title}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} />
+                      <span style={{ fontWeight: 600, fontSize: 13, color: s.cancelled ? FIRE.textMuted2 : FIRE.textPrimary }}><span style={s.cancelled ? { textDecoration: "line-through" } : undefined}>{s.title}</span>{s.cancelled && <CancelledPill />}<EventAudienceTag audience={s.audience} /><EventOptionalTag session={s} /><EventOffsiteTag session={s} />
                         {/* the mock's .spill.done — the status sits with the title, not in the button cluster */}
                         {s.done && <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", padding: "2px 8px", borderRadius: 999, color: FIRE.greenText, background: "rgba(47,168,105,.10)", border: "1px solid rgba(47,168,105,.4)", verticalAlign: "1px" }}>Done</span>}
                       </span>
                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[s.m].slice(0, 3)} {s.d}{s.y !== today.getFullYear() ? `, ${s.y}` : ""}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
+                      {s.cancelled && <div data-testid="row-cancel-reason" style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Cancelled{cancelReasonOf(s.id) ? ` — ${cancelReasonOf(s.id)}` : ""}</div>}
+                      {(canManage || isLeader(role)) && pendingFor(s.id) && (() => { const pr = pendingFor(s.id); return (
+                        <div data-testid="row-pending" style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          {pr.kind === "cancel" ? "Cancellation" : "Restore"} pending — waiting on a second sign-off ({pr.initiator_name} asked)
+                          {canManage && pr.initiator_id === meId && <button style={{ ...Sbtn, padding: "3px 8px", fontSize: 11 }} onClick={() => withdrawRequest(pr)}>Withdraw</button>}
+                        </div>); })()}
                     </div>
                     {/* REORDERED: Attendance → QR sign-in → Mark complete / DONE → delete. Cluster wraps as a unit under the title on phones. */}
                     <div style={{ ...FS.rowActions, gap: 6 }}>
-                      <button style={Sbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>
+                      {!s.cancelled && <button style={Sbtn} onClick={() => setOpenAtt(open ? null : s.id)}><Users size={14} color={LbtnIcon} /> Attendance {attCount}/{expCount}</button>}
                       {/* REGISTER — plans (not attendance), leaders' heads-up; separate from the roll above */}
-                      {!s.done && (() => { const n = reg.forSession(s.id).filter((r) => r.status === "coming").length; return (
+                      {!s.done && !s.cancelled && (() => { const n = reg.forSession(s.id).filter((r) => r.status === "coming").length; return (
                         <button style={{ ...Sbtn, borderStyle: "dashed" }} aria-expanded={plansOpen === s.id} onClick={() => setPlansOpen(plansOpen === s.id ? null : s.id)}><CalendarCheck size={14} color={LbtnIcon} /> Plans{n ? ` · ${n} coming` : ""}</button>
                       ); })()}
                       {s.plans.length > 0 && <button style={Sbtn} onClick={() => setOpenPlans(openPlans === s.id ? null : s.id)}><FileText size={14} color={LbtnIcon} /> {meetingRow ? (s.plans.length > 1 ? `Agenda (${s.plans.length})` : "Agenda") : (s.plans.length > 1 ? `Plans (${s.plans.length})` : "Plan")} {openPlans === s.id ? <ChevronUp size={13} color={LbtnIcon} /> : <ChevronDown size={13} color={LbtnIcon} />}</button>}
-                      {canRunSignin && !s.done && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                      {canRunSignin && !s.done && !s.cancelled && <button style={{ ...Sbtn, ...(s.signinOpen ? { color: FIRE.greenText, borderColor: "rgba(118,201,141,.4)" } : {}) }} onClick={() => setOpenSignin(openSignin === s.id ? null : s.id)}><QrCode size={14} color={s.signinOpen ? FIRE.greenText : FIRE.redText} /> QR sign-in{s.signinOpen ? " · open" : ""}</button>}
+                      {!s.cancelled && (<>{/* Slice 7: no plans / agendas onto a cancelled session (the RPCs refuse it) */}
                       {!meetingRow && canManage && (
                         <label title={s.plans.length ? "Attach more plans" : "Attach a plan"} style={{ ...Sbtn, padding: "6px 8px", cursor: "pointer" }}><FileText size={14} color={LbtnIcon} />Attach plan<input type="file" multiple style={{ display: "none" }} onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ""; for (const f of files) await attachPlan(s, f); }} /></label>
                       )}
@@ -25234,12 +25367,16 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                           </span>
                         )}
                       </>)}
+                      </>)}
                       {s.done
                         ? <>{canManage && <button style={Sbtn} onClick={() => reopenSession(s)}><RotateCcw size={14} color={LbtnIcon} /> Reopen</button>}</>
-                        : canManage && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
-                      {canManage && editSessionMode && !locked && <button title="Edit" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
+                        : canManage && !s.cancelled && <button style={{ ...Sbtn, background: FIRE.redBright, borderColor: FIRE.redBright, color: "#fff" }} onClick={() => beginCloseout(s)}><ClipboardCheck size={14} color="#fff" /> Complete</button>}
+                      {canManage && editSessionMode && !locked && !s.cancelled && <button title="Edit" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => startEditSession(s)}><Pencil size={14} color={LbtnIcon} /></button>}
                       {/* Slice 6: a LOCKED session isn't edited, it's corrected — gated, with a reason, logged. */}
                       {canManage && editSessionMode && locked && <button title="Correct this session — logged, with a reason" aria-expanded={correctingId === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => (correctingId === s.id ? setCorrectingId(null) : openCorrect(s))}><Pencil size={14} color={LbtnIcon} /> Correct…</button>}
+                      {/* Slice 7: Cancel (an upcoming, unattended, unfinalized session) / Restore (a cancelled one) — each a two-person request */}
+                      {canManage && editSessionMode && !s.done && !s.cancelled && !(s.attendance?.length > 0) && sessDate(s) >= _t0 && !pendingFor(s.id) && <button title="Cancel this session — a second training manager signs off" aria-expanded={changePanel?.id === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => openChange(s, "cancel")}><X size={14} color={FIRE.deleteRed} /> Cancel…</button>}
+                      {canManage && s.cancelled && sessDate(s) >= _t0 && !pendingFor(s.id) && <button title="Restore this session — a second training manager signs off" aria-expanded={changePanel?.id === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => openChange(s, "restore")}><RotateCcw size={14} color={LbtnIcon} /> Restore…</button>}
                       {isLeader(role) && corrN(s.id) > 0 && <button aria-expanded={histOpenId === s.id} style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => setHistOpenId(histOpenId === s.id ? null : s.id)}><ClipboardList size={14} color={LbtnIcon} /> Corrections ({corrN(s.id)})</button>}
                       {/* Remove survives only while the session is UNCLOSED and EMPTY. A closed drill is an
                           attendance record; so is an open one somebody has already checked into, and deleting
@@ -25249,7 +25386,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                           Deliberately NOT reusing `locked`, which also covers signinOpen: an open QR sign-in
                           nobody has used yet is still an empty session and still cleanup-able. Reopen renders
                           in the done branch above, so a closed session shows the right action instead. */}
-                      {canManage && editSessionMode && canDeleteShared && !s.done && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
+                      {canManage && editSessionMode && canDeleteShared && !s.done && !s.cancelled && !(s.attendance?.length > 0) && <button title="Remove" style={{ ...Sbtn, padding: "6px 8px" }} onClick={() => removeSession(s.id)}><X size={14} color={FIRE.deleteRed} /></button>}
                     </div>
                   </div>
                   {!s.done && plansOpen === s.id && (
@@ -25325,13 +25462,40 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                           <div key={a.id} style={{ padding: "8px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 12.5, color: FIRE.textSecondary }}>
                             <div><b style={{ color: FIRE.textPrimary }}>{S6_ACTIONS[a.action] || a.action}</b> by {a.actor_name} · {new Date(a.at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div>
                             {a.reason && <div style={{ marginTop: 2 }}>“{a.reason}”</div>}
-                            {ch.filter(([k]) => a.action === "correct" || k !== "done").map(([k, d]) => <div key={k} style={{ marginTop: 2, ...Lnum }}>{S6_FIELDS[k] || k}: {val(k, d?.old)} → {val(k, d?.new)}</div>)}
+                            {a.changes?.initiator?.name && <div style={{ marginTop: 2 }}>Asked by {a.changes.initiator.name} · signed off by {a.actor_name}</div>}
+                            {a.changes?.request_id && (<>
+                              <button style={{ ...Lbtn, padding: "3px 8px", fontSize: 11, marginTop: 4 }} aria-expanded={!!sigShown[a.changes.request_id]} onClick={() => showSignatures(a.changes.request_id)}>{sigShown[a.changes.request_id] ? "Hide signatures" : "View signatures"}</button>
+                              {sigShown[a.changes.request_id] && (
+                                <div data-testid="signatures" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                                  {[["initiator", "Asked"], ["approver", "Signed off"]].map(([k, lbl]) => sigShown[a.changes.request_id][`${k}_signature`] && (
+                                    <figure key={k} style={{ margin: 0 }}>
+                                      <img src={sigShown[a.changes.request_id][`${k}_signature`]} alt={`${lbl}: ${sigShown[a.changes.request_id][`${k}_name`] || ""}`} style={{ display: "block", width: 160, height: "auto", background: "#fff", borderRadius: 6 }} />
+                                      <figcaption style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 2 }}>{lbl} · {sigShown[a.changes.request_id][`${k}_name`]}</figcaption>
+                                    </figure>))}
+                                </div>)}
+                            </>)}
+                            {ch.filter(([k]) => (a.action === "correct" || k !== "done") && k !== "request_id" && k !== "initiator").map(([k, d]) => <div key={k} style={{ marginTop: 2, ...Lnum }}>{S6_FIELDS[k] || k}: {val(k, d?.old)} → {val(k, d?.new)}</div>)}
                             {(a.roster_added || []).length > 0 && <div style={{ marginTop: 2, color: FIRE.greenText }}>+ {a.roster_added.map(nm).join(", ")}</div>}
                             {(a.roster_removed || []).length > 0 && <div style={{ marginTop: 2, color: FIRE.redText }}>− {a.roster_removed.map(nm).join(", ")}</div>}
                             {a.roster_before !== a.roster_after && <div style={{ marginTop: 2, ...Lnum }}>Roll {a.roster_before} → {a.roster_after}</div>}
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                  {canManage && changePanel?.id === s.id && (
+                    <div data-testid="change-panel" style={{ ...NOIR_INSET, margin: "2px 0 10px", padding: 12, borderColor: `${FIRE.amberText}66` }}>
+                      <div style={{ fontSize: 11, color: FIRE.amberText, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>{changePanel.kind === "cancel" ? "Cancel this session" : "Restore this session"} — two-person sign-off</div>
+                      <div style={{ fontSize: 12, color: FIRE.textMuted, marginBottom: 10 }}>Nothing changes until a second training officer or Department Admin signs off on their own account. The reason and both signatures are kept on the session's log.</div>
+                      <label style={Lfield}><span style={LfieldLabel}>Reason (required)</span>
+                        <textarea data-testid="change-reason" style={{ ...Linput, minHeight: 54, resize: "vertical" }} value={changeReason} placeholder={changePanel.kind === "cancel" ? "e.g. Storm warning — the station is closed tonight" : "e.g. The storm passed — the drill is back on"} onChange={(e) => setChangeReason(e.target.value)} /></label>
+                      <div style={{ ...LfieldLabel, margin: "10px 0 4px" }}>Your signature</div>
+                      <SignaturePad key={`${s.id}-${changePanel.kind}`} onChange={setChangeSig} height={120} />
+                      {changeErr && <div role="alert" style={{ ...NOIR_ERR, marginTop: 10 }}><b>{changeErr.title}.</b> {changeErr.text}</div>}
+                      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                        <button style={{ ...LprimaryBtn, opacity: changeBusy ? 0.7 : 1 }} disabled={changeBusy} onClick={() => submitChange(s)}><CheckCircle2 size={15} /> {changePanel.kind === "cancel" ? "Request cancellation" : "Request restore"}</button>
+                        <button style={Lbtn} disabled={changeBusy} onClick={() => setChangePanel(null)}>Back</button>
+                      </div>
                     </div>
                   )}
                   {s.plans.length > 0 && openPlans === s.id && (
@@ -25495,7 +25659,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
               );
             };
             if (listFilter === "month") return monthSessions.length === 0 ? <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No sessions scheduled in {TRAIN_MONTHS[cur.m]}.</div> : monthSessions.map(renderSessionRow);
-            if (!listRange) return <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>Pick a From and To month, then Apply.</div>;
+            if (!listRange && listFilter !== "cancelled") return <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>Pick a From and To month, then Apply.</div>;
             if (!listGroups.length) return <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>{listEmpty}</div>;
             return listGroups.map((g) => (
               <React.Fragment key={`${g.y}-${g.m}`}>

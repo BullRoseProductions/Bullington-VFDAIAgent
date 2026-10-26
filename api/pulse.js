@@ -265,7 +265,8 @@ export default async function handler(req, res) {
       .select("id, department_id, title, date, start_time, audience, done")
       .gte("date", addDaysISO(todayISO, -1))     // -1 day of slack so a late-evening event is never missed by a UTC/Central edge
       .lte("date", addDaysISO(todayISO, 2))
-      .eq("done", false);
+      .eq("done", false)
+      .neq("status", "cancelled");                 // Slice 7: never remind anyone about a cancelled drill
     if (error) throw new Error(error.message);
 
     const deptIds = [...new Set((sessions || []).map((s) => s.department_id))];

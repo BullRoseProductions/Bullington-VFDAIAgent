@@ -164,7 +164,7 @@ async function runTool(sb, name, input, ctx) {
       const until = todayCT(new Date(Date.now() + 60 * 86400000));
       const { data, error } = await sb.from("training_sessions")
         .select("title, date, start_time, duration_min, done, audience, counts_toward_attendance, is_offsite, location_label")
-        .gte("date", today).lte("date", until).order("date", { ascending: true }).limit(40);
+        .gte("date", today).lte("date", until).neq("status", "cancelled").order("date", { ascending: true }).limit(40);   // Slice 7: cancelled drills aren't on anyone's schedule
       if (error) return fail("Couldn't read the schedule.");
       const isBoard = ctx.access.includes("Board Member"), isLeader = ctx.isLeader;
       const visible = (data || []).filter((s) => !s.done && (s.audience === "board" ? isBoard : s.audience === "leadership" ? isLeader : true));

@@ -200,8 +200,13 @@ const rec = body(src, "Recruitment");
 ok("Recruitment page: no calendar mounted; planner, ideas, Graphic Studio, saved drafts kept", rec && !/<(EventsCalendar|MonthCalendar|RecruitmentCalendar)\b/.test(rec) && rec.includes("<RecruitmentPlanView") && rec.includes("<IdeaGrid") && rec.includes("<GraphicStudio") && rec.includes("Saved drafts"));
 ok("no tap-to-delete wording left anywhere in the new calendar", ev && !/tap to remove|tap an event to remove/.test(ev));
 ok("EventsCalendar gates writes on CANMANAGE_OPS_ROLES, delete also on useCanDeleteShared; never isDeptAdmin", ev.includes("hasAny(role, CANMANAGE_OPS_ROLES)") && ev.includes("canWrite && canDeleteShared") && !ev.includes("isDeptAdmin"));
+// PINNED to the Events release (b04b58d, a --no-ff merge whose first parent is the main it landed on): "unchanged vs
+// origin/main" held only until a later slice legitimately touched these readers (Training Slice 7 teaches them `status`).
+// Historical = the release left them byte-identical to its parent.
+const evRel = execSync("git show b04b58d:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
+const evParent = execSync("git show b04b58d^1:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
 for (const name of ["OfficerDashboard", "MemberDashboard", "DashboardCalendar", "FundraiserHQ"]) {
-  ok(`unchanged vs origin/main: ${name}`, body(src, name) !== null && body(src, name) === body(main, name));
+  ok(`Events release (b04b58d) left ${name} unchanged vs its parent`, body(evRel, name) !== null && body(evRel, name) === body(evParent, name));
 }
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 const addedHex = (strip(ev).match(/#[0-9A-Fa-f]{3,8}\b/g) || []);
