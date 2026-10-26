@@ -270,26 +270,28 @@ for (const [who, role, isTO, meId, want] of [
 
 // 8 — the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// Structural fences are PINNED to Slice 7-UI's own release (244f79f, a --no-ff merge whose first parent 12888fc is the main
+// it landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "244f79f", BASE = `${REL}^1`;
 const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const base = appAt(BASE);
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
-ok("runtime changes: src/App.jsx + the two api read filters only", JSON.stringify(changed) === '["api/assistant.js","api/pulse.js","src/App.jsx"]', JSON.stringify(changed));
-const apiDiff = execSync(`git diff ${BASE} -- api`, { cwd: root }).toString().split("\n").filter((l) => /^[+-][^+-]/.test(l));
+const rel = appAt(REL), base = appAt(BASE);
+const changed = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("Slice 7-UI (244f79f) runtime changes vs its parent: src/App.jsx + the two api read filters only", JSON.stringify(changed) === '["api/assistant.js","api/pulse.js","src/App.jsx"]', JSON.stringify(changed));
+const apiDiff = execSync(`git diff ${BASE} ${REL} -- api`, { cwd: root }).toString().split("\n").filter((l) => /^[+-][^+-]/.test(l));
 ok("the api changes are read filters only (.neq status cancelled) — no write path", apiDiff.filter((l) => l.startsWith("+")).every((l) => /neq\("status", "cancelled"\)|^\+\s*\.eq\("done", false\)$/.test(l)) && !apiDiff.some((l) => /insert|update|delete|upsert/i.test(l)), JSON.stringify(apiDiff));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-const added = [...rpcSet(src)].filter((n) => !rpcSet(base).has(n)).sort();
-ok("the only new RPCs are the five 7-DB ones", JSON.stringify(added) === JSON.stringify(["approve_session_change", "reject_session_change", "request_session_change", "session_change_signatures", "withdraw_session_change"]), JSON.stringify(added));
+const added = [...rpcSet(rel)].filter((n) => !rpcSet(base).has(n)).sort();
+ok("Slice 7-UI (244f79f): the only new RPCs are the five 7-DB ones", JSON.stringify(added) === JSON.stringify(["approve_session_change", "reject_session_change", "request_session_change", "session_change_signatures", "withdraw_session_change"]), JSON.stringify(added));
 // every write on training_sessions (update / insert / upsert, single- or multi-line) — none may carry a status field
 const tsWrites = src.split('from("training_sessions")').slice(1).map((x) => x.slice(0, 1200)).filter((x) => /^(\s|\/\/[^\n]*\n)*\.(update|insert|upsert)\(/.test(x));   // comment lines may sit before .update(
 const rowsLit = (src.match(/const rows = fresh\.map\(\(iso\) => \(\{[^\n]*/) || [""])[0];   // scheduleRecurring's bulk-insert rows
 ok("no direct status write: no training_sessions update/insert/upsert carries status (status moves only via the RPCs)",
   tsWrites.length >= 4 && tsWrites.every((x) => !/\bstatus\s*:/.test(x.slice(0, x.search(/\)\s*[.;]/) + 1 || 1200))) && !/\bstatus\s*:/.test(rowsLit), `${tsWrites.length} writes`);
 ok("the signature columns are never selected (only via session_change_signatures)", !/training_session_requests"\)\s*\.select\("[^"]*signature/.test(src));
-ok("no new station_presence write", (src.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
+ok("Slice 7-UI (244f79f) added no station_presence write", (rel.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main (App.jsx)", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
-ok("…and in api/assistant.js + api/digest.js", ["api/assistant.js", "api/digest.js"].every((f) => tok(readFileSync(join(root, f), "utf8")) === tok(execSync(`git show ${BASE}:${f}`, { cwd: root }).toString())));
+ok("locked-token count unchanged by Slice 7-UI (244f79f) vs its parent (App.jsx)", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
+ok("…and in api/assistant.js + api/digest.js (244f79f vs its parent)", ["api/assistant.js", "api/digest.js"].every((f) => tok(execSync(`git show ${REL}:${f}`, { cwd: root }).toString()) === tok(execSync(`git show ${BASE}:${f}`, { cwd: root }).toString())));
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
