@@ -14,8 +14,8 @@
  *   · needsRoll = finalized, not cancelled, counts toward the rate, but NO roll taken — shown as
  *     "needs roll", never counted as held                                                       D-3
  *   · drillsScheduled = not cancelled, counts toward the rate, not a meeting — any state       D-1
- * WHO IS COUNTED is the caller's: deptAttendance takes a `counted(member)` predicate. The app passes countsInStats and
- * the email its copy, exactly as today; WS-4c swaps both for shared/members.js in one place (rulings B-1..B-4).
+ * WHO IS COUNTED is the caller's: deptAttendance takes a `counted(member)` predicate. Since WS-4c both the app and the
+ * email pass shared/members.js's isCountedMember (rulings B-1..B-4: Active/Probationary, not separated; C-1).
  *
  * SESSION SHAPE is the app's: { y, m (0-based), d, done, status, audience, countsAttendance, isMeeting, attendance:[member ids] }.
  * MEMBER SHAPE is the app's: { id, access, joinedOn ("YYYY-MM-DD"|null), joined ("YYYY"|…) }. The email maps its rows onto these.

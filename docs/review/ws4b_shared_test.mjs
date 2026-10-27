@@ -231,8 +231,10 @@ const fnBody = (s, head) => { const i = s.indexOf(head); if (i < 0) return ""; c
 ok("PIN App: imports rigStatus + checkOverdue from ../shared/apparatus-status.js", src.includes('import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";'));
 ok("PIN App: imports the attendance rule from ../shared/attendance.js", /import \{ isRestrictedEvent, isOptionalEvent, countsTowardRate, expectedAfterJoin, memberAttendance, drillsScheduled,\s*deptAttendance as deptAttendanceShared \} from "\.\.\/shared\/attendance\.js";/.test(src));
 ok("PIN App: imports maintStatus (as maintRule) + startOfToday from ../shared/maint-due.js", src.includes('import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";'));
-ok("PIN App: no local copy of the attendance rule (deptAttendance is the countsInStats wrapper; no memberAttendance / joinCutoff / countsTowardRate body)",
-  src.includes("const deptAttendance = (members, sessions, year, range) => deptAttendanceShared(members, sessions, year, range, countsInStats);")
+// Re-baselined in WS-4c: the wrapper now passes shared/members.js's isCountedMember (the planned swap — 4b passed
+// countsInStats). The 4b fence is unchanged in substance: one thin wrapper, no local copy of the rule.
+ok("PIN App: no local copy of the attendance rule (deptAttendance is the one-predicate wrapper; no memberAttendance / joinCutoff / countsTowardRate body)",
+  /const deptAttendance = \(members, sessions, year, range\) => deptAttendanceShared\(members, sessions, year, range, (countsInStats|isCountedMember)\);/.test(src)
   && !/function deptAttendance\(/.test(src) && !/const memberAttendance = \(/.test(src) && !/const joinCutoff = \(/.test(src) && !/const countsTowardRate = \(/.test(src) && !/const isOptionalEvent = \(/.test(src));
 const hook = fnBody(src, "function useApparatusReadiness(");
 ok("PIN useApparatusReadiness: buckets from rigStatus; no local Pass test", hook.includes("rigStatus(r, { now })") && !hook.includes('r.status === "Pass"') && !hook.includes('r.status !== "Pass"'));

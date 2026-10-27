@@ -1,0 +1,60 @@
+{
+ "read_at": "2026-10-27",
+ "source": "live ifeptqnlucmvhlvadcpj, read-only",
+ "members_view": {
+  "md5": "5c78c518a924963a3f0acf61e8184e19",
+  "def": " SELECT id,\n    department_id,\n    name,\n        CASE\n            WHEN is_leader() THEN role\n            ELSE NULL::text\n        END AS role,\n        CASE\n            WHEN is_leader() THEN access\n            ELSE NULL::text[]\n        END AS access,\n        CASE\n            WHEN is_leader() THEN status\n            ELSE NULL::text\n        END AS status,\n    phone,\n    joined,\n        CASE\n            WHEN is_leader() THEN participation\n            ELSE NULL::integer\n        END AS participation,\n    created_at,\n    email,\n    mentor_id\n   FROM members\n  WHERE department_id = my_department_id();",
+  "options": [
+   "security_invoker=false"
+  ],
+  "owner": "postgres",
+  "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+  "columns": [
+   "id:uuid",
+   "department_id:uuid",
+   "name:text",
+   "role:text",
+   "access:ARRAY",
+   "status:text",
+   "phone:text",
+   "joined:text",
+   "participation:integer",
+   "created_at:timestamp with time zone",
+   "email:text",
+   "mentor_id:uuid"
+  ]
+ },
+ "member_separation_columns": [
+  "member_id:uuid",
+  "department_id:uuid",
+  "terminated_on:date",
+  "set_by_member:uuid",
+  "set_at:timestamp with time zone"
+ ],
+ "counts": {
+  "sep_rows": 1,
+  "sep_active_or_prob": 0,
+  "members_total": 115,
+  "verified_presence": 961,
+  "fn_count": 227,
+  "total_policies": 181
+ },
+ "defs": {
+  "is_dept_admin()": {
+   "md5": "c692e44f62923d2bf4c1a39a21a87bf7",
+   "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n"
+  },
+  "is_leader()": {
+   "md5": "3f462af26a46909309f856f769226baa",
+   "def": "CREATE OR REPLACE FUNCTION public.is_leader()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n"
+  },
+  "my_department_id()": {
+   "md5": "87f546659c3804a943b48e419e017f18",
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n"
+  },
+  "my_member_id()": {
+   "md5": "3f66369c8af7bc07ec59831af6536fee",
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n"
+  }
+ }
+}

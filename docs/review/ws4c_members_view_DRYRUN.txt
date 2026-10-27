@@ -1,0 +1,53 @@
+pins: 4/4 mock = live (view md5 reproduces from the live text; function bodies; ACL) 
+   view options|owner in the mock: security_invoker=false|postgres  (live: security_invoker=false|postgres)
+migration: applied. state row: {"fn_count":3,"view_acl":"{postgres=arwdDxt/postgres,anon=arwdDxt/postgres,authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres}","sep_sealed":true,"new_view_md5":"88ed2484a40be1287157263bb6a5cb4a","view_columns":13,"total_policies":0,"separated_column":"boolean","verified_presence":2,"view_options_owner":"security_invoker=false|postgres","terminated_on_in_view":0,"separated_active_or_prob":0,"members_with_separation_row":1}
+re-run: refused -> PREFLIGHT: members_view already has a separated column — WS-4c looks applied. Refusing.
+RETEST:
+PASS  O1 members_view: separated (boolean) is the last column; security_invoker=false, owner postgres; grants as live (anon / authenticated / service_role)
+PASS  O2 only separated was added (the rest = the pinned definition); terminated_on in no view; member_separation sealed
+PASS  O3 is_leader() / my_department_id() byte-identical
+— Alpha (mock)
+   (leader = a REAL Department Admin)
+   PASS  T1 as the DA: separated true (yesterday + future-dated), false (normal member, the DA)
+   PASS  T2 as the Officer: separated true (yesterday + future-dated), false (normal member, the DA)
+   PASS  T3 as a plain Member: 8 rows, separated NULL on every one (masked like status)
+   PASS  T4 as anon: members_view returns nothing
+   PASS  T5 B-4 headcount over the view = 5 = the server's readiness packet; both separated fixtures out, the normal member in
+   PASS  T6 station_presence byte-identical; verified count 2 unchanged
+— Bravo (mock)
+   (leader = a fixture Department Admin)
+   PASS  T1 as the DA: separated true (yesterday + future-dated), false (normal member, the DA)
+   PASS  T2 as the Officer: separated true (yesterday + future-dated), false (normal member, the DA)
+   PASS  T3 as a plain Member: 7 rows, separated NULL on every one (masked like status)
+   PASS  T4 as anon: members_view returns nothing
+   PASS  T5 B-4 headcount over the view = 5 = the server's readiness packet; both separated fixtures out, the normal member in
+   PASS  T6 station_presence byte-identical; verified count 2 unchanged
+15 passed, 0 failed, 0 skipped
+drift "members_view drifted (a column changed)": refused -> PREFLIGHT: members_view definition drifted (md5 d4ca0c158a59e18436a63fc5fa2af494 <> pinned 5c78c518a924963a3f0acf61e8184e19). Re-read it before applying. Refusing.
+drift "is_leader() drifted": refused -> PREFLIGHT: public.is_leader() drifted from its pinned body. Refusing.
+drift "member_separation unsealed (authenticated SELECT)": refused -> PREFLIGHT: member_separation is no longer sealed (RLS on, no policies, no anon/authenticated SELECT). Refusing.
+drift "member_separation gained a policy": refused -> PREFLIGHT: member_separation is no longer sealed (RLS on, no policies, no anon/authenticated SELECT). Refusing.
+drift "view switched to security_invoker": refused -> PREFLIGHT: members_view options/owner are "security_invoker=true|postgres" (expected security_invoker=false|postgres). Refusing.
+mutations:
+   M1 separated not masked for non-leaders: migration REFUSED -> Post-condition failed: removing the separated column does not give back the pinned definition — something else changed. Rolling back.
+   M2 future-dated separation not counted (drifts from the server rule): migration REFUSED -> Post-condition failed: removing the separated column does not give back the pinned definition — something else changed. Rolling back.
+   M3 status unmasked on the way through: migration REFUSED -> Post-condition failed: removing the separated column does not give back the pinned definition — something else changed. Rolling back.
+   M4 terminated_on exposed: migration REFUSED -> Post-condition failed: columns are "id:uuid,department_id:uuid,name:text,role:text,access:ARRAY,status:text,phone:text,joined:text,participation:integer,created_at:timestamp with time zone,email:text,mentor_id:uuid,separated:boolean,terminated_on:date" (expected the old list + separated:boolean). Rolling back.
+   M5 anon grant revoked by the migration: migration REFUSED -> Post-condition failed: members_view grants changed ({postgres=arwdDxt/postgres,anon=arwdDxt/postgres,authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres} -> {postgres=arwdDxt/postgres,authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres}). Rolling back.
+   M6 department scope dropped: migration REFUSED -> Post-condition failed: removing the separated column does not give back the pinned definition — something else changed. Rolling back.
+post-apply drift (RETEST alone must catch):
+   D1 anon's grant revoked later:
+      FAIL  O1 members_view column / options / ACL not as intended
+      FAIL  T4 anon sees 8 rows permission denied for view members_view
+      12 passed, 3 failed, 0 skipped
+   D2 member_separation readable later:
+      FAIL  O2 the view changed beyond separated, or terminated_on leaked, or member_separation unsealed
+      14 passed, 1 failed, 0 skipped
+   D3 the view replaced unmasked later:
+      FAIL  O2 the view changed beyond separated, or terminated_on leaked, or member_separation unsealed
+      FAIL  T3 plain Member sees separated on 8 of 8 rows
+      12 passed, 3 failed, 0 skipped
+   D4 the view later stops counting a FUTURE-dated separation:
+      FAIL  O2 the view changed beyond separated, or terminated_on leaked, or member_separation unsealed
+      FAIL  T1 as the DA: sep=t fut=f norm=f da=f
+      8 passed, 7 failed, 0 skipped
