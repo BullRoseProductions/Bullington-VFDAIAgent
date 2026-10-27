@@ -72,13 +72,12 @@
   - **RETEST: 31 passed, 0 failed, 0 skipped.** That's 5 once-checks + 13 × 2 departments: one with a REAL DA, one with a fixture DA.
 - **3 drift refusals, each caught by pre-flight:** a gate widened, an event policy rewritten, a table already present.
 - **14 mutations, all caught:**
-  - **The migration itself refuses 5:**
+  - **The migration itself refuses 4:**
     - M1: claims get an INSERT grant.
     - M2: anon keeps its grants.
     - M9: a plain (non-dept) FK on `action_items`.
     - M13: a pre-existing function is touched.
-    - M14 was caught by RETEST instead (see below).
-  - **RETEST turns red for the rest:**
+  - **RETEST turns red for the other 10:**
     - M3: needs gate widened to Board → T1.
     - M4: no `FOR UPDATE` → T4.
     - M5: overfill → T3/T5.
