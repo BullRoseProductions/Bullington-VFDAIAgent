@@ -1,0 +1,21 @@
+PASS card: upcoming events with an open slot or me on it, soonest first, max 3 [11,80,155,-1]
+PASS card: past events and full-without-me events are left out 
+PASS card: shows coverage per event (Open house: Engine crew 1/3 + Kids' table 1/1 = 2 of 4) 
+PASS card: only OPEN needs are offered (the full Kids' table isn't, I'm not on it) 
+PASS who's going is visible (Ben Cho), and my own row says 'You' 
+PASS Sign up → claim_event_need(need) and the lists re-read 
+PASS Can't make it → unclaim_event_need(need) 
+PASS a refusal reads as a sentence (FULL: stripped) 
+PASS card: nothing at all when no event needs anyone 
+PASS calendar: a training chip is found and is unchanged (no coverage suffix) 
+PASS calendar: the Open house chip is found (stepping a month when needed) 
+PASS calendar: a community chip carries '· 2/4' + 'needs: 2 of 4 covered' 
+PASS calendar detail: Needs hands + coverage + Sign up for an open need 
+PASS calendar detail: Sign up → claim_event_need 
+PASS calendar detail: a past event is closed — no Sign up / Can't make it 
+PASS only src/App.jsx changed (runtime) vs origin/main ["src/App.jsx"]
+PASS sign-ups only through claim_ / unclaim_event_need — no write to event_need_claims 
+PASS the Needs hands card is on all four dashboards 
+PASS every dashboard calendar gets meId + members 
+PASS locked-token count unchanged vs origin/main 132 vs 132
+PASS Notify crew held back 

@@ -1,0 +1,37 @@
+PASS Department Admin: the events calendar is on the hub, both tables' events on it chips 2
+PASS Department Admin: Add an event shown 
+PASS Department Admin: kicker reads FUNDING & EVENTS 
+PASS Department Admin: under the stat chips, above Funds / Fundraisers / Donation tracker {"iChips":193,"iCal":473,"iFunds":716,"iFrs":786,"iTrack":923}
+PASS Department Admin: "Funding calendar ›" is now "All fundraisers ›" 
+PASS Officer: the events calendar is on the hub, both tables' events on it chips 2
+PASS Officer: Add an event shown 
+PASS Officer: kicker reads FUNDING & EVENTS 
+PASS Officer: under the stat chips, above Funds / Fundraisers / Donation tracker {"iChips":193,"iCal":473,"iFunds":716,"iFrs":786,"iTrack":923}
+PASS Officer: "Funding calendar ›" is now "All fundraisers ›" 
+PASS Board Member: the events calendar is on the hub, both tables' events on it chips 2
+PASS Board Member: Add an event hidden 
+PASS Board Member: kicker reads FUNDING & EVENTS 
+PASS Board Member: under the stat chips, above Funds / Fundraisers / Donation tracker {"iChips":193,"iCal":473,"iFunds":703,"iFrs":773,"iTrack":910}
+PASS Board Member: "Funding calendar ›" is now "All fundraisers ›" 
+PASS Project Admin: the events calendar is on the hub, both tables' events on it chips 2
+PASS Project Admin: Add an event hidden 
+PASS Project Admin: kicker reads FUNDING & EVENTS 
+PASS Project Admin: tile layout keeps the Fundraisers tile, calendar above it 
+PASS Fundraisers sub-view: no events calendar mounted 
+PASS Fundraisers sub-view: the back button reads Funding & Events 
+PASS back on the hub: the calendar is there again, freshly read 
+PASS Add opens the type tiles: both kinds, no form, nothing preselected 
+PASS picking Community event opens its form (no 'Part of a fundraiser') 
+PASS Change type returns to the tiles 
+PASS picking Fundraiser event opens its form with 'Part of a fundraiser' 
+PASS Cancel from the tiles closes the add, nothing written 
+PASS only src/App.jsx changed (runtime) vs origin/main ["src/App.jsx"]
+PASS exactly one <EventsCalendar mount, in Funding, none in Fundraisers 
+PASS nav: label Funding & Events, key still funding, roles still LEADERSHIP 
+PASS no default kind: a new add starts at kind null, and addEvent refuses an unknown kind 
+PASS no new table read or RPC 
+PASS no new write anywhere 146 vs 146
+PASS the gates are unchanged: EventsCalendar still CANMANAGE_OPS_ROLES + useCanDeleteShared 
+PASS no new hex literal in EventsCalendar or Funding 
+PASS locked-token count unchanged vs origin/main 132 vs 132
+PASS Notify crew held back 

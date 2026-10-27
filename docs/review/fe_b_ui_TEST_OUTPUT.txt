@@ -1,0 +1,42 @@
+PASS needCoverage caps per need and sums 
+PASS recruitment_events read carries event_type id, date, title, color, notes, start_time, end_time, location_label, event_type
+PASS needs + claims read with explicit columns 
+PASS chip shows coverage '· 2/4' and the tooltip says 'needs: 2 of 4 covered' + the subtype Open house · 2/4
+PASS an event with no needs has no coverage suffix 
+PASS detail: coverage chip '2 of 4 covered' + both needs with who signed up 
+PASS detail header names the subtype 
+PASS add need refused before any write: empty role 
+PASS add need refused before any write: 0 people 
+PASS add need refused before any write: 51 people 
+PASS add need refused before any write: 2.5 people 
+PASS add need refused before any write: end before start 
+PASS add need → event_needs insert on the community parent, with department + shift, read back {"role_label":"Setup crew","slots_needed":4,"start_time":"08:00","end_time":"09:30","notes":null,"department_id":"dept-1","recruitment_event_id":"r1"}
+PASS edit: 0 people refused before the write 
+PASS edit → update by id with .select(); a DB refusal is shown as a sentence (code stripped) 
+PASS edit: 0 rows back = an error, not a success 
+PASS remove need: the confirm names the sign-ups it drops; delete by id with .select() 
+PASS assign list = active / probationary members not already on it (no Inactive, no duplicate) ["Assign a member…","Ben Cho","Cy Dee"]
+PASS Assign → assign_event_need(need, member) 
+PASS an RPC refusal reads as a sentence (FULL: stripped) 
+PASS ✕ on a sign-up → remove_event_need_claim(claim) 
+PASS the full need (Kids' table 1 of 1) offers no Assign 
+PASS jobs read action_items by recruitment_event_id 
+PASS jobs list: open + done, owner + due shown 
+PASS add job → action_items insert (department, recruitment_event_id, source_label = the event, assignee, due) read back {"department_id":"dept-1","text":"Borrow tables","assigned_to":"m1","due_date":"2026-10-20","recruitment_event_id":"r1","source_label":"Open house"}
+PASS Done / Not needed (with a reason) / Reopen → the lifecycle RPCs 
+PASS delete-confirm names the sign-ups removed with the event 2 sign-ups for its 2 needs are removed too — those people are no longer signed up. Any jobs for it stay on the jobs list, without the event link.
+PASS a fundraiser event shows Needs but not Jobs 
+PASS a need on a fundraiser event goes on funding_event_id 
+PASS past event: no assign, no remove ✕, 'sign-ups are closed' 
+PASS community add writes event_type {"department_id":"dept-1","title":"Parade float","date":"2026-10-27","color":"#C8323A","start_time":null,"end_time":null,"location_label":null,"notes":null,"event_type":"parade"}
+PASS the fundraiser form has no 'Kind of event' 
+PASS fundraiser add never carries event_type 
+PASS edit pre-fills the subtype 
+PASS edit writes the new subtype 
+PASS Board: sees needs + who signed up, but no editor / assign / remove / job actions 
+PASS Project Admin: sees needs + who signed up, but no editor / assign / remove / job actions 
+PASS Member: sees needs + who signed up, but no editor / assign / remove / job actions 
+PASS only src/App.jsx changed (runtime) vs origin/main ["src/App.jsx"]
+PASS no write to event_need_claims anywhere — sign-ups only through the RPCs 
+PASS locked-token count unchanged vs origin/main 132 vs 132
+PASS Notify crew held back 
