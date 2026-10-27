@@ -641,7 +641,9 @@ export default async function handler(req, res) {
       sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance"),
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp, no_expiry, cert_types(never_expires, department_id)"),
-      sb.from("apparatus").select("department_id, in_service"),
+      // RETIRED RIGS OUT (WS-4a, ruling A-2). retire_apparatus soft-deletes and leaves in_service=true, so without
+      // this a retired truck still counted as "in service" in the email while every app screen had dropped it.
+      sb.from("apparatus").select("department_id, in_service").is("deleted_at", null),
       // auto_closed IS SELECTED NOW, and it is load-bearing. Without it this read could not tell a
       // shift whose stop time an officer confirmed from one the sweeper guessed at the cap, so the
       // digest credited estimated hours the screen refuses. These rows no longer produce the credited
