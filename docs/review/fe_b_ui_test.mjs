@@ -278,12 +278,17 @@ for (const [who, role] of [["Board", ["Board Member"]], ["Project Admin", ["Proj
 
 // ---------------------------------------------------------------- 9. the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const base = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+// The DELTA fences are PINNED to FE-B-UI's own code commit (35980a0, parent d0e7ae9 = FE-A-r2; released in
+// industrial-noir-36): "vs origin/main" goes red once the slice is on main. The structural guards below still read today's tree.
+const REL = "35980a0";
+const BASE = `${REL}^1`;
+const base = execSync(`git show ${BASE}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = execSync(`git show ${REL}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const changed = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("FE-B-UI (35980a0) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 ok("no write to event_need_claims anywhere — sign-ups only through the RPCs", !/from\("event_need_claims"\)\.(insert|update|upsert|delete)/.test(src) && src.includes('supabase.rpc("assign_event_need"') && src.includes('supabase.rpc("remove_event_need_claim"'));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by FE-B-UI (35980a0) vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);

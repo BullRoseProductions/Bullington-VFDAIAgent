@@ -181,17 +181,22 @@ await act(async () => rootR.unmount());
 
 // ---------------------------------------------------------------- 6. the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// The DELTA fences are PINNED to the slice's own code commit (1f2173e = b9c1018 rebased onto the FE merge 71a8c9f, same
+// patch-id; released in industrial-noir-36): "vs origin/main" goes red once the slice is on main. The structural guards
+// below still read today's tree.
+const REL = "1f2173e";
+const BASE = `${REL}^1`;
 const base = execSync(`git show ${BASE}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const rel = execSync(`git show ${REL}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const changed = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("Library S1-UI (1f2173e) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 ok("the hard-coded SEED catalog and useState(SEED) are gone", !/const SEED = \[/.test(src) && !src.includes("useState(SEED)"));
 ok("the in-memory Content Admin publish is gone", !src.includes("Publish to library") && !src.includes("setLibrary("));
 ok("nav 'library' renders Training on its Library tab (one library)", src.includes(`(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"}`) && !src.includes('screen === "library" && <Library'));
 ok("the pull is the RPC only — no direct library_drills / drill_plans write", src.includes('supabase.rpc("pull_library_drill", { p_library_id: libraryId })') && !/from\("library_drills"\)\.(insert|update|upsert|delete)/.test(src) && !/from\("drill_plans"\)\.(insert|update|upsert|delete)/.test(src));
 ok("library_drills is never read with select(\"*\")", !/from\("library_drills"\)\.select\("\*"\)/.test(src));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by Library S1-UI (1f2173e) vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
