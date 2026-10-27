@@ -175,14 +175,16 @@ ok("closeOpenShift checks end > start and ≤ now BEFORE closeShiftAt (inline, n
 ok("confirmOut checks end > start and ≤ now BEFORE resolve_auto_closed_shift", co.includes(RULE) && co.indexOf(RULE) < co.indexOf('rpc("resolve_auto_closed_shift"'));
 ok("checkOut's rule is the one mirrored (unchanged)", fnIn(report, "checkOut").includes("if (when <= inAt || when > new Date())"));
 ok("digest: apparatus read filters retired rigs (deleted_at IS NULL)", dig.includes('sb.from("apparatus").select("department_id, in_service").is("deleted_at", null)'));
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
-const untracked = execSync("git ls-files --others --exclude-standard -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const all = [...new Set([...changed, ...untracked])].sort();
-ok("only src/App.jsx, api/digest.js and shared/shift-span.js changed (runtime) vs origin/main", JSON.stringify(all) === JSON.stringify(["api/digest.js", "shared/shift-span.js", "src/App.jsx"]), JSON.stringify(all));
+// The DELTA fences are PINNED to WS-4a's own code commit (cc719d6, parent dfd9866; released in industrial-noir-37):
+// "vs origin/main" goes red once the slice is on main. The structural guards above still read today's tree.
+const REL = "cc719d6";
+const BASE = `${REL}^1`;
+const all = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("WS-4a (cc719d6) changed only src/App.jsx, api/digest.js and shared/shift-span.js (runtime) vs its parent", JSON.stringify(all) === JSON.stringify(["api/digest.js", "shared/shift-span.js", "src/App.jsx"]), JSON.stringify(all));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)", tok(src) === 132 && tok(dig) === 32 && tok(readFileSync(join(root, "api/assistant.js"), "utf8")) === 14, `${tok(src)} · ${tok(dig)}`);
-const added = execSync("git diff origin/main -- src api", { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-ok("no station_presence write (or read) added", !added.some((l) => l.includes("station_presence")));
+const added = execSync(`git diff ${BASE} ${REL} -- src api`, { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+ok("WS-4a (cc719d6) added no station_presence write (or read)",!added.some((l) => l.includes("station_presence")));
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
