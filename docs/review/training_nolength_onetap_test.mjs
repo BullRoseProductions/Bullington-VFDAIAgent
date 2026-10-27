@@ -146,18 +146,20 @@ for (const [who, role, isTO, meId, want] of [
 
 // 3 — the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// Structural fences are PINNED to the fix's own release (c0a1a55, a --no-ff merge whose first parent 65249db is the main
+// it landed on): "vs origin/main" holds only until the next slice merges. Historical = the release vs its parent.
+const REL = "c0a1a55";
 const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
-const base = appAt(BASE);
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const rel = appAt(REL), base = appAt(`${REL}^1`);
+const changed = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("the fix (c0a1a55) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
-ok("no new RPC — the only call is the existing correct_training_session", [...rpcSet(src)].every((n) => rpcSet(base).has(n)) && rpcSet(base).has("correct_training_session"));
+ok("no new RPC in c0a1a55 — the only call is the existing correct_training_session", [...rpcSet(rel)].every((n) => rpcSet(base).has(n)) && rpcSet(base).has("correct_training_session"));
 const durWrites = (s) => (s.match(/\.update\(\{[^}]*duration_min/g) || []).length;
-ok("no new direct duration_min update", durWrites(src) === durWrites(base), `${durWrites(src)} vs ${durWrites(base)}`);
-ok("no new station_presence write", (src.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
+ok("no new direct duration_min update in c0a1a55", durWrites(rel) === durWrites(base), `${durWrites(rel)} vs ${durWrites(base)}`);
+ok("no new station_presence write in c0a1a55", (rel.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length === (base.match(/from\("station_presence"\)\.(insert|update|upsert|delete)/g) || []).length);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by c0a1a55 vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
