@@ -36,6 +36,7 @@ const MOCKS = {
       const b = { _t: table, _op: "select", _f: [] };
       b.select = (cols) => { if (b._op === "select") b._cols = cols; else b._ret = cols; return b; };
       b.neq = (c, v) => { b._f.push(["neq", c, v]); return b; };
+      b.order = () => b;   // FE-B: the needs / sign-ups reads are ordered
       b.eq = (c, v) => { b._f.push(["eq", c, v]); return b; };
       b.insert = (row) => { b._op = "insert"; b._row = row; return b; };
       b.update = (row) => { b._op = "update"; b._row = row; return b; };

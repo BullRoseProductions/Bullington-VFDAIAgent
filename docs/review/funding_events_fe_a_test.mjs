@@ -152,26 +152,31 @@ for (const [who, role, cds, canAdd, layout] of [
 
 // 5. the source
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "origin/main";
+// The DELTA fences are PINNED to FE-A's own code commit (57d730e on feat/fe-a-hub-calendar-r2, parent 361f5ff = the main it
+// was rebased onto): "vs origin/main" stopped being FE-A-only once FE-B-UI built on top of it. Historical = FE-A vs its
+// parent. The structural guards below still read today's tree.
+const REL = "57d730e";
+const BASE = `${REL}^1`;
 const base = execSync(`git show ${BASE}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const rel = execSync(`git show ${REL}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 const body = (s, name) => { const i = s.indexOf(`function ${name}(`); if (i < 0) return null; let j = s.indexOf("\nfunction ", i + 10); const k = s.indexOf("\nconst ", i + 10); if (k > 0 && k < j) j = k; return s.slice(i, j); };
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok("only src/App.jsx changed (runtime) vs origin/main", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const changed = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("FE-A (57d730e) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 ok("exactly one <EventsCalendar mount, in Funding, none in Fundraisers", (src.match(/<EventsCalendar /g) || []).length === 1 && body(src, "Funding").includes("<EventsCalendar ") && !body(src, "Fundraisers").includes("<EventsCalendar") && !strip(src).includes("fundingReloadKey"));
 ok("nav: label Funding & Events, key still funding, roles still LEADERSHIP", src.includes('{ key: "funding", label: "Funding & Events", Icon: DollarSign, roles: LEADERSHIP }'));
 ok("no default kind: a new add starts at kind null, and addEvent refuses an unknown kind", body(src, "EventsCalendar").includes("const blank = (day) => ({ kind: null,") && body(src, "EventsCalendar").includes("if (!EVENT_KINDS[f.kind])"));
 const tables = (s) => [...new Set((s.match(/\.from\("([a-z_]+)"\)/g) || []))].sort();
 const rpcs = (s) => [...new Set((s.match(/\.rpc\("([a-z_]+)"/g) || []))].sort();
-ok("no new table read or RPC", JSON.stringify(tables(src)) === JSON.stringify(tables(base)) && JSON.stringify(rpcs(src)) === JSON.stringify(rpcs(base)));
+ok("FE-A (57d730e) added no table read or RPC", JSON.stringify(tables(rel)) === JSON.stringify(tables(base)) && JSON.stringify(rpcs(rel)) === JSON.stringify(rpcs(base)));
 const writes = (s) => (s.match(/\.(insert|update|upsert|delete)\(/g) || []).length;
-ok("no new write anywhere", writes(src) === writes(base), `${writes(src)} vs ${writes(base)}`);
+ok("FE-A (57d730e) added no write", writes(rel) === writes(base), `${writes(rel)} vs ${writes(base)}`);
 ok("the gates are unchanged: EventsCalendar still CANMANAGE_OPS_ROLES + useCanDeleteShared",
   body(src, "EventsCalendar").includes("const canWrite = hasAny(role, CANMANAGE_OPS_ROLES);") && body(src, "EventsCalendar").includes("const canDelete = canWrite && canDeleteShared;"));
 const hex = (s) => (strip(s).match(/#[0-9A-Fa-f]{3,8}\b/g) || []).length;
-ok("no new hex literal in EventsCalendar or Funding", hex(body(src, "EventsCalendar")) === hex(body(base, "EventsCalendar")) && hex(body(src, "Funding")) === hex(body(base, "Funding")));
+ok("FE-A (57d730e) added no hex literal in EventsCalendar or Funding", hex(body(rel, "EventsCalendar")) === hex(body(base, "EventsCalendar")) && hex(body(rel, "Funding")) === hex(body(base, "Funding")));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("locked-token count unchanged vs origin/main", tok(src) === tok(base), `${tok(src)} vs ${tok(base)}`);
+ok("locked-token count unchanged by FE-A (57d730e) vs its parent", tok(rel) === tok(base), `${tok(rel)} vs ${tok(base)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
