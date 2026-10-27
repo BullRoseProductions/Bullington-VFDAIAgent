@@ -1,0 +1,148 @@
+{
+ "categories": [
+  {
+   "dept": "B4C Demo Department",
+   "name": "EMS Skills Refresher",
+   "state": "never logged",
+   "cadence": "Monthly",
+   "last_iso": null,
+   "next_scheduled": null
+  },
+  {
+   "dept": "B4C Demo Department",
+   "name": "Live Fire / RIT",
+   "state": "never logged",
+   "cadence": "Quarterly",
+   "last_iso": null,
+   "next_scheduled": null
+  },
+  {
+   "dept": "B4C Demo Department",
+   "name": "Monthly Pump Operations",
+   "state": "never logged",
+   "cadence": "Monthly",
+   "last_iso": null,
+   "next_scheduled": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "name": "First 5 Minutes",
+   "state": "on track",
+   "cadence": "Quarterly",
+   "last_iso": "2026-09-21",
+   "next_scheduled": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "name": "Pump Operations",
+   "state": "on track",
+   "cadence": "Semi-annual",
+   "last_iso": "2026-09-03",
+   "next_scheduled": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "name": "RIT",
+   "state": "one-off",
+   "cadence": "One-off",
+   "last_iso": "2026-10-22",
+   "next_scheduled": null
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "name": "Ropes",
+   "state": "one-off",
+   "cadence": "One-off",
+   "last_iso": null,
+   "next_scheduled": "2026-10-29"
+  },
+  {
+   "dept": "Indian Harbor Volunteer Fire Department",
+   "name": "Vehicle Extrication Familiarization",
+   "state": "one-off",
+   "cadence": "One-off",
+   "last_iso": "2026-10-01",
+   "next_scheduled": null
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "name": "Fire Training",
+   "state": "scheduled (reconciled)",
+   "cadence": "Weekly",
+   "last_iso": "2026-08-20",
+   "next_scheduled": "2026-11-17"
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "name": "Meeting",
+   "state": "scheduled (reconciled)",
+   "cadence": "Monthly",
+   "last_iso": "2026-09-08",
+   "next_scheduled": "2026-11-03"
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "name": "Officer Meeting",
+   "state": "never logged",
+   "cadence": "Monthly",
+   "last_iso": null,
+   "next_scheduled": "2026-11-03"
+  },
+  {
+   "dept": "Lipan Volunteer Fire Department",
+   "name": "Work Night",
+   "state": "never logged",
+   "cadence": "Monthly",
+   "last_iso": null,
+   "next_scheduled": "2026-10-29"
+  },
+  {
+   "dept": "North Hood County Volunteer Fire Department",
+   "name": "Fire Training",
+   "state": "scheduled (reconciled)",
+   "cadence": "Bi-weekly",
+   "last_iso": "2026-10-22",
+   "next_scheduled": "2026-11-05"
+  },
+  {
+   "dept": "North Hood County Volunteer Fire Department",
+   "name": "Monthly Board Meeting",
+   "state": "scheduled (reconciled)",
+   "cadence": "Monthly",
+   "last_iso": "2026-10-15",
+   "next_scheduled": "2026-11-01"
+  },
+  {
+   "dept": "North Hood County Volunteer Fire Department",
+   "name": "Monthly Business Meeting",
+   "state": "scheduled (reconciled)",
+   "cadence": "Monthly",
+   "last_iso": "2026-10-08",
+   "next_scheduled": "2026-11-12"
+  }
+ ],
+ "drill_plans": {
+  "rows": 0,
+  "with_category": 0,
+  "category_matches_a_plan_name": 0
+ },
+ "last_iso_fn": "f8da6df3d9e1366b618a11d96b4980f1",
+ "cadence_values": {
+  "Weekly": 1,
+  "Monthly": 7,
+  "One-off": 3,
+  "Bi-weekly": 1,
+  "Quarterly": 2,
+  "Semi-annual": 1
+ },
+ "last_iso_trigger": [],
+ "sessions_with_plan": {
+  "total": 176,
+  "with_plan_id": 122,
+  "done_with_plan_id": 10
+ },
+ "session_plans_by_category": {
+  "total": 29,
+  "on_session_with_plan_id": 12
+ }
+}
