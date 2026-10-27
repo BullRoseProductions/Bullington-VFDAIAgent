@@ -12481,7 +12481,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
         return (
           <div className="mf-grid" style={{ marginBottom: 10 }}>
             <Card padding="14px 16px" style={{ minWidth: 0 }}>
-              <CardHead icon={ShieldAlert} title="Readiness" right={<span>as of today</span>} />
+              {/* WS-4b (C-2, Ashlea): this ring is the mean of cert % and 90-day attendance — titled for what it is, so it
+                  stops colliding with the Readiness verdict (requirements x/y). */}
+              <CardHead icon={ShieldAlert} title="Cert & attendance" right={<span>as of today</span>} />
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }} title="Mean of cert compliance and 90-day participation">
                   <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">

@@ -246,6 +246,11 @@ ok("PIN digest: imports apparatusCounts + deptAttendance from shared/", dig.incl
 ok("PIN digest: apparatus metric = apparatusCounts; the tile is 'Apparatus ready' = ready/total", dig.includes("const c = apparatusCounts(deptApparatus);") && dig.includes('["Apparatus ready", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.ready)}/${esc(m.apparatus.total)}`]'));
 ok("PIN digest: trainingCompliancePct delegates to deptAttendance (no local eligibility copy)", fnBody(dig, "export function trainingCompliancePct(").includes("return deptAttendance(") && !dig.includes('if (s.audience === "leadership" || s.audience === "board") return false;'));
 ok("C-2: the email tile reads 'Attendance' (not 'Training' under 'Readiness at a glance'); the PDF 'AVG ATTENDANCE'", dig.includes('["Attendance", dash(m.trainingPct, "%")]') && rep.includes('label: "AVG ATTENDANCE"'));
+{ // the member-file ring = mean(cert %, 90-day attendance): titled "Cert & attendance", never "Readiness" (Ashlea's rename)
+  const i = src.indexOf("// READY = the mean of cert compliance (current ÷ on file) and 90-day participation");
+  const ring = i < 0 ? "" : src.slice(i, i + 4000);
+  ok("C-2 rename: the member-file cert+attendance ring is titled 'Cert & attendance', not 'Readiness'",
+    ring.includes('<CardHead icon={ShieldAlert} title="Cert & attendance" right={<span>as of today</span>} />') && !ring.includes('title="Readiness"') && !src.includes('<CardHead icon={ShieldAlert} title="Readiness"'), i < 0 ? "ring not found" : ""); }
 ok("C-3: the PDF dashes a null attendance %", /k\.avgPart == null \? "(—|\\u2014)"/.test(rep) && rep.includes('pd.avgPart == null ? "attendance not measured"'));
 ok("A: the PDF names never checked", rep.includes("${rd.neverChecked ?? 0} never checked") && rep.includes('"Never checked"'));
 

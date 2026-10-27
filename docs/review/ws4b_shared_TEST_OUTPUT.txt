@@ -34,6 +34,7 @@ PASS PIN digest: imports apparatusCounts + deptAttendance from shared/
 PASS PIN digest: apparatus metric = apparatusCounts; the tile is 'Apparatus ready' = ready/total 
 PASS PIN digest: trainingCompliancePct delegates to deptAttendance (no local eligibility copy) 
 PASS C-2: the email tile reads 'Attendance' (not 'Training' under 'Readiness at a glance'); the PDF 'AVG ATTENDANCE' 
+PASS C-2 rename: the member-file cert+attendance ring is titled 'Cert & attendance', not 'Readiness' 
 PASS C-3: the PDF dashes a null attendance % 
 PASS A: the PDF names never checked 
 PASS A-2: app, email and daily push all drop a RETIRED rig's maintenance tasks 

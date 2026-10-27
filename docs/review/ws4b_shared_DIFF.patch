@@ -325,7 +325,7 @@ index 0000000..b63ad61
 +  return !isCancelled(s) && countsTowardRate(s) && !isMeetingSession(s) && iso >= range.from && iso <= range.to;
 +});
 diff --git a/src/App.jsx b/src/App.jsx
-index 4eadc80..ff9d025 100644
+index 4eadc80..84d94fd 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -16,6 +16,8 @@ import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck,
@@ -411,7 +411,18 @@ index 4eadc80..ff9d025 100644
    // certs, duties and upcoming-training derivations all moved to PersonalView with the cards that
    // used them — MemberDashboard now renders that component instead of its own copy.
    // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
-@@ -13480,8 +13460,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -12501,7 +12481,9 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
+         return (
+           <div className="mf-grid" style={{ marginBottom: 10 }}>
+             <Card padding="14px 16px" style={{ minWidth: 0 }}>
+-              <CardHead icon={ShieldAlert} title="Readiness" right={<span>as of today</span>} />
++              {/* WS-4b (C-2, Ashlea): this ring is the mean of cert % and 90-day attendance — titled for what it is, so it
++                  stops colliding with the Readiness verdict (requirements x/y). */}
++              <CardHead icon={ShieldAlert} title="Cert & attendance" right={<span>as of today</span>} />
+               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                 <div style={{ position: "relative", width: 96, height: 96, flexShrink: 0 }} title="Mean of cert compliance and 90-day participation">
+                   <svg width="96" height="96" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+@@ -13480,8 +13462,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
    const cov = certCoverage(members, { includeProbationary: true });
    const certPct = cov.pct;
    // Real attendance — shared deptAttendance calc, now RANGE-scoped (a period fact). Dashboards still call the year form.
@@ -422,7 +433,7 @@ index 4eadc80..ff9d025 100644
    const attById = new Map(attRows.map((r) => [r.id, r.pct]));
    // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
    const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
-@@ -13620,6 +13600,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -13620,6 +13602,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
        readiness: apOk ? {
          ...ap.totals, asOf: todayLabel,
          flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
@@ -430,7 +441,7 @@ index 4eadc80..ff9d025 100644
          oosRigs: ap.oosRigs.map((r) => ({ name: r.name, note: r.note })),
        } : null,
      };
-@@ -13639,7 +13620,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -13639,7 +13622,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
        ``,
        `=== DURING THE REPORT PERIOD (${periodLabel}) — what happened in this window ===`,
        `Training sessions held (attendance recorded): ${drillsHeld}`,
@@ -439,7 +450,7 @@ index 4eadc80..ff9d025 100644
        `Duties completed: ${dutiesDone}`,
        `Action items resolved (completed or cancelled): ${actionsResolved}`,
        ...(shOk ? [
-@@ -13681,9 +13662,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -13681,9 +13664,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
        `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
        `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
        ...(apOk ? [
@@ -451,7 +462,7 @@ index 4eadc80..ff9d025 100644
          `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
        ] : [`Apparatus readiness: unavailable — the record could not be read, so no readiness figure is provided.`]),
        ...(onMod("equipment") ? (eq.ok ? [
-@@ -13738,7 +13720,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -13738,7 +13722,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
          <CardHead icon={CalendarCheck} title="During this period" right={periodLabel} style={{ marginTop: 4 }} />
          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
            <Stat S={S} dark n={String(drillsHeld)} label="Training sessions" />
@@ -460,7 +471,7 @@ index 4eadc80..ff9d025 100644
            <Stat S={S} dark n={String(dutiesDone)} label="Duties completed" />
            <Stat S={S} dark n={String(actionsResolved)} label="Action items resolved" />
          </div>
-@@ -13813,10 +13795,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
+@@ -13813,10 +13797,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
            </div>
          ) : apOk && (
            <>
@@ -474,7 +485,7 @@ index 4eadc80..ff9d025 100644
            </>
          )}
          {onMod("equipment") && (eq.err ? <Unavail what="Equipment readiness" retry={eq.retry} /> : eq.ok && (<>
-@@ -13948,7 +13930,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
+@@ -13948,7 +13932,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
  function ReportsHub({ S, members, sessions, dept, open }) {
    const year = useMemo(() => presetRange("year"), []);
    const cov = certCoverage(members, { includeProbationary: true });
@@ -483,7 +494,7 @@ index 4eadc80..ff9d025 100644
    const onSH = moduleEnabled("stationhours", dept?.disabled_modules), onAp = moduleEnabled("apparatus", dept?.disabled_modules);
    const sh = useStationHoursRange(year);
    const ap = useApparatusReadiness();
-@@ -13962,12 +13944,12 @@ function ReportsHub({ S, members, sessions, dept, open }) {
+@@ -13962,12 +13946,12 @@ function ReportsHub({ S, members, sessions, dept, open }) {
    const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
    // Values follow the colour rule — green good, amber warning, red bad — not a fixed accent per tile.
    const tone = (p) => p == null ? FIRE.textSecondary : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText;
@@ -499,7 +510,7 @@ index 4eadc80..ff9d025 100644
    ];
    const card = (key, Icon, acc, title, blurb, pv, pm, badge, pvColor) => (
      <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => open(key)}>
-@@ -14003,7 +13985,7 @@ function ReportsHub({ S, members, sessions, dept, open }) {
+@@ -14003,7 +13987,7 @@ function ReportsHub({ S, members, sessions, dept, open }) {
        <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 14px", lineHeight: 1.45 }}>A summary of the numbers a chief gets asked for — the reports below document each one for the council, the board, and the county.</div>
        <SectionBar label="Reports — open any to view, draft, or download" style={{ marginTop: 0 }} />
        <div style={S.opGrid}>
@@ -508,7 +519,7 @@ index 4eadc80..ff9d025 100644
          {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted", last ? FIRE.textPrimary : FIRE.textMuted)}
          {card("actions", ClipboardCheck, FIRE.amberText, "Action Items", "The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.", null, null)}
          {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null, null, shOk ? FIRE.greenText : FIRE.textSecondary)}
-@@ -14079,10 +14061,10 @@ function BoardStats({ S, role, members, sessions, dept }) {
+@@ -14079,10 +14063,10 @@ function BoardStats({ S, role, members, sessions, dept }) {
    const newThisYear = cm.filter((m) => joinedYear(m) === thisYear).length;
  
    // Attendance + drills — THIS PERIOD.
@@ -521,7 +532,7 @@ index 4eadc80..ff9d025 100644
    // Charts follow the period picker: one point / one bar per month of the selected range.
    const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 24), [range.from, range.to]);
    const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
-@@ -14145,6 +14127,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
+@@ -14145,6 +14129,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
                {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
                  <div style={{ marginTop: 10, paddingTop: 4, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                    <StatsRigList label="Needs attention" rigs={ap.flaggedRigs} />
@@ -529,7 +540,7 @@ index 4eadc80..ff9d025 100644
                    <StatsRigList label="Out of service" rigs={ap.oosRigs} />
                  </div>
                )}
-@@ -14787,27 +14770,29 @@ function useApparatusReadiness() {
+@@ -14787,27 +14772,29 @@ function useApparatusReadiness() {
    const load = () => {
      setErr("");
      Promise.all([
@@ -567,7 +578,7 @@ index 4eadc80..ff9d025 100644
    };
  }
  
-@@ -16049,7 +16034,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
+@@ -16049,7 +16036,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
  function AttendanceReport({ S, members, sessions, dept, back }) {
    const [presetKey, setPresetKey] = useState("year");                  // default This Year (matches prior on-load behavior)
    const [range, setRange] = useState(() => presetRange("year"));
@@ -576,7 +587,7 @@ index 4eadc80..ff9d025 100644
    const fmtD = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
    const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
    const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
-@@ -16121,16 +16106,16 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
+@@ -16121,16 +16108,16 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
        </div>
  
        <div style={S.statRow}>
@@ -597,7 +608,7 @@ index 4eadc80..ff9d025 100644
                <div style={{ position: "absolute", left: 0, right: 0, bottom: 19 + avgPct,   /* px: 15px month label + 4px gap + the bar scale (1px = 1%) */ borderTop: `1px dashed ${FIRE.line2Noir}`, pointerEvents: "none" }}>
                  <span style={{ position: "absolute", left: 0, top: -15, fontSize: 10, color: FIRE.textSecondary, background: FIRE.cardNoir, padding: "0 4px 0 0" }}>{avgPct}% avg</span>
                </div>
-@@ -16205,6 +16190,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
+@@ -16205,6 +16192,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
        </div>
        )}
        {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
@@ -606,7 +617,7 @@ index 4eadc80..ff9d025 100644
        </NoirSkin>
      </PageShell>
    );
-@@ -17014,8 +17001,15 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
+@@ -17014,8 +17003,15 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       loader, not here. */
    useAutoRefresh(loadRigs);
    const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
@@ -624,7 +635,7 @@ index 4eadc80..ff9d025 100644
    const outOfServiceCount = rigs.length - inServiceRigs.length;
    function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper", purchaseYear: r.purchaseYear ?? "", purchaseCost: r.purchaseCost ?? "", currentCost: r.currentCost ?? "", inflationRate: r.inflationRate ?? "", replaceYear: r.replaceYear ?? "", replaceCost: r.replaceCost ?? "" }); }
    async function saveEditRig(id) {
-@@ -17070,8 +17064,11 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
+@@ -17070,8 +17066,11 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
       rather than by luck, and a failed my_stations() read degrades to one ungrouped list instead of
       a wall of empty headers. Same rule as the picker and the B3b hours breakdown. */
    const allMode = activeStationId === ALL_STATIONS;
@@ -637,7 +648,7 @@ index 4eadc80..ff9d025 100644
    const stationSections = grouped ? groupByStation(rigs, stations) : [];
    /* One rig card. Extracted from the list so it can be rendered once per house in all-stations
       mode without duplicating 50 lines of card. The card itself is unchanged. */
-@@ -17080,8 +17077,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
+@@ -17080,8 +17079,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
      const ok = r.status === "Pass";
      const outOfService = !r.inService;
      const openMaint = maintItems.filter((i2) => i2.rigId === r.id && i2.status !== "Current");
@@ -647,7 +658,7 @@ index 4eadc80..ff9d025 100644
      const on = openRigId === r.id;
      return (
        <button key={r.id} type="button" aria-expanded={on} onClick={() => setOpenRigId(on ? null : r.id)}
-@@ -17119,10 +17115,10 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
+@@ -17119,10 +17117,10 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
            <div style={{ minWidth: 0 }}>
              <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary, lineHeight: 1.1 }}>{r.name}</div>
@@ -661,7 +672,7 @@ index 4eadc80..ff9d025 100644
            ); })()}
            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
            {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
-@@ -17251,25 +17247,23 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
+@@ -17251,25 +17249,23 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
            const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
            return [
              chip(Truck, "In service", <>{inServiceRigs.length}{small(`/${rigs.length}`)}</>, outOfServiceCount ? `${outOfServiceCount} out of service` : "whole fleet available", outOfServiceCount ? FIRE.amberText : FIRE.greenText),
@@ -696,7 +707,7 @@ index 4eadc80..ff9d025 100644
        {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
        {/* AFTER-CALL CHECKLIST — the way into the branch view.
  
-@@ -18396,15 +18390,13 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
+@@ -18396,15 +18392,13 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
  }
  
  /* ---------------- Maintenance reminders + checklists ---------------- */
@@ -719,7 +730,7 @@ index 4eadc80..ff9d025 100644
  }
  const MAINT_COLOR = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.green };   // the status set: red bad, amber warning, green good
  const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
-@@ -18436,17 +18428,17 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
+@@ -18436,17 +18430,17 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
    const [maintLoaded, setMaintLoaded] = useState(false);
    const loadMaint = () => {
      supabase.from("apparatus_maintenance")
@@ -740,7 +751,7 @@ index 4eadc80..ff9d025 100644
          })));
        });
    };
-@@ -19873,7 +19865,6 @@ function Equipment({ S, role, members, meId, notify }) {
+@@ -19873,7 +19867,6 @@ function Equipment({ S, role, members, meId, notify }) {
    const allUnits = types.flatMap((t) => t.units);
    const totalUnits = allUnits.length;
    const available = allUnits.filter((u) => u.status === "in_inventory").length;
@@ -748,7 +759,7 @@ index 4eadc80..ff9d025 100644
    const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
    const isManager = managers.some((m) => m.memberId === meId);
    // Registry write gate — same pair the custody RPCs use (is_dept_admin() OR is_equipment_manager()),
-@@ -19885,6 +19876,11 @@ function Equipment({ S, role, members, meId, notify }) {
+@@ -19885,6 +19878,11 @@ function Equipment({ S, role, members, meId, notify }) {
    const canManage = isDA || isManager;
    useEffect(() => { if (canManage && activeStationId !== undefined) loadIssues(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canManage, activeStationId]);
    const issuesByEq = new Map(); openIssues.forEach((x) => issuesByEq.set(x.equipment_id, (issuesByEq.get(x.equipment_id) || 0) + 1));
@@ -760,7 +771,7 @@ index 4eadc80..ff9d025 100644
    const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
    const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
      .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
-@@ -20194,7 +20190,7 @@ function Equipment({ S, role, members, meId, notify }) {
+@@ -20194,7 +20192,7 @@ function Equipment({ S, role, members, meId, notify }) {
            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
              {chip(Briefcase, "Total gear", String(totalUnits), "tracked items")}
              {chip(Users, "Issued", <>{issuedN}<span style={{ fontSize: 14, color: FIRE.textMuted }}> / {available} free</span></>, "held by members")}
@@ -769,7 +780,7 @@ index 4eadc80..ff9d025 100644
              {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
            </div>
          );
-@@ -20292,7 +20288,7 @@ function Equipment({ S, role, members, meId, notify }) {
+@@ -20292,7 +20290,7 @@ function Equipment({ S, role, members, meId, notify }) {
          const aging = rows.filter((r) => r.g.rank <= 1).sort((a, b) => a.g.rank - b.g.rank || a.g.retire - b.g.retire);
          const cats = [...new Set(types.map((t) => t.category || "Other"))].map((c) => {
            const cr = rows.filter((r) => (r.t.category || "Other") === c);
@@ -778,7 +789,7 @@ index 4eadc80..ff9d025 100644
          }).filter((x) => x.n > 0);
          const lifeLeft = (g) => { const mo = Math.round((g.retire - new Date()) / (30.44 * 86400000)); return mo <= 0 ? "past service life" : `retires in ${mo} mo`; };
          return (<>
-@@ -20331,7 +20327,7 @@ function Equipment({ S, role, members, meId, notify }) {
+@@ -20331,7 +20329,7 @@ function Equipment({ S, role, members, meId, notify }) {
                      <div style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>{x.c}</div>
                      <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{x.n}</div>
                      <div style={{ fontSize: 10.5, marginTop: 6, color: x.retire || x.soon || x.attn ? FIRE.amberText : FIRE.greenText }}>
@@ -787,7 +798,7 @@ index 4eadc80..ff9d025 100644
                      </div>
                    </div>
                  ))}
-@@ -21159,7 +21155,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
+@@ -21159,7 +21157,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
          ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
        ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
        ...(apOk ? [
@@ -797,7 +808,7 @@ index 4eadc80..ff9d025 100644
          `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
          `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
        ] : [`Apparatus readiness: unavailable — not read, so no readiness figure is provided.`]),
-@@ -21236,7 +21233,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
+@@ -21236,7 +21235,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
      </div>
    );
    const nextSess = upcoming[0];
@@ -806,7 +817,7 @@ index 4eadc80..ff9d025 100644
    return (
      <div>
        <div style={{ ...FS.cardNoir, padding: "13px 15px", marginBottom: 16 }}>
-@@ -28145,16 +28142,7 @@ const monthsBetween = (from, to, max = 12) => {
+@@ -28145,16 +28144,7 @@ const monthsBetween = (from, to, max = 12) => {
    }
    return { months: all.slice(-max), truncated: all.length > max };
  };
@@ -824,7 +835,7 @@ index 4eadc80..ff9d025 100644
  const memberAttendanceSeries = (me, sessions, months) => months.map((m) => {
    const r = memberAttendance(me, sessions, m);
    return { label: m.label, partial: m.partial, drills: r ? r.total : 0, pct: r ? r.pct : null };
-@@ -28166,7 +28154,7 @@ const lastMonths = (n) => { const t = new Date(); return monthsBetween(toISODate
+@@ -28166,7 +28156,7 @@ const lastMonths = (n) => { const t = new Date(); return monthsBetween(toISODate
  const attendanceSeries = (members, sessions, months) => months.map((m) => {
    const a = deptAttendance(members, sessions, null, m);
    const rated = a.rows.some((r) => r.pct != null);
@@ -833,7 +844,7 @@ index 4eadc80..ff9d025 100644
  });
  // Grow-in on mount, skipped entirely under prefers-reduced-motion.
  function useChartGrow() {
-@@ -28332,11 +28320,12 @@ function ApparatusReadinessView({ ap }) {
+@@ -28332,11 +28322,12 @@ function ApparatusReadinessView({ ap }) {
    const { grown, transition } = useChartGrow();
    if (ap.err) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>— Couldn't load apparatus. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={ap.retry}>Retry</button></div>;
    if (!ap.loaded) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>—</div>;
@@ -847,7 +858,7 @@ index 4eadc80..ff9d025 100644
      { key: "oos", n: oos, label: "Out of service", color: FIRE.redText },
    ];
    const W = 600, gap = 4, live = parts.filter((p) => p.n > 0);
-@@ -28345,7 +28334,7 @@ function ApparatusReadinessView({ ap }) {
+@@ -28345,7 +28336,7 @@ function ApparatusReadinessView({ ap }) {
    const rects = live.map((p) => { const w = (p.n / total) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
    return (
      <>
@@ -856,7 +867,7 @@ index 4eadc80..ff9d025 100644
          {rects.map((p) => (
            <g key={p.key}>
              <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={3} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${total}`}</title></rect>
-@@ -28740,7 +28729,7 @@ function DutyOpenList({ duties, members, dept, cap = 3 }) {
+@@ -28740,7 +28731,7 @@ function DutyOpenList({ duties, members, dept, cap = 3 }) {
  }
  function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts, overview, actionCenter }) {
    const yr = new Date().getFullYear();
@@ -865,7 +876,7 @@ index 4eadc80..ff9d025 100644
    const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
    const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
    const trend = useMemo(() => attendanceSeries(members, sessions, lastMonths(8)), [members, sessions]);
-@@ -28759,7 +28748,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
+@@ -28759,7 +28750,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
    // ROSTER COVERAGE, not records — see certCoverage. expdC is "any expired cert exists", a different question.
    let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp, c.neverExpires).rank === 0) expdC++; }));
    const cov = certCoverage(members, { includeProbationary: true });
@@ -874,7 +885,7 @@ index 4eadc80..ff9d025 100644
    const dutyList = duties || [];
    const dutyDone = dutyList.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
    // null, NOT 100 — a department with no duties configured has nothing measured; the bar says "No duties set".
-@@ -28802,7 +28791,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
+@@ -28802,7 +28793,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
                  <StationHoursBars months={ovMonths} />
                </MiniChart>
              )}
@@ -883,7 +894,7 @@ index 4eadc80..ff9d025 100644
                swatch={<span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.redBright, boxShadow: `0 0 0 2px ${FIRE.barGlowNoir}`, flexShrink: 0 }} />}>
                <AttendanceTrend series={ovTrend} />
              </MiniChart>
-@@ -28847,7 +28836,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
+@@ -28847,7 +28838,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
        {/* Desktop: a compact multi-column grid (2–3 across) so the section fits on about one screen.
            Phone: min(300px, 100%) collapses it to one column with no horizontal scroll. */}
        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
