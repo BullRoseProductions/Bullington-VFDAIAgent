@@ -15,6 +15,7 @@ import { FIRE } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
 import { mergeStationHours, rollupStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
+import { shiftSpan, shiftHoursText } from "../shared/shift-span.js";   // WS-4a G: "Voided" / "< 1 min" on every shift row
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -11882,7 +11883,9 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
   //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
   //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
-  //  · Readiness leader: highest cert compliance (ties → more certs on file).
+  //  · Cert leader: highest cert compliance (ties → more certs on file) — and ONLY at 75%+ current (WS-4a H-1, the
+  //    high bar). Below that nobody is highlighted: a "leader" at 0% read as a reward. Renamed from "Readiness
+  //    leader" because it is cert compliance, not the Readiness verdict (requirements x/y).
   const yrNow = new Date().getFullYear();
   const since90 = new Date(); since90.setDate(since90.getDate() - 90);
   const recentDone = (sessions || []).filter((x) => x.done && sessDate(x) >= since90);
@@ -11890,17 +11893,18 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   const pick = (arr, score) => arr.reduce((best, m) => { const v = score(m); return v != null && (best == null || v > best.v) ? { m, v } : best; }, null);
   const vet = pick(activeRoster, (m) => (m.joined && /^\d{4}$/.test(String(m.joined)) ? yrNow - Number(m.joined) : null));
   const resp = pick(activeRoster, (m) => { const n = recentDone.filter((x) => (x.attendance || []).includes(m.id)).length; return n > 0 ? n : null; });
-  const lead = pick(activeRoster, (m) => { const c = compliance(m); return c == null ? null : c * 1000 + (m.certs || []).length; });
+  const CERT_LEADER_FLOOR = 75;
+  const lead = pick(activeRoster, (m) => { const c = compliance(m); return c == null || c < CERT_LEADER_FLOOR ? null : c * 1000 + (m.certs || []).length; });
   const initialsOf = (m) => (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const rankOf = (m) => m.role || "Member";   // station rank text (Firefighter, Captain…) — shared by the spotlight and the cards
-  const spot = (key, label, title, hit, big, unit, gold, tone) => (
+  const spot = (key, label, title, hit, big, unit, gold, tone, none = "Not enough data yet") => (
     <div key={key} style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: "16px 17px", display: "flex", alignItems: "center", gap: 14, minWidth: 0, cursor: hit && onOpen ? "pointer" : "default" }} onClick={hit && onOpen ? () => onOpen(hit.m.id) : undefined}>
       <span aria-hidden="true" style={{ position: "absolute", right: -30, top: -30, width: 130, height: 130, borderRadius: "50%", background: "radial-gradient(circle, rgba(200,50,58,.22), transparent 70%)", pointerEvents: "none" }} />
       <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted }}>{label}</span>
       <div style={{ width: 52, height: 52, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.white, background: "linear-gradient(135deg, #1B222C, #11151B)", border: `2px solid ${gold ? "rgba(204,158,82,.6)" : "rgba(255,255,255,.1)"}`, boxShadow: gold ? "0 0 16px rgba(204,158,82,.25)" : "none" }}>{hit ? initialsOf(hit.m) : "—"}</div>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 11, color: FIRE.redText, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>{title}</div>
-        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1.1, marginTop: 3, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hit ? hit.m.name : "Not enough data yet"}</div>
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1.1, marginTop: 3, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hit ? hit.m.name : none}</div>
         {hit && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{rankOf(hit.m)}</div>}
       </div>
       {hit && (
@@ -11968,7 +11972,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(250px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
         {spot("vet", "★ MILESTONE", "Service milestone", vet, vet ? vet.v : null, vet && vet.v === 1 ? "year of service" : "years of service", true)}
         {spot("resp", "▲ TOP RESPONDER", "Most sessions · 90 days", resp, resp ? resp.v : null, "sessions attended")}
-        {spot("lead", "✦ READINESS LEADER", "Highest compliance", lead, lead ? <>{Math.floor(lead.v / 1000)}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></> : null, "certs current", false, lead ? pctColor(Math.floor(lead.v / 1000)) : null)}
+        {spot("lead", "✦ CERT LEADER", "Highest cert compliance", lead, lead ? <>{Math.floor(lead.v / 1000)}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></> : null, "certs current", false, lead ? pctColor(Math.floor(lead.v / 1000)) : null, `No one at ${CERT_LEADER_FLOOR}%+ yet`)}
       </div>
       {canAdd && (adding ? (
         <Card padding="15px 16px" style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -13251,8 +13255,11 @@ function RosterAttendance({ S, members, sessions, plan }) {
     return { m, cells, pct: exp ? Math.round((got / exp) * 100) : null };
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || (a.m.name || "").localeCompare(b.m.name || ""));
   const ranked = att90.rows.filter((r) => r.pct != null && members.some((m) => m.id === r.id && m.status !== "Inactive"));
-  const top3 = ranked.slice().sort((a, b) => b.pct - a.pct || b.attended - a.attended).slice(0, 3);
   const nudge3 = ranked.filter((r) => r.pct < 75).sort((a, b) => a.pct - b.pct).slice(0, 3);
+  // WS-4a H: "Showing up strong" needs turnout above 0% and never lists someone who is also under "Needs a nudge" —
+  // with a small roster the old top-3 could hand a medal to a 0% member, or to the same name in both cards.
+  const nudgeIds = new Set(nudge3.map((r) => r.id));
+  const top3 = ranked.filter((r) => r.pct > 0 && !nudgeIds.has(r.id)).sort((a, b) => b.pct - a.pct || b.attended - a.attended).slice(0, 3);
   const { draftFor, runDraft, draftBox } = useInsightDrafts();
   // COLOUR ONLY — the roster rule (>=90 green · 70–89 amber · <70 red). Who is listed under "Needs a nudge" is a
   // separate rule (nudge3, <75) and deliberately unchanged.
@@ -13351,6 +13358,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
           <Card padding="14px 16px" style={{ minWidth: 0 }}>
             <CardHead icon={Award} title="Showing up strong" right={<span>top turnout · 90 days</span>} />
+            {top3.length === 0 && <EmptyState text="No one's turnout stands out yet." />}
             {top3.map((r, i) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 2px", borderBottom: i === top3.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
                 <span style={{ fontSize: 13, width: 18, textAlign: "center" }}>{["🥇", "🥈", "🥉"][i]}</span>{av(r.name, 30)}
@@ -15158,6 +15166,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
       notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member actually left before closing the shift." });
       return;
     }
+    // WS-4a G: the same window close_open_shift enforces (and checkOut checks) — said inline, not as a server error.
+    if (when <= new Date(r.checked_in_at) || when > new Date()) { notify?.({ kind: "error", title: "Out-time outside the shift", text: "Pick a time after they checked in and no later than now." }); return; }
     if (await closeShiftAt(r.shift_id, when, r.member_name)) setCloseAt((o) => { const n = { ...o }; delete n[r.shift_id]; return n; });
   }
   /* ---- "Check out" on On station right now — same admin gate as the closer above ----
@@ -15232,6 +15242,8 @@ function StationHoursReport({ S, role, dept, notify, back }) {
     const raw = outAt[r.shift_id];
     const when = raw ? new Date(raw) : null;   // datetime-local parses as LOCAL time — correct here
     if (!raw || !when || isNaN(when.getTime())) { notify?.({ kind: "error", title: "Enter the out-time", text: "Set when the member actually left before confirming." }); return; }
+    // WS-4a G: the same window resolve_auto_closed_shift enforces (and checkOut checks) — said inline, not as a server error.
+    if (when <= new Date(r.checked_in_at) || when > new Date()) { notify?.({ kind: "error", title: "Out-time outside the shift", text: "Pick a time after they checked in and no later than now." }); return; }
     setBusyId(r.shift_id);
     const { error } = await supabase.rpc("resolve_auto_closed_shift", { p_shift_id: r.shift_id, p_checked_out_at: when.toISOString() });
     setBusyId(null);
@@ -15735,13 +15747,14 @@ function StationHoursReport({ S, role, dept, notify, back }) {
               {dayShifts.map((x, i) => {
                 const [bl, bc] = badgeOf(x);
                 const outNextDay = x.checked_out_at && new Date(x.checked_in_at).toDateString() !== new Date(x.checked_out_at).toDateString();
+                const voided = shiftSpan(x.checked_in_at, x.checked_out_at) === "voided";
                 return (
                   <div key={`${x.member_id}-${x.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none", flexWrap: "wrap" }}>
                     <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{x.member_name || "A member"}</div>
-                      <div style={{ fontSize: 11.5, color: FIRE.textMuted }}>{fmtHm(x.checked_in_at)} – {x.checked_out_at ? `${outNextDay ? `${fmtDate(x.checked_out_at)} · ` : ""}${fmtHm(x.checked_out_at)}` : "open"} · {x.kind === "training" ? "training" : "standby"}</div>
+                      <div style={{ fontSize: 11.5, color: FIRE.textMuted, textDecoration: voided ? "line-through" : undefined }}>{fmtHm(x.checked_in_at)} – {x.checked_out_at ? `${outNextDay ? `${fmtDate(x.checked_out_at)} · ` : ""}${fmtHm(x.checked_out_at)}` : "open"} · {x.kind === "training" ? "training" : "standby"}</div>
                     </div>
-                    <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1(x.hours)} h</span>
+                    <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: voided ? FIRE.textMuted : FIRE.textPrimary }}>{shiftHoursText(x.checked_in_at, x.checked_out_at, `${h1(x.hours)} h`)}</span>
                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".04em", color: bc, background: `${bc}1A`, border: `1px solid ${bc}55`, borderRadius: 5, padding: "2px 7px" }}>{bl}</span>
                   </div>
                 );
@@ -15986,6 +15999,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                 const outNextDay = s.checked_out_at
                   && new Date(s.checked_in_at).toDateString() !== new Date(s.checked_out_at).toDateString();
                 const outAt = `${outNextDay ? `${fmtDate(s.checked_out_at)} · ` : ""}${fmtHm(s.checked_out_at)}`;
+                const voided = shiftSpan(s.checked_in_at, s.checked_out_at) === "voided";   // in = out: void_auto_closed_shift's zero-length record
                 return (
                 <tr key={`${s.member_id}-${s.checked_in_at}`} style={{ borderTop: `0.5px solid ${FIRE.hairline}`, opacity: (s.verified && !s.auto_closed) ? 1 : 0.62 }}>   {/* muted = recorded but not credited */}
                   <td style={TD}>{fmtDate(s.checked_in_at)}</td>
@@ -15993,15 +16007,15 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                   {/* Attested drill time carries no house — an em dash rather than a blank, so an
                       empty cell reads as "not applicable" instead of "failed to load". */}
                   {multiStation && <td style={{ ...TD, color: s.station_name ? FIRE.textSecondary : FIRE.textMuted2 }}>{s.station_name || "—"}</td>}
-                  <td style={TD}>{fmtHm(s.checked_in_at)}</td>
+                  <td style={{ ...TD, textDecoration: voided ? "line-through" : undefined }}>{fmtHm(s.checked_in_at)}</td>
                   {/* The out-time is the FICTION in an auto-closed row — flag it there, where a leader is
                       already looking to work out what actually happened, not in the verified column. */}
-                  <td style={TD}>{s.checked_out_at
+                  <td style={{ ...TD, textDecoration: voided ? "line-through" : undefined }}>{s.checked_out_at
                     ? (s.auto_closed
                         ? <span title="Stopped automatically at the department's maximum shift length — the real out-time is unknown, so this shift is not credited." style={{ color: FIRE.amberText, fontWeight: 600 }}>{outAt} · auto</span>
                         : outAt)
                     : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>Open</span>}</td>
-                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{h1(s.hours)}</td>
+                  <td style={{ ...TD, textAlign: "right", ...FS.num }}>{shiftHoursText(s.checked_in_at, s.checked_out_at, h1(s.hours))}</td>
                   <td style={TD}>{s.kind === "training" ? "Training" : "Standby"}</td>
                   <td style={{ ...TD, color: s.verified ? FIRE.greenText : FIRE.amberText, fontWeight: 600 }}>{s.verified ? "✓" : "⚠"}</td>
                 </tr>
@@ -19641,8 +19655,8 @@ function StationHours({ S, dept, notify }) {
                         <div key={`${s.checked_in_at}-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderTop: i ? `1px solid ${FIRE.lineNoir}` : "none" }}>
                           <div style={{ width: 34, textAlign: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 10, lineHeight: 1.15, color: FIRE.textSecondary, flexShrink: 0 }}>{d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}<br /><span style={{ fontSize: 15, color: FIRE.textPrimary }}>{d.getDate()}</span></div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h · {s.kind === "training" ? "training" : "standby"}</div>
-                            <div style={{ fontSize: 11, color: FIRE.textMuted }}>{fmtHm2(s.checked_in_at)}–{s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"}</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{shiftHoursText(s.checked_in_at, s.checked_out_at, `${h1n(s.hours)} h`)} · {s.kind === "training" ? "training" : "standby"}</div>
+                            <div style={{ fontSize: 11, color: FIRE.textMuted, textDecoration: shiftSpan(s.checked_in_at, s.checked_out_at) === "voided" ? "line-through" : undefined }}>{fmtHm2(s.checked_in_at)}–{s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"}</div>
                           </div>
                           <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", color: tc, background: `${tc}1A`, border: `1px solid ${tc}55`, borderRadius: 5, padding: "2px 7px", flexShrink: 0 }}>{tl}</span>
                         </div>
@@ -19691,10 +19705,10 @@ function StationHours({ S, dept, notify }) {
                     <div key={`${s.checked_in_at}-${i}`} style={{ ...FS.row, borderBottom: i === shown.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}`, padding: "9px 2px" }}>
                       <div style={FS.rowTitle}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{fmtDay(s.checked_in_at)}</div>
-                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}{multiStation ? ` · ${stationOf(s)}` : ""}</div>
+                        <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, textDecoration: shiftSpan(s.checked_in_at, s.checked_out_at) === "voided" ? "line-through" : undefined }}>{fmtHm2(s.checked_in_at)} – {s.checked_out_at ? fmtHm2(s.checked_out_at) : "open"} · {s.kind === "training" ? "Training" : "Standby"}{multiStation ? ` · ${stationOf(s)}` : ""}</div>
                       </div>
                       <div style={{ ...FS.rowActions, gap: 10 }}>
-                        <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{h1n(s.hours)} h</span>
+                        <span style={{ ...FS.num, fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{shiftHoursText(s.checked_in_at, s.checked_out_at, `${h1n(s.hours)} h`)}</span>
                         <span title={s.verified ? "Verified at the station" : "Not location-verified"} style={{ display: "inline-flex", color: s.verified ? FIRE.greenText : FIRE.amberText }}>
                           {s.verified ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
                         </span>

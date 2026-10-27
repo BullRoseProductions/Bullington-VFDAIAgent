@@ -1,0 +1,31 @@
+PASS in = out → voided (void_auto_closed_shift's zero-length record) 
+PASS 20 s and 59.9 s → under_minute; exactly 60 s → timed 
+PASS no out-time → open; out before in → timed (never mislabelled); garbage → timed 
+PASS shiftHoursText: Voided · < 1 min · otherwise the caller's text unchanged 
+PASS StationHours: the voided shift reads 'Voided', not '0.0 h' · standby4:35 PM–4:36 PMON LOCATIONOCT24Voided · standby4:35 PM–4:
+PASS StationHours: the 20-second shift reads '< 1 min' 
+PASS StationHours: a real shift still reads the server's hours (2.5 h) 
+PASS StationHours: only the voided shift's times are struck through (one per list it appears in) 2
+PASS StationHours: rendering wrote nothing 
+PASS Roster: the spotlight is renamed '✦ CERT LEADER' (no 'READINESS LEADER') 
+PASS Roster: nobody under 75% current is highlighted — 'No one at 75%+ yet' CERT LEADER—Highest cert complianceNo one at 75%+ yetAll 2Active 2Probationary 0Sort: Roste
+PASS Roster: at 75%+ the highest is highlighted (Casey Full, 100%) CERT LEADERCFHighest cert complianceCasey FullFirefighter100%certs currentAll 2Active 2Prob
+PASS Roster: exactly 75% current qualifies (the bar is ≥ 75) 
+PASS RosterAttendance: the nudge list holds the 0% and 50% members Needs a nudgeunder 75% · 90 days!CZCam Zero0%Draft a check-in!BFBen Fifty50%Draft a check-in
+PASS RosterAttendance: 'Showing up strong' never lists the 0% member Showing up strongtop turnout · 90 days🥇AHAva Hundred100%🥈DSDee Seventyfive75%
+PASS RosterAttendance: 'Showing up strong' never lists someone also under 'Needs a nudge' Showing up strongtop turnout · 90 days🥇AHAva Hundred100%🥈DSDee Seventyfive75%
+PASS RosterAttendance: the strong members are still there (Ava 100%, Dee 75%) 
+PASS PIN: App.jsx imports shiftSpan + shiftHoursText from ../shared/shift-span.js 
+PASS PIN: StationHoursReport · day detail prints its hours through shiftHoursText 
+PASS PIN: StationHoursReport · shift log prints its hours through shiftHoursText 
+PASS PIN: StationHours · recent shifts prints its hours through shiftHoursText 
+PASS PIN: StationHours · full list prints its hours through shiftHoursText 
+PASS PIN: no shift row prints raw hours any more ({h1(x.hours)} h · {h1(s.hours)}</td> · {h1n(s.hours)} h) 
+PASS closeOpenShift checks end > start and ≤ now BEFORE closeShiftAt (inline, no RPC) 
+PASS confirmOut checks end > start and ≤ now BEFORE resolve_auto_closed_shift 
+PASS checkOut's rule is the one mirrored (unchanged) 
+PASS digest: apparatus read filters retired rigs (deleted_at IS NULL) 
+PASS only src/App.jsx, api/digest.js and shared/shift-span.js changed (runtime) vs origin/main ["api/digest.js","shared/shift-span.js","src/App.jsx"]
+PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 132 · 32
+PASS no station_presence write (or read) added 
+PASS Notify crew held back 
