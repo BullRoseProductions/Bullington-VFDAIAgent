@@ -1,0 +1,149 @@
+{
+ "run": "2026-10-27, Supabase SQL editor, read-only (sha256 aeacebe0\u2026)",
+ "result": {
+  "cron_jobs": [
+   "auto-close-stale-shifts | */20 * * * * | SELECT public.auto_close_stale_shifts();"
+  ],
+  "drill_rpcs": {
+   "dept_drill_plans()": {
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   "delete_drill_plan(p_id uuid)": {
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   "approve_drill_plan(p_id uuid)": {
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   "unapprove_drill_plan(p_id uuid)": {
+    "anon": false,
+    "auth": true,
+    "definer": true
+   },
+   "set_drill_plan(p_id uuid, p_title text, p_category text, p_duration_min integer, p_audience text, p_content jsonb, p_source text)": {
+    "anon": false,
+    "auth": true,
+    "definer": true
+   }
+  },
+  "extensions": [
+   "plpgsql 1.0",
+   "pg_stat_statements 1.11",
+   "uuid-ossp 1.1",
+   "pgcrypto 1.3",
+   "supabase_vault 0.3.1",
+   "pg_cron 1.6.4"
+  ],
+  "departments": 5,
+  "drill_plans_rls": true,
+  "ai_outputs_drill": {
+   "agenda": 4,
+   "report": 4,
+   "minutes": 16,
+   "fundraiser": 4,
+   "recruitment": 2
+  },
+  "drill_plans_cols": [
+   "id uuid NOT NULL DEFAULT gen_random_uuid()",
+   "department_id uuid NOT NULL",
+   "title text NOT NULL",
+   "category text",
+   "duration_min int4",
+   "audience text",
+   "content jsonb NOT NULL",
+   "status text NOT NULL DEFAULT 'draft'::text",
+   "source text NOT NULL DEFAULT 'ai'::text",
+   "created_by uuid",
+   "created_at timestamptz NOT NULL DEFAULT now()",
+   "approved_by uuid",
+   "approved_at timestamptz",
+   "updated_by uuid",
+   "updated_at timestamptz NOT NULL DEFAULT now()"
+  ],
+  "session_plans_fks": [
+   "session_plans_drill_plan_id_fkey | FOREIGN KEY (drill_plan_id) REFERENCES drill_plans(id) ON DELETE SET NULL",
+   "session_plans_session_id_fkey | FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+   "session_plans_source_check | CHECK (((source IS NULL) OR (source = ANY (ARRAY['upload'::text, 'ai'::text]))))"
+  ],
+  "drill_plans_counts": {},
+  "drill_plans_grants": [
+   "anon:DELETE",
+   "anon:INSERT",
+   "anon:REFERENCES",
+   "anon:SELECT",
+   "anon:TRIGGER",
+   "anon:TRUNCATE",
+   "anon:UPDATE",
+   "authenticated:DELETE",
+   "authenticated:INSERT",
+   "authenticated:REFERENCES",
+   "authenticated:SELECT",
+   "authenticated:TRIGGER",
+   "authenticated:TRUNCATE",
+   "authenticated:UPDATE"
+  ],
+  "session_plans_cols": [
+   "id uuid",
+   "department_id uuid",
+   "session_id uuid",
+   "title text",
+   "source text",
+   "storage_path text",
+   "ai_text text",
+   "created_by text",
+   "created_at timestamptz",
+   "drill_plan_id uuid"
+  ],
+  "used_library_plans": 0,
+  "drill_plans_policies": [
+   "members read drill_plans | SELECT | authenticated | USING (department_id = my_department_id()) | CHECK -"
+  ],
+  "session_plans_counts": {
+   "total": 39,
+   "ai_text": 30,
+   "uploads": 9,
+   "from_library": 0,
+   "on_done_attended": 22,
+   "on_done_sessions": 22
+  },
+  "session_plans_policies": [
+   "canmanage delete session_plans | DELETE | USING ((department_id = my_department_id()) AND is_training_manager()) | CHECK -",
+   "canmanage insert session_plans | INSERT | USING - | CHECK ((department_id = my_department_id()) AND is_canmanage())",
+   "canmanage update session_plans | UPDATE | USING ((department_id = my_department_id()) AND is_training_manager()) | CHECK ((department_id = my_department_id()) AND is_training_manager())",
+   "members read session_plans | SELECT | USING (department_id = my_department_id()) | CHECK -"
+  ],
+  "drill_plans_constraints": [
+   "drill_plans_content_chk | CHECK ((jsonb_typeof(content) = 'object'::text))",
+   "drill_plans_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+   "drill_plans_duration_chk | CHECK (((duration_min IS NULL) OR (duration_min > 0)))",
+   "drill_plans_pkey | PRIMARY KEY (id)",
+   "drill_plans_source_chk | CHECK ((source = ANY (ARRAY['ai'::text, 'manual'::text])))",
+   "drill_plans_status_chk | CHECK ((status = ANY (ARRAY['draft'::text, 'approved'::text])))",
+   "drill_plans_title_chk | CHECK ((btrim(title) <> ''::text))"
+  ],
+  "training_plans_policies": [
+   "admins delete training_plans | DELETE | USING ((department_id = my_department_id()) AND is_dept_admin())",
+   "leaders update training_plans | UPDATE | USING ((department_id = my_department_id()) AND is_training_manager())",
+   "leaders write training_plans | INSERT | USING -",
+   "members read training_plans | SELECT | USING (department_id = my_department_id())"
+  ],
+  "standard_cert_types_policies": [
+   "authenticated read standard_cert_types | SELECT | USING true"
+  ],
+  "tables_without_department_id": [
+   "_d2a_resync_backup",
+   "aftercall_run_items",
+   "departments",
+   "equipment_handoff_items",
+   "member_active_station",
+   "member_devices",
+   "notification_prefs",
+   "standard_cert_types"
+  ]
+ }
+}
