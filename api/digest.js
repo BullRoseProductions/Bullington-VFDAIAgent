@@ -27,6 +27,9 @@ import { buildNotifications, insertNotifications, sendPush } from "./_push.js";
 import { detectMaintenanceFrom } from "../shared/maint-due.js";
 // The cert date rule the app, the assistant and the SQL readers share (shape + month 01–12 + year >= 1900).
 import { validExpYM } from "../shared/expiry.js";
+// WS-4b: "ready" and the attendance % are the app's own definitions, imported — not copied.
+import { apparatusCounts } from "../shared/apparatus-status.js";
+import { deptAttendance } from "../shared/attendance.js";
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
 const FROM = "B4C <notifications@b4thecall.com>";
@@ -258,11 +261,13 @@ async function detectGear(sb, today) {
 }
 async function detectMaintenance(sb, today) {
   const { data, error } = await sb.from("apparatus_maintenance")
-    .select("id, department_id, task, cadence, last_done_at, apparatus(name)");
+    .select("id, department_id, task, cadence, last_done_at, apparatus(name, deleted_at)");
   if (error) throw new Error(`apparatus_maintenance read failed: ${error.message}`);
+  // WS-4b (A-2): a task on a RETIRED rig is not due — retire_apparatus soft-deletes and leaves its maintenance rows.
+  // The app drops the same rows. A task with no rig ("All units") has no apparatus and stays.
   /* The READ stays here; only the arithmetic moved. detectMaintenanceFrom returns exactly what this
      function used to build — plus an additive `nextDue`, which nothing downstream reads. */
-  return detectMaintenanceFrom(data, today);
+  return detectMaintenanceFrom((data || []).filter((r) => !r.apparatus?.deleted_at), today);
 }
 
 /* ---------------- metrics ----------------
@@ -285,26 +290,26 @@ function certsCurrentPct(certRows, countedIds, today) {
   return Math.round(100 * ranks.filter((r) => r === 2).length / ranks.length);
 }
 
-// Training compliance, mirroring deptAttendance (App.jsx:1162) for the current calendar year.
-// Eligible sessions: done, inside the year, at least one attendance row, and counting toward the rate
-// (restricted leadership/board events and optional sessions are excluded — countsTowardRate, App.jsx:106).
-// The department figure is the MEAN OF PER-MEMBER PERCENTAGES, not a pooled ratio — the app's definition.
-function trainingCompliancePct(sessions, attendance, countedMembers, year) {
+// Attendance % for the current calendar year — BY THE APP'S OWN RULE (shared/attendance.js, WS-4b). This function is
+// now only the ADAPTER from database rows to the app's session/member shapes. It used to be a copy of the rule, and
+// the copy had drifted: no join-date cutoff (a September joiner read as absent for every January drill — the email's
+// 51% against the app's 54%) and no cancelled guard. `joinedOn` is member_id → "YYYY-MM-DD" (member_private).
+// The department figure is the MEAN OF PER-MEMBER PERCENTAGES, not a pooled ratio; nobody rated → null → "—".
+export function trainingCompliancePct(sessions, attendance, countedMembers, year, joinedOn = new Map()) {
   const attendedBy = new Map();                                     // session_id → Set(member_id)
   for (const a of attendance) {
     if (!attendedBy.has(a.session_id)) attendedBy.set(a.session_id, new Set());
     attendedBy.get(a.session_id).add(a.member_id);
   }
-  const eligible = sessions.filter((s) => {
-    if (!s.done) return false;
-    if (String(s.date || "").slice(0, 4) !== String(year)) return false;
-    if (s.audience === "leadership" || s.audience === "board") return false;
-    if (s.counts_toward_attendance === false) return false;
-    return (attendedBy.get(s.id)?.size || 0) > 0;                   // a session with no roll taken is not a denominator
-  });
-  if (!eligible.length || !countedMembers.length) return null;      // nothing held (or nobody counted) → "—"
-  const pcts = countedMembers.map((m) => 100 * eligible.filter((s) => attendedBy.get(s.id)?.has(m.id)).length / eligible.length);
-  return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+  // Exactly the app's mapping of a training_sessions row (App.jsx, the sessions loader).
+  const toSession = (s) => {
+    const [yy, mm, dd] = String(s.date || "").slice(0, 10).split("-").map(Number);
+    return { id: s.id, y: yy, m: (mm || 1) - 1, d: dd, done: !!s.done, status: s.status || "scheduled", audience: s.audience || "everyone",
+      countsAttendance: s.counts_toward_attendance !== false, isMeeting: !!s.is_meeting, attendance: [...(attendedBy.get(s.id) || [])] };
+  };
+  const toMember = (m) => ({ id: m.id, name: m.name, access: m.access, status: m.status, joined: m.joined, joinedOn: joinedOn.get(m.id) || null });
+  // countedMembers is already filtered by countsInStats (the app's population, until WS-4c) — so `counted` is everyone here.
+  return deptAttendance(countedMembers.map(toMember), sessions.filter((s) => s.date).map(toSession), year, null).avg;
 }
 
 // Shift duration from the two timestamps — station_presence stores no hours column.
@@ -475,11 +480,12 @@ function dutiesBlock(d) {
 const dash = (v, suffix = "") => (v === null || v === undefined ? "&mdash;" : `${esc(v)}${suffix}`);
 function metricsBlock(m) {
   const tiles = [
-    ["Training", dash(m.trainingPct, "%")],
+    ["Attendance", dash(m.trainingPct, "%")],   // WS-4b C-2: it's the attendance %, not "readiness" (that's the requirements verdict, x/y)
     ["Certs current", dash(m.certsPct, "%")],
     ["Station hrs", dash(m.station.credited)],
     ["Verified", dash(m.station.verifiedPct, "%")],
-    ["Apparatus", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.inService)}/${esc(m.apparatus.total)}`],
+    // WS-4b (A): READY of the non-retired fleet, by the app's own rule (shared/apparatus-status.js) — it used to be in_service only.
+    ["Apparatus ready", m.apparatus.total === null ? "&mdash;" : `${esc(m.apparatus.ready)}/${esc(m.apparatus.total)}`],
   ];
   const tds = tiles.map(([label, value]) => `<td width="20%" align="center" style="padding:12px 4px;background:${C.card};border:1px solid ${C.hairline};border-radius:10px">
       <div style="font-size:19px;font-weight:700;color:${C.text};line-height:1.1">${value}</div>
@@ -634,16 +640,16 @@ export default async function handler(req, res) {
   // summary degrades to "—" and the digest still goes out; it never blocks the items that need attention.
   // station_presence is read DIRECTLY: the service-role key already bypasses RLS, so no RPC is needed —
   // the app's RPCs exist only because a browser client has to be walled off by my_department_id().
-  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], error: null };
+  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], joins: [], error: null };
   try {
     const rs = await Promise.all([
-      sb.from("members").select("id, department_id, access, email, status"),
-      sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance"),
+      sb.from("members").select("id, department_id, access, email, status, joined"),
+      sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance, is_meeting, status"),
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp, no_expiry, cert_types(never_expires, department_id)"),
       // RETIRED RIGS OUT (WS-4a, ruling A-2). retire_apparatus soft-deletes and leaves in_service=true, so without
       // this a retired truck still counted as "in service" in the email while every app screen had dropped it.
-      sb.from("apparatus").select("department_id, in_service").is("deleted_at", null),
+      sb.from("apparatus").select("department_id, in_service, status, last_check_at, check_interval_days").is("deleted_at", null),
       // auto_closed IS SELECTED NOW, and it is load-bearing. Without it this read could not tell a
       // shift whose stop time an officer confirmed from one the sweeper guessed at the cap, so the
       // digest credited estimated hours the screen refuses. These rows no longer produce the credited
@@ -657,7 +663,12 @@ export default async function handler(req, res) {
     const bad = rs.find((r) => r.error);
     if (bad) throw new Error(bad.error.message);
     const [m, s, a, c, ap, sp] = rs.map((r) => r.data || []);
-    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, error: null };
+    // JOIN DATES for the attendance cutoff (WS-4b). member_private directly, because the app's `celebrations` view is
+    // `WHERE department_id = my_department_id()` — empty for this service-role caller. ONLY the three columns the
+    // cutoff needs (never birthday). Read on its own and TOLERANT: a failure here falls back to the `joined` year
+    // (Jan 1 cutoff), it does not blank every tile the way a failed core read must.
+    const jr = await sb.from("member_private").select("member_id, department_id, joined_date").not("joined_date", "is", null);
+    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, joins: jr.error ? [] : (jr.data || []), error: null };
   } catch (e) {
     mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
   }
@@ -752,17 +763,19 @@ export default async function handler(req, res) {
     total += n;
     const deptApparatus = mi.apparatus.filter((a) => a.department_id === deptId);
     const metrics = {
-      trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year),
+      trainingPct: trainingCompliancePct(mi.sessions.filter((s) => s.department_id === deptId), mi.attendance, counted, year,
+        new Map(mi.joins.filter((j) => j.department_id === deptId).map((j) => [j.member_id, String(j.joined_date).slice(0, 10)]))),
       certsPct: certsCurrentPct(mi.certRows.filter((c) => c.department_id === deptId), countedIds, today),
       // `?? null` is the whole point of the has() check: a department whose hours read failed passes
       // null and dashes out, rather than passing [] and asserting zero credited hours.
       station: stationMetrics(mi.shifts.filter((s) => s.department_id === deptId),
                               isoByDept.has(deptId) ? isoByDept.get(deptId) : null,
                               countedIds),
-      apparatus: {
-        total: deptApparatus.length || null,                  // no apparatus on file → "—", not "0 of 0"
-        inService: deptApparatus.filter((a) => a.in_service !== false).length,   // null counts as in service, matching App.jsx:6789
-      },
+      // WS-4b (A): the strict buckets from shared/apparatus-status.js — the dashboards read the same rule.
+      apparatus: (() => {
+        const c = apparatusCounts(deptApparatus);
+        return { total: c.total || null, ready: c.ready, inService: c.total - c.outOfService, neverChecked: c.neverChecked };   // no apparatus on file → "—", not "0 of 0"
+      })(),
     };
     // TEST MODE goes to the one test address and NEVER to real admins; a real run resolves that
     // department's own Department Admins. A department with none is skipped and reported, not crashed on.

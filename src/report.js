@@ -170,7 +170,7 @@ export function buildReportDoc(data) {
   const tiles = [
     { num: `${k.active}/${k.total}`, label: "ACTIVE MEMBERS", sub: `${data.counts.prob} probationary`, sc: GRAY },
     { num: `${k.certPct}%`, label: "CERT COMPLIANCE", sub: `${data.counts.expg} expiring \u00b7 ${data.counts.expd} expired`, sc: k.certWarn ? REDX : AMBER },
-    { num: `${k.avgPart}%`, label: "AVG PARTICIPATION", sub: "over the period", sc: GRAY },
+    { num: k.avgPart == null ? "—" : `${k.avgPart}%`, label: "AVG ATTENDANCE", sub: "over the period", sc: GRAY },   // WS-4b C-2/C-3: "attendance", and a dash when nobody was rated
   ];
   const KH = 64;
   doc.setFillColor(...PANEL); doc.rect(M, y, CW, KH, "F");
@@ -234,7 +234,7 @@ export function buildReportDoc(data) {
   const pd = data.period || {};
   header("Chief\u2019s Summary");
   if (pd.label) para(`Report period: ${pd.label}${pd.generated ? `   \u00b7   Generated ${pd.generated}` : ""}`, SLATE, 9.3);
-  if (pd.label) para(`During this period, the department held ${pd.drillsHeld} training session${pd.drillsHeld === 1 ? "" : "s"} with recorded attendance (${pd.avgPart}% average attendance), completed ${pd.dutiesDone} dut${pd.dutiesDone === 1 ? "y" : "ies"}, and resolved ${pd.actionsResolved} action item${pd.actionsResolved === 1 ? "" : "s"}.`);
+  if (pd.label) para(`During this period, the department held ${pd.drillsHeld} training session${pd.drillsHeld === 1 ? "" : "s"} with recorded attendance (${pd.avgPart == null ? "attendance not measured" : `${pd.avgPart}% average attendance`}), completed ${pd.dutiesDone} dut${pd.dutiesDone === 1 ? "y" : "ies"}, and resolved ${pd.actionsResolved} action item${pd.actionsResolved === 1 ? "" : "s"}.`);
   para(`As of today, the department has ${c.active} active members of ${c.total} on the roster (${c.prob} probationary). `
     + (c.expd > 0
       ? `${c.expd} certification${c.expd > 1 ? "s are" : " is"} expired and ${c.expg} expiring within 90 days \u2014 flagged below as action items.`
@@ -344,16 +344,18 @@ export function buildReportDoc(data) {
   const rd = data.readiness;
   if (rd) {
     header("Apparatus Readiness");
-    para(`As of ${rd.asOf}: ${rd.ready} ready, ${rd.flagged} needing attention, ${rd.oos} out of service of ${rd.total} apparatus. `
+    // WS-4b: ready is STRICT (passed, checked, not overdue \u2014 shared/apparatus-status.js); never checked is its own bucket.
+    para(`As of ${rd.asOf}: ${rd.ready} ready, ${rd.flagged} needing attention, ${rd.neverChecked ?? 0} never checked, ${rd.oos} out of service of ${rd.total} apparatus. `
       + `${rd.openFailures} check failure${rd.openFailures === 1 ? "" : "s"} remain${rd.openFailures === 1 ? "s" : ""} unresolved.`);
     const rigRows = [
       ...rd.flaggedRigs.map((r) => [r.name || "\u2014", "Needs attention", r.note || "\u2014"]),
+      ...(rd.neverCheckedRigs || []).map((r) => [r.name || "\u2014", "Never checked", r.note || "\u2014"]),
       ...rd.oosRigs.map((r) => [r.name || "\u2014", "Out of service", r.note || "\u2014"]),
     ];
     if (rigRows.length) {
       table(["Apparatus", "Status", "Reason on record"], rigRows,
         { badgeCol: 1, columnStyles: { 0: { fontStyle: "bold" }, 1: { cellWidth: 96 } } });
-    } else { para("Every apparatus is in service and passing its last check.", GRAY); y += 8; }
+    } else { para("Every apparatus is in service, checked, and passing its last check.", GRAY); y += 8; }
   }
 
   // ---------- Equipment Readiness (AS OF TODAY) ----------

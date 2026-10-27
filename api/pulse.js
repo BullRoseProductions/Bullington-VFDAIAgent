@@ -600,12 +600,13 @@ export default async function handler(req, res) {
      governance-only and is deliberately not buzzed about a pump test; Project Admin is excluded. */
   try {
     const { data: maintRows, error: mErr } = await sb.from("apparatus_maintenance")
-      .select("id, department_id, task, cadence, last_done_at, apparatus(name)");
+      .select("id, department_id, task, cadence, last_done_at, apparatus(name, deleted_at)");
     if (mErr) throw new Error(mErr.message);
 
     const byDept = new Map();
     for (const r of maintRows || []) {
       if (!r.department_id) continue;
+      if (r.apparatus?.deleted_at) continue;   // WS-4b (A-2): a RETIRED rig's task is not overdue — the app and the weekly email drop it too
       if (!byDept.has(r.department_id)) byDept.set(r.department_id, []);
       byDept.get(r.department_id).push(r);
     }
