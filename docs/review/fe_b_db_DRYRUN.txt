@@ -1,0 +1,91 @@
+pins: 14/15 mock bodies md5-equal to the live pins; differing: ["public.my_department_rollup()"]
+   (my_department_rollup is a stub in the mock: its pin re-pointed 7f9723c9… -> d3372b7c… for this run only)
+migration: applied. state row: {"rpcs":["assign_event_need anon=false auth=true","claim_event_need anon=false auth=true","remove_event_need_claim anon=false auth=true","tg_event_needs_guard anon=false auth=false","unclaim_event_need anon=false auth=true"],"fn_count":20,"event_needs":true,"id_dept_keys":2,"new_policies":5,"total_policies":17,"event_need_claims":true,"verified_presence":3,"anon_on_new_tables":false,"claims_write_grant":false,"recruitment_events":2,"action_items_linked":0,"event_type_null_rows":2}
+re-run: refused -> PREFLIGHT: event_needs / event_need_claims already exist — FE-B-DB looks applied. Refusing.
+RETEST:
+PASS  O1 privileges: 4 RPCs definer + authenticated-only; guard executable by no one
+PASS  O2 new tables: RLS; needs 4 policies + S/I/U/D; claims 1 SELECT policy, read-only; anon nothing
+PASS  O3 the 15 pinned functions are byte-identical
+PASS  O4 event_type CHECK (6 types, nullable); (id, department_id) keys; action_items composite FK SET NULL (link)
+PASS  O5 no existing row touched (2 community events all event_type NULL; no job linked)
+— Indian Harbor (mock)
+   (leader = a fixture Department Admin; other department for cross-checks: North Hood (mock))
+   PASS  T1 needs: DA + Officer add (created_by = self); Board / PA / Member refused; Member + Board touch 0 rows
+   PASS  T2 shape: two / no parent, another department's event, slots 0 / 51, end < start — all refused
+   PASS  T3 claim: signed up (taken 1, claimed_by = self); again ALREADY; last slot gone FULL; Inactive NO_MEMBER
+   PASS  T4 claim + assign lock the need row FOR UPDATE before counting
+   PASS  T5 unclaim: own row gone (taken 0); again NOT_SIGNED_UP; the freed slot taken by another member
+   PASS  T6 window: today's event open; yesterday's CLOSED for claim / unclaim / assign / remove
+   PASS  T7 assign / remove: Officer assigns (claimed_by = Officer) + removes; Member / Board / PA NOT_ALLOWED; other-dept / Inactive NOT_IN_DEPT; full FULL
+   PASS  T8 sign-ups: a member with none of their own sees all 4 in the department; another department sees 0; no direct INSERT / DELETE
+   PASS  T9 another department's need / sign-up: NOT_FOUND for claim / assign / remove; not readable
+   PASS  T10 guard: slots below sign-ups SLOTS_BELOW_CLAIMS; raising + relabelling fine; moving PARENT_LOCKED
+   PASS  T11 jobs: DA links one; cross-department refused; complete works; event delete keeps the job (link NULL), drops needs + sign-ups
+   PASS  T12 deleting a fundraiser event removes its needs + sign-ups
+   PASS  T13 station_presence byte-identical; verified count 3 unchanged
+— North Hood (mock)
+   (leader = a REAL Department Admin; other department for cross-checks: Indian Harbor (mock))
+   PASS  T1 needs: DA + Officer add (created_by = self); Board / PA / Member refused; Member + Board touch 0 rows
+   PASS  T2 shape: two / no parent, another department's event, slots 0 / 51, end < start — all refused
+   PASS  T3 claim: signed up (taken 1, claimed_by = self); again ALREADY; last slot gone FULL; Inactive NO_MEMBER
+   PASS  T4 claim + assign lock the need row FOR UPDATE before counting
+   PASS  T5 unclaim: own row gone (taken 0); again NOT_SIGNED_UP; the freed slot taken by another member
+   PASS  T6 window: today's event open; yesterday's CLOSED for claim / unclaim / assign / remove
+   PASS  T7 assign / remove: Officer assigns (claimed_by = Officer) + removes; Member / Board / PA NOT_ALLOWED; other-dept / Inactive NOT_IN_DEPT; full FULL
+   PASS  T8 sign-ups: a member with none of their own sees all 4 in the department; another department sees 0; no direct INSERT / DELETE
+   PASS  T9 another department's need / sign-up: NOT_FOUND for claim / assign / remove; not readable
+   PASS  T10 guard: slots below sign-ups SLOTS_BELOW_CLAIMS; raising + relabelling fine; moving PARENT_LOCKED
+   PASS  T11 jobs: DA links one; cross-department refused; complete works; event delete keeps the job (link NULL), drops needs + sign-ups
+   PASS  T12 deleting a fundraiser event removes its needs + sign-ups
+   PASS  T13 station_presence byte-identical; verified count 3 unchanged
+31 passed, 0 failed, 0 skipped
+drift "a gate drifted (is_canmanage_ops adds Board)": refused -> PREFLIGHT: public.is_canmanage_ops() has drifted (live md5 e9bc778be93ae48a183251314b29a94f, pinned 92fa180343748968dff96fa044b0420d). Re-audit.
+drift "an event policy drifted": refused -> PREFLIGHT: policy "leaders write recruitment_events" on recruitment_events is not the audited text. Re-audit.
+drift "event_needs already exists": refused -> PREFLIGHT: event_needs / event_need_claims already exist — FE-B-DB looks applied. Refusing.
+mutations:
+   M1 claims get an INSERT grant: migration REFUSED -> POST: the new tables' RLS / grants are wrong (anon must have nothing; claims are RPC-only writes).
+   M2 anon keeps its default grants on event_needs: migration REFUSED -> POST: the new tables' RLS / grants are wrong (anon must have nothing; claims are RPC-only writes).
+   M3 needs write gate widened to is_canmanage() (Board):
+      FAIL  T1 needs write gate: insert-accepted:febrt-00000000-board@retest.invalid
+      FAIL  T1 needs write gate: insert-accepted:febrt-00000000-board@retest.invalid
+      29 passed, 2 failed, 0 skipped
+   M4 claim without FOR UPDATE:
+      FAIL  T4 no FOR UPDATE on the need row
+      FAIL  T4 no FOR UPDATE on the need row
+      29 passed, 2 failed, 0 skipped
+   M5 claim lets the last slot overfill (> not >=):
+      FAIL  T3 claim: full:ACCEPTED
+      FAIL  T5 unclaim: taken:{"taken": 1, "need_id": "2a9da5a7-0b45-4f31-a52a-10b3f1637678", "slots_needed": 1} freed-slot:ALREADY: you are already signed up for this.
+      FAIL  T3 claim: full:ACCEPTED
+      FAIL  T5 unclaim: taken:{"taken": 1, "need_id": "9495f48f-9239-4636-9162-057edeb531ec", "slots_needed": 1} freed-slot:ALREADY: you are already signed up for this.
+      27 passed, 4 failed, 0 skipped
+   M6 no date window on claim:
+      FAIL  T6 window: past-claim:ALREADY: you are already signed up for this.
+      FAIL  T6 window: past-claim:ALREADY: you are already signed up for this.
+      29 passed, 2 failed, 0 skipped
+   M7 assign accepts any member (no dept check):
+      FAIL  T7 assign / remove: other-dept-member:FULL: every slot for this is taken. inactive:FULL: every slot for this is taken.
+      FAIL  T7 assign / remove: other-dept-member:FULL: every slot for this is taken. inactive:FULL: every slot for this is taken.
+      29 passed, 2 failed, 0 skipped
+   M8 assign open to every member (no gate):
+      FAIL  T7 assign / remove: febrt-00000000-m1@retest.invalid:FULL: every slot for this is taken. febrt-00000000-board@retest.invalid:FULL: every slot for this is taken. febrt-00000000-pa@retest.invalid:FULL: every slot for this is taken.
+      FAIL  T7 assign / remove: febrt-00000000-m1@retest.invalid:FULL: every slot for this is taken. febrt-00000000-board@retest.invalid:FULL: every slot for this is taken. febrt-00000000-pa@retest.invalid:FULL: every slot for this is taken.
+      29 passed, 2 failed, 0 skipped
+   M9 plain FK on action_items (no department): migration REFUSED -> POST: the (id, department_id) keys / the action_items link are not as intended.
+   M10 one-parent CHECK dropped:
+      FAIL  T2 needs shape accepted: two-parents no-parent
+      FAIL  T2 needs shape accepted: two-parents no-parent
+      29 passed, 2 failed, 0 skipped
+   M11 claims readable by leaders only (FE5.2 reverted):
+      FAIL  T8 sign-up visibility / writes: member-sees:0-of-4
+      FAIL  T8 sign-up visibility / writes: member-sees:0-of-4
+      29 passed, 2 failed, 0 skipped
+   M12 guard lets slots drop below sign-ups:
+      FAIL  T10 guard: below:ACCEPTED
+      FAIL  T10 guard: below:ACCEPTED
+      29 passed, 2 failed, 0 skipped
+   M13 a pre-existing function is touched: migration REFUSED -> POST: a pre-existing function (or its ACL) changed — it must not.
+   M14 remove open to every member:
+      FAIL  T7 assign / remove: member-remove:ACCEPTED officer-remove:NOT_FOUND: that sign-up is not in your department.
+      FAIL  T7 assign / remove: member-remove:ACCEPTED officer-remove:NOT_FOUND: that sign-up is not in your department.
+      29 passed, 2 failed, 0 skipped
