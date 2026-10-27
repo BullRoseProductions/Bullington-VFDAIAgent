@@ -268,15 +268,16 @@ const eqPage = fnBody(src, "function Equipment(");
 ok("F-4: Equipment 'need attention' (chip + per category) = units with an OPEN issue, not condition ≠ Serviceable",
   eqPage.includes("const flagged = issuesKnown ? allUnits.filter((u) => issuesByEq.get(u.id) > 0).length : null;") && !eqPage.includes('const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;')
   && eqPage.includes("attn: issuesKnown ? cr.filter((r) => issuesByEq.get(r.u.id) > 0 && r.g.rank !== 0).length : 0"), eqPage ? "" : "Equipment() not found");
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const untracked = execSync("git ls-files --others --exclude-standard -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const all = [...new Set([...changed, ...untracked])].sort();
+// The DELTA fences are PINNED to WS-4b's own reviewed range (734dc71 = main before it, .. 1319a3e = the code commit
+// 747269d + Ashlea's rename; released in industrial-noir-38): "vs origin/main" goes red once the slice is on main.
+const BASE = "734dc71", REL = "1319a3e";
+const all = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
 const RUNTIME = ["api/digest.js", "api/pulse.js", "shared/apparatus-status.js", "shared/attendance.js", "src/App.jsx", "src/report.js"];
-ok("runtime files changed vs origin/main = App.jsx, report.js, digest.js, pulse.js + the two new shared helpers", JSON.stringify(all) === JSON.stringify(RUNTIME), JSON.stringify(all));
+ok("WS-4b (734dc71..1319a3e) runtime files = App.jsx, report.js, digest.js, pulse.js + the two new shared helpers", JSON.stringify(all) === JSON.stringify(RUNTIME), JSON.stringify(all));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)", tok(src) === 132 && tok(dig) === 32 && tok(readFileSync(join(root, "api/assistant.js"), "utf8")) === 14, `${tok(src)} · ${tok(dig)}`);
-const added = execSync("git diff origin/main -- src api shared", { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-ok("no station_presence write added (no added line touches it)", !added.some((l) => l.includes("station_presence")));
+const added = execSync(`git diff ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+ok("WS-4b (734dc71..1319a3e) added no station_presence write (no added line touches it)", !added.some((l) => l.includes("station_presence")));
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
