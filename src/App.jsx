@@ -3944,6 +3944,90 @@ function StationFundraiserCard({ style }) {
     </div>
   );
 }
+/* FE-C — MEMBERS SIGN UP FOR EVENT NEEDS (claude/B4C_FundingEvents_Redesign_Step0_ReviewRecord.md, FE8).
+   Members never reach Funding & Events, so the sign-up lives where they already see events: the dashboard calendar's
+   event detail, and the "Needs hands" card. Sign up = claim_event_need (MYSELF, one slot; the DB locks the need row so the
+   last slot can't be taken twice — FULL); "Can't make it" = unclaim_event_need (my own row only). Both are refused after
+   the event's day (CLOSED, FE5.4). Every member sees who signed up (FE5.2). Nothing here writes a table directly. */
+function NeedsSignup({ needs, claims, meId, members, past, notify, onChanged, onlyOpen }) {
+  const nameOf = (id) => (id === meId ? "You" : (members || []).find((m) => m.id === id)?.name || "A member");
+  const [busy, setBusy] = useState(null);
+  async function act(fn, n) {
+    setBusy(n.id);
+    const { error } = await supabase.rpc(fn, { p_need_id: n.id });
+    setBusy(null);
+    if (error) { notify?.({ kind: "error", title: fn === "claim_event_need" ? "Couldn't sign you up" : "Couldn't take you off", text: rpcText(error), details: error.message }); onChanged?.(); return; }
+    notify?.({ kind: "success", text: fn === "claim_event_need" ? `You're signed up for ${n.role_label}.` : `You're off ${n.role_label}.` });
+    onChanged?.();
+  }
+  const shown = (needs || []).filter((n) => {
+    if (!onlyOpen) return true;
+    const cs = (claims || []).filter((c) => c.need_id === n.id);
+    return cs.length < n.slots_needed || cs.some((c) => c.member_id === meId);
+  });
+  return (
+    <div data-testid="needs-signup" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {shown.map((n) => {
+        const cs = (claims || []).filter((c) => c.need_id === n.id), mine = cs.find((c) => c.member_id === meId), full = cs.length >= n.slots_needed;
+        return (
+          <div key={n.id} data-testid="signup-row" style={{ ...NOIR_INSET, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary }}>{n.role_label} <span style={{ fontWeight: 400, fontSize: 12, color: full ? FIRE.greenText : FIRE.textSecondary }}>{Math.min(cs.length, n.slots_needed)} of {n.slots_needed}</span>
+                {(n.start_time || n.end_time) && <span style={{ fontWeight: 400, fontSize: 12, color: FIRE.textMuted }}> · {eventTimeRange(n.start_time, n.end_time)}</span>}</div>
+              {cs.length > 0 && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2 }}>{cs.map((c) => nameOf(c.member_id)).join(", ")}</div>}
+              {n.notes && <div style={{ fontSize: 11.5, color: FIRE.textSecondary, marginTop: 2 }}>{n.notes}</div>}
+            </div>
+            {mine
+              ? (past ? <span style={{ fontSize: 12, color: FIRE.greenText, fontWeight: 600 }}>You were signed up</span>
+                : <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 12, color: FIRE.greenText, fontWeight: 600 }}>You're signed up</span>
+                  <button data-testid="unclaim" style={{ ...FS.btn, padding: "4px 10px", fontSize: 12 }} onClick={() => act("unclaim_event_need", n)} disabled={busy === n.id}>Can't make it</button></span>)
+              : past ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>Closed</span>
+              : full ? <span style={{ fontSize: 12, color: FIRE.textMuted }}>Full</span>
+              : <button data-testid="claim" style={{ ...FS.btnPrimary, padding: "5px 12px", fontSize: 12.5, opacity: busy === n.id ? 0.7 : 1 }} onClick={() => act("claim_event_need", n)} disabled={busy === n.id}>{busy === n.id ? <Loader2 size={13} className="spin" /> : null} Sign up</button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+// "Needs hands": the next few upcoming events that still have open slots (or that I'm on), with one-tap sign-up.
+// Shows nothing at all when no upcoming event needs anyone — no empty card on a quiet month.
+function NeedsHandsCard({ meId, members, notify, style }) {
+  const ev = useEventNeeds();
+  const [events, setEvents] = useState(null);
+  const loadEvents = () => Promise.all([
+    supabase.from("recruitment_events").select("id, title, date, start_time"),
+    supabase.from("funding_events").select("id, title, date, start_time"),
+  ]).then(([r, f]) => {
+    if (r.error || f.error || !Array.isArray(r.data) || !Array.isArray(f.data)) return;   // failed read: keep last-known (nothing on first load)
+    setEvents([...r.data.map((x) => ({ ...x, key: `community-${x.id}` })), ...f.data.map((x) => ({ ...x, key: `fundraiser-${x.id}` }))]);
+  });
+  useEffect(() => { loadEvents(); }, []);
+  const todayIso = toISO(new Date());
+  const rows = (events || []).filter((e) => e.date >= todayIso).map((e) => {
+    const needs = ev.byEvent.get(e.key) || [];
+    const ids = new Set(needs.map((n) => n.id)); const claims = ev.claims.filter((c) => ids.has(c.need_id));
+    const open = needs.some((n) => claims.filter((c) => c.need_id === n.id).length < n.slots_needed);
+    const mine = claims.some((c) => c.member_id === meId);
+    return { e, needs, claims, show: needs.length > 0 && (open || mine) };
+  }).filter((x) => x.show).sort((a, b) => a.e.date.localeCompare(b.e.date) || String(a.e.start_time || "").localeCompare(String(b.e.start_time || ""))).slice(0, 3);
+  if (rows.length === 0) return null;
+  return (
+    <div data-testid="needs-hands" style={{ ...FS.cardNoir, borderRadius: 14, padding: "14px 16px", marginBottom: 10, ...style }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: FIRE.catGreen, marginBottom: 8 }}>Needs hands</div>
+      {rows.map(({ e, needs, claims }) => (
+        <div key={e.key} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+            <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 16, color: FIRE.textPrimary }}>{e.title}</span>
+            <span style={{ fontSize: 12, color: FIRE.textMuted }}>{localDayLabel(e.date)}{e.start_time ? ` · ${fmtTime(e.start_time)}` : ""}</span>
+            <CoverageChip cov={needCoverage(needs, claims)} testid="hands-coverage" />
+          </div>
+          <NeedsSignup needs={needs} claims={claims} meId={meId} members={members} past={false} notify={notify} onChanged={() => ev.reload()} onlyOpen />
+        </div>
+      ))}
+    </div>
+  );
+}
 function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers are derived inside DeptHealthCharts — the SAME component the DA dashboard renders.
@@ -3994,6 +4078,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
         <ActionItemsCard meId={meId} go={go} />
       </div>
       <StationFundraiserCard style={{ marginTop: -4, marginBottom: 14 }} />
+      <NeedsHandsCard meId={meId} members={members} notify={notify} style={{ marginBottom: 14 }} />
 
       {/* DEPARTMENT HEALTH — each number on its own. The blended readiness ring is gone: it averaged
           unlike things (a 0% cert, a 42% attendance, a "no duties" n/a) into one figure nobody could act on. */}
@@ -4016,7 +4101,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
         </div>
       </div>
       </NoirSkin>
@@ -4165,10 +4250,11 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
       </div>
       <StationFundraiserCard style={{ marginTop: 8 }} />
+      <NeedsHandsCard meId={meId} members={members} notify={notify} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
         </div>
       </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
@@ -4468,6 +4554,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
         <NextLeadershipEventTile S={S} sessions={sessions} role={role} notify={notify} />
       </div>
       <StationFundraiserCard style={{ marginTop: 8 }} />
+      <NeedsHandsCard meId={meId} members={members} notify={notify} />
       <ActionItemsCard meId={meId} go={go} style={{ marginTop: 8, marginBottom: 8 }} />
       {/* Officers get the same personal strip Dept Admins already had — an Officer is a firefighter with
           their own certs, hours and drills, and had no route to them from this dashboard before.
@@ -4489,7 +4576,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
         </div>
       </div>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
@@ -5037,6 +5124,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
       <ReadSignCard go={go} />
       {/* A fundraiser your officers shared with the station (renders nothing when none is shared) */}
       <StationFundraiserCard />
+      <NeedsHandsCard meId={meId} members={members} notify={notify} />
       {/* Your upcoming expirations (my_expirations) — certs, credentials, assigned gear; hidden when there are none */}
       <MyExpirationsCard />
       {/* 2 — stat row: 2 boxes (attendance+training merged | next event) */}
@@ -5137,7 +5225,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <Card padding={16}>
-            <DashboardCalendar S={S} notify={notify} />
+            <DashboardCalendar S={S} notify={notify} meId={meId} members={members} />
           </Card>
         </div>
       </div>
@@ -8217,8 +8305,9 @@ function EventsCalendar({ S, role, notify, members }) {
 const SOURCE_COLORS = { social: FIRE.red, training: FIRE.catBlue, recruit: FIRE.catGreen, funding: FIRE.catAmber, actionitem: FIRE.catViolet };
 const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
 const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
-function DashboardCalendar({ S, notify, withImportanceMode }) {
+function DashboardCalendar({ S, notify, withImportanceMode, meId, members }) {
   const today = new Date();
+  const ev = useEventNeeds();   // FE-C: needs + sign-ups → coverage on event chips + Sign up in the event detail
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -8257,8 +8346,8 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
             .slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))   // newest-first, matching Training's loadSessions
             .map((p) => ({ id: p.id, title: p.title, storage_path: p.storage_path, ai_text: p.ai_text, source: p.source, session_id: r.id, kind: p.storage_path ? "file" : "ai" })),
         })),
-        ...mapRows(recruit, "recruit", (r) => r.title),
-        ...mapRows(funding, "funding", (r) => r.title),
+        ...mapRows(recruit, "recruit", (r) => r.title, (r) => ({ title: r.title, evKey: `community-${r.id}`, date: r.date })),
+        ...mapRows(funding, "funding", (r) => r.title, (r) => ({ title: r.title, evKey: `fundraiser-${r.id}`, date: r.date })),
         ...actionRows,
       ]);
     });
@@ -8328,7 +8417,9 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
         <MonthCalendar
           cur={cur} setCur={setCur} dark tiles card
           items={monthItems}
-          renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length; return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, dashed: restricted, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label, title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
+          renderChip={(it) => { const restricted = it.source === "training" && isRestrictedEvent(it); const isBoardEvt = it.audience === "board"; const hasPlan = it.source === "training" && (it.plans || []).length;
+            const cov = it.evKey ? needCoverage(ev.byEvent.get(it.evKey) || [], ev.claims) : null;   // FE-C: "· 2/5" on events that need hands
+            return { color: restricted ? (isBoardEvt ? FIRE.blueText : FIRE.amberText) : it.color, dashed: restricted, label: (it.startTime ? `${fmtTime(it.startTime)} · ` : "") + it.label + (cov && cov.slots ? ` · ${cov.taken}/${cov.slots}` : ""), title: `${restricted ? (isBoardEvt ? "Board only · " : "Leadership only · ") : ""}${it.label}${cov && cov.slots ? ` · needs: ${cov.taken} of ${cov.slots} covered` : ""} · click for details${hasPlan ? " + plan" : ""}`, ...(filter === "all" ? { tier: it.tier } : {}), onClick: () => setDetailEvent(it) }; }}
           todayColor={FIRE.red}
           monthLabel={`${CAL_MONTHS[cur.m]} ${cur.y}`}
           overflowIndicator
@@ -8361,6 +8452,17 @@ function DashboardCalendar({ S, notify, withImportanceMode }) {
                 {isTraining && (hasPlans
                   ? <button style={{ ...FS.btnPrimary, alignSelf: "flex-start", marginTop: 4 }} onClick={() => { openSessionPlans(it); setDetailEvent(null); }}><FileText size={15} /> View plan</button>
                   : <div style={{ fontSize: 13, color: FIRE.textMuted, marginTop: 2 }}>No plan attached yet.</div>)}
+                {it.evKey && (() => {   // FE-C: a community / fundraiser event with needs → who's going + Sign up / Can't make it
+                  const needs = ev.byEvent.get(it.evKey) || [];
+                  if (!needs.length) return null;
+                  const ids = new Set(needs.map((n) => n.id)), claims = ev.claims.filter((c) => ids.has(c.need_id));
+                  const past = it.date < toISO(new Date());
+                  return (<div style={{ borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 10, marginTop: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><span style={{ ...NOIR_LABEL, margin: 0 }}>Needs hands</span><CoverageChip cov={needCoverage(needs, claims)} /></div>
+                    <NeedsSignup needs={needs} claims={claims} meId={meId} members={members} past={past} notify={notify} onChanged={() => ev.reload()} />
+                    {past && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 4 }}>This event has passed — sign-ups are closed.</div>}
+                  </div>);
+                })()}
               </div>
             </div>
           </div>
