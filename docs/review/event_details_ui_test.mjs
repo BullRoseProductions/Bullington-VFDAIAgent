@@ -4,7 +4,7 @@
 //   1. the union: both tables load, each item tagged by kind; the chip leads with the start time; a time-less event is "All day"
 //   2. the gate: Add + Edit = Department Admin / Officer (CANMANAGE_OPS_ROLES); Delete also needs the typed-delete gate
 //      (DA / PA) — so DA only; a Project Admin and a plain member see neither; everyone can open the detail
-//   3. the add form: the type toggle routes the insert to the right table; "Part of a fundraiser" only on Fundraiser;
+//   3. the add form: the type (FE-A: tiles, picked first) routes the insert to the right table; "Part of a fundraiser" only on Fundraiser;
 //      the new fields are written; end < start is refused; a quick date-only add sends nulls
 //   4. E1: edit + delete read back the row count — 0 rows is an error, never a silent success
 //   5. the source: no tap-to-delete / "(tap to remove)" left; the Recruitment page no longer mounts a calendar; the
@@ -144,9 +144,12 @@ for (const [who, role, cds, add, edit, del] of [
 
 // 3. the add form
 { const { host, unmount } = await mount(["Officer"], false);
+  // FE-A: "Add an event" opens the type tiles first — no default kind, no form until one is picked.
   await click(btn(host, "Add an event"));
-  ok("add form: Fundraiser is the default and shows 'Part of a fundraiser'", !!field(host, "Part of a fundraiser"));
-  await click(btn(host, "Community event"));
+  ok("add: the type tiles come first, no form yet (FE-A)", !!btn(host, "Fundraiser event") && !!btn(host, "Community event") && !field(host, "Title"));
+  await click(btn(host, "Fundraiser event"));
+  ok("add form: Fundraiser event shows 'Part of a fundraiser'", !!field(host, "Part of a fundraiser"));
+  await click(btn(host, "Change type")); await click(btn(host, "Community event"));
   ok("add form: Community event hides 'Part of a fundraiser'", !field(host, "Part of a fundraiser"));
   await setVal(field(host, "Title"), "Booth at the market");
   await setVal(field(host, "Day"), "20");
@@ -160,7 +163,7 @@ for (const [who, role, cds, add, edit, del] of [
   ok("community add -> recruitment_events with the new fields, no fundraiser_id", ins && ins.table === "recruitment_events" && ins.row.start_time === "10:00" && ins.row.end_time === "13:00"
      && ins.row.location_label === "Farmers market" && ins.row.notes === "Bring the sign-up sheet" && !("fundraiser_id" in ins.row) && ins.row.date === `${ym}-20` && ins.row.department_id === "dept-1", JSON.stringify(ins?.row));
   globalThis.__sb.calls = [];
-  await click(btn(host, "Add an event"));
+  await click(btn(host, "Add an event")); await click(btn(host, "Fundraiser event"));
   await setVal(field(host, "Title"), "Raffle"); await setVal(field(host, "Part of a fundraiser"), "fr1");
   await click(btn(host, "Add to")); await tick();
   const ins2 = globalThis.__sb.calls.find((c) => c.op === "insert");
@@ -195,7 +198,7 @@ const src = readFileSync(join(root, "src/App.jsx"), "utf8");
 const main = execSync("git show origin/main:src/App.jsx", { cwd: root, maxBuffer: 1 << 27 }).toString();
 const body = (s, name) => { const i = s.indexOf(`function ${name}(`); if (i < 0) return null; let j = s.indexOf("\nfunction ", i + 10); const k = s.indexOf("\nconst ", i + 10); if (k > 0 && k < j) j = k; return s.slice(i, j); };
 const ev = body(src, "EventsCalendar");
-ok("the old two calendars are gone; one EventsCalendar mounted on Fundraisers", !src.includes("function RecruitmentCalendar(") && !src.includes("function FundingCalendar(") && (src.match(/<EventsCalendar /g) || []).length === 1 && src.includes("FUNDRAISING &amp; COMMUNITY EVENTS"));
+ok("the old two calendars are gone; one EventsCalendar mounted (on the Funding & Events hub since FE-A)", !src.includes("function RecruitmentCalendar(") && !src.includes("function FundingCalendar(") && (src.match(/<EventsCalendar /g) || []).length === 1 && src.includes("FUNDRAISING &amp; COMMUNITY EVENTS"));
 const rec = body(src, "Recruitment");
 ok("Recruitment page: no calendar mounted; planner, ideas, Graphic Studio, saved drafts kept", rec && !/<(EventsCalendar|MonthCalendar|RecruitmentCalendar)\b/.test(rec) && rec.includes("<RecruitmentPlanView") && rec.includes("<IdeaGrid") && rec.includes("<GraphicStudio") && rec.includes("Saved drafts"));
 ok("no tap-to-delete wording left anywhere in the new calendar", ev && !/tap to remove|tap an event to remove/.test(ev));
