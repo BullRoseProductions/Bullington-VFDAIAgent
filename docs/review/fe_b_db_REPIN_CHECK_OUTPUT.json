@@ -1,0 +1,11 @@
+{
+ "pins_ok": 15,
+ "fn_count": 220,
+ "pins_total": 15,
+ "pins_drifted": [],
+ "fe_b_names_clear": true,
+ "verified_presence": 959,
+ "policy_snapshot_md5": "d3ab075a95d792687d94a187798bbfff",
+ "total_public_policies": 175,
+ "event_and_action_policies": 11
+}
