@@ -1,0 +1,77 @@
+pins: 10/10 mock bodies md5-equal to the live pins (all live bodies, no stubs) 
+migration: applied. state row: {"rpcs":["library_drill_usage anon=false auth=true","pull_library_drill anon=false auth=true"],"codes":["EMS-114","EMS-203","FIRE-118","FIRE-203","LEAD-140","OPS-120"],"fn_count":12,"library_drills":{"seed/published":6},"library_policies":1,"verified_presence":2,"total_public_policies":2,"drill_plans_source_chk":"CHECK ((source = ANY (ARRAY['ai'::text, 'manual'::text, 'library'::text])))","origin_dept_selectable":false}
+re-run: refused -> PREFLIGHT: library_drills already exists — slice 1 looks applied. Refusing.
+RETEST:
+PASS  O1 library_drills: RLS, one published-only SELECT policy; anon nothing; origin_department_id unselectable; no writes
+PASS  O2 the 6 seed packets are published with the drill_plans content keys
+PASS  O3 pull + usage: SECURITY DEFINER, authenticated-only
+PASS  O4 drill_plans source = ai|manual|library; library_id ⇒ source library
+— Alpha (mock)
+   (leader = a REAL Department Admin)
+   PASS  T1 a member reads the published catalog only; origin_department_id refused; anon refused
+   PASS  T2 pull: DA + training officer copy a draft (source library, snapshot content); second ALREADY_PULLED; unpublished NOT_FOUND; Officer / Board / PA / Member NOT_ALLOWED
+   PASS  T3 the pulled draft edits (source + link kept) and approves like any drill plan
+   PASS  T4 used = finalized + attended only (1 held, 1 department); upcoming / unattended not counted; a non-member gets nothing
+   PASS  T5 another department can't see this copy and pulls its own
+   PASS  T6 a deleted copy can be pulled again
+   PASS  T7 station_presence byte-identical; verified count 2 unchanged
+— Bravo (mock)
+   (leader = a fixture Department Admin)
+   PASS  T1 a member reads the published catalog only; origin_department_id refused; anon refused
+   PASS  T2 pull: DA + training officer copy a draft (source library, snapshot content); second ALREADY_PULLED; unpublished NOT_FOUND; Officer / Board / PA / Member NOT_ALLOWED
+   PASS  T3 the pulled draft edits (source + link kept) and approves like any drill plan
+   PASS  T4 used = finalized + attended only (1 held, 1 department); upcoming / unattended not counted; a non-member gets nothing
+   PASS  T5 another department can't see this copy and pulls its own
+   PASS  T6 a deleted copy can be pulled again
+   PASS  T7 station_presence byte-identical; verified count 2 unchanged
+18 passed, 0 failed, 0 skipped
+drift "is_training_manager() drifted": refused -> PREFLIGHT: public.is_training_manager() is missing or has drifted (pinned 472b87b0abca586ba0a13cd615b376fe). Re-audit.
+drift "drill_plans gained a write policy": refused -> PREFLIGHT: drill_plans policies are not the audited single SELECT. Re-audit.
+drift "source CHECK already widened": refused -> PREFLIGHT: drill_plans_source_chk is not the audited text. Re-audit.
+mutations:
+   M1 catalog readable by anon: migration REFUSED -> POST: library_drills grants / policy not as intended.
+   M2 origin_department_id selectable: migration REFUSED -> POST: library_drills grants / policy not as intended.
+   M3 unpublished drills readable:
+      FAIL  O1 library_drills RLS / grants
+      FAIL  T1 catalog read: member-sees:8/unpublished:2
+      15 passed, 3 failed, 0 skipped
+   M4 pull open to every member:
+      FAIL  T2 pull: accepted:libs1-00000000-off libs1-00000000-board:ALREADY_PULLED: that drill is already in your plans. libs1-00000000-pa:ALREADY_PULLED: that drill is already in your plans. libs1-00000000-mem:ALREADY_PULLED: that drill is already in your plans.
+      FAIL  T2 pull: accepted:libs1-00000000-off libs1-00000000-board:ALREADY_PULLED: that drill is already in your plans. libs1-00000000-pa:ALREADY_PULLED: that drill is already in your plans. libs1-00000000-mem:ALREADY_PULLED: that drill is already in your plans.
+      16 passed, 2 failed, 0 skipped
+   M5 pull lands approved (skips the officer):
+      FAIL  T2 pull: copy-wrong
+      FAIL  T2 pull: copy-wrong
+      16 passed, 2 failed, 0 skipped
+   M6 pull allows duplicates:
+      FAIL  T2 pull: second:ACCEPTED
+      FAIL  T2 pull: second:ACCEPTED
+      16 passed, 2 failed, 0 skipped
+   M7 pull of unpublished drills:
+      FAIL  T2 pull: unpublished:ACCEPTED
+      FAIL  T2 pull: unpublished:ACCEPTED
+      16 passed, 2 failed, 0 skipped
+   M8 usage counts unattended sessions:
+      FAIL  T4 usage: usage:2/1 (want 1/1)
+      FAIL  T4 usage: usage:2/1 (want 1/1)
+      16 passed, 2 failed, 0 skipped
+   M9 usage for anyone (no member check):
+      FAIL  T4 usage: stranger-sees:1
+      FAIL  T4 usage: stranger-sees:1
+      16 passed, 2 failed, 0 skipped
+   M10 a pre-existing function touched: migration REFUSED -> POST: a pre-existing function (or its ACL) changed — it must not.
+post-apply drift (RETEST alone must catch):
+   D1 anon granted SELECT later:
+      FAIL  O1 library_drills RLS / grants
+      FAIL  T1 catalog read: anon:READ
+      15 passed, 3 failed, 0 skipped
+   D2 policy loosened to every row:
+      FAIL  O1 library_drills RLS / grants
+      FAIL  T1 catalog read: member-sees:8/unpublished:2
+      15 passed, 3 failed, 0 skipped
+   D3 a seed packet withdrawn:
+      FAIL  O2 seed packets: 5 of 6
+      17 passed, 1 failed, 0 skipped
+   D4 source CHECK reverted (no 'library'):
+      FAIL  O4 drill_plans CHECKs
+      17 passed, 1 failed, 0 skipped

@@ -1,0 +1,90 @@
+{
+ "defs": {
+  "approve_drill_plan(uuid)": {
+   "def": "CREATE OR REPLACE FUNCTION public.approve_drill_plan(p_id uuid)\n RETURNS drill_plans\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 approve a plan in the caller's OWN department. Self-approval allowed (a lesson plan, not a custody\n  -- attestation). Already approved: returned unchanged.\n  declare v_dept uuid := public.my_department_id(); v_row public.drill_plans;\n  begin\n    if v_dept is null or not coalesce(public.is_training_manager(), false) then\n      raise exception 'Only a Department Admin or training officer can approve drill plans.';\n    end if;\n    select * into v_row from public.drill_plans where id = p_id and department_id = v_dept for update;\n    if not found then raise exception 'That drill plan is not in your department.'; end if;\n    if v_row.status = 'approved' then return v_row; end if;\n    update public.drill_plans set status = 'approved', approved_by = public.my_member_id(), approved_at = now()\n     where id = p_id returning * into v_row;\n    return v_row;\n  end;\n  $function$\n",
+   "md5": "a01c872bc14561fcb633796353a4b694"
+  },
+  "attach_drill_plan_to_session(uuid,uuid)": {
+   "def": "CREATE OR REPLACE FUNCTION public.attach_drill_plan_to_session(p_plan_id uuid, p_session_id uuid)\n RETURNS session_plans\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 attach a library plan to a training session in the caller's OWN department, as an ordinary\n  -- session_plans row (the existing View plan renders its ai_text). One attachment per (session, plan).\n  declare v_dept uuid := public.my_department_id(); v_p public.drill_plans; v_row public.session_plans;\n          v_c jsonb; v_who text; L text[] := array[]::text[]; s jsonb; i int := 0;\n  begin\n    if v_dept is null or not coalesce(public.is_training_manager(), false) then\n      raise exception 'Only a Department Admin or training officer can attach drill plans.';\n    end if;\n    select * into v_p from public.drill_plans where id = p_plan_id and department_id = v_dept for update;\n    if not found then raise exception 'That drill plan is not in your department.'; end if;\n    if not exists (select 1 from public.training_sessions where id = p_session_id and department_id = v_dept) then\n      raise exception 'That session is not in your department.';\n    end if;\n    -- B4C:slice7 \u2014 no plans onto a cancelled session (R7).\n    if exists (select 1 from public.training_sessions where id = p_session_id and status = 'cancelled') then\n      raise exception 'CANCELLED: that session was cancelled \u2014 restore it before attaching a plan.';\n    end if;\n    if exists (select 1 from public.session_plans where session_id = p_session_id and drill_plan_id = p_plan_id) then\n      raise exception 'That plan is already attached to this session.';\n    end if;\n    v_c := v_p.content;\n    -- the Quick Run Sheet, then the full plan \u2014 the layout serializeDrillPlan writes and the plan viewer splits on\n    L := L || '## Quick Run Sheet'::text;\n    if v_p.duration_min is not null then L := L || ''::text || ('Total time: ' || v_p.duration_min || ' min'); end if;\n    if jsonb_typeof(v_c -> 'run_of_show') = 'array' then\n      for s in select x from jsonb_array_elements(v_c -> 'run_of_show') x loop\n        i := i + 1;\n        if jsonb_typeof(s) = 'object' then\n          L := L || ''::text || ('**' || i || '. ' || coalesce(nullif(s ->> 't', ''), 'Step') || '**');\n          if coalesce(s ->> 'd', '') <> '' then L := L || ('- ' || (s ->> 'd')); end if;\n        else\n          L := L || ''::text || ('**' || i || '. ' || (s #>> '{}') || '**');\n        end if;\n      end loop;\n    end if;\n    if jsonb_typeof(v_c -> 'safety') = 'array' and jsonb_array_length(v_c -> 'safety') > 0 then\n      L := L || ''::text || '**Safety first:**'::text || array(select '- ' || (x #>> '{}') from jsonb_array_elements(v_c -> 'safety') x);\n    end if;\n    L := L || ''::text || ('## ' || v_p.title || ' \u2014 Drill Plan');\n    if coalesce(v_c ->> 'summary', '') <> '' then L := L || ''::text || (v_c ->> 'summary'); end if;\n    if v_p.duration_min is not null then L := L || ''::text || ('Duration: ' || v_p.duration_min || ' minutes'); end if;\n    if jsonb_typeof(v_c -> 'objectives') = 'array' and jsonb_array_length(v_c -> 'objectives') > 0 then\n      L := L || ''::text || '## Objectives'::text || array(select '- ' || (x #>> '{}') from jsonb_array_elements(v_c -> 'objectives') x);\n    end if;\n    if jsonb_typeof(v_c -> 'safety') = 'array' and jsonb_array_length(v_c -> 'safety') > 0 then\n      L := L || ''::text || '## Safety notes'::text || array(select '- ' || (x #>> '{}') from jsonb_array_elements(v_c -> 'safety') x);\n    end if;\n    if jsonb_typeof(v_c -> 'materials') = 'array' and jsonb_array_length(v_c -> 'materials') > 0 then\n      L := L || ''::text || '## Equipment'::text || array(select '- ' || (x #>> '{}') from jsonb_array_elements(v_c -> 'materials') x);\n    end if;\n    select name into v_who from public.members where id = public.my_member_id();\n    insert into public.session_plans (department_id, session_id, title, source, ai_text, created_by, drill_plan_id)\n    values (v_dept, p_session_id, v_p.title, 'ai', array_to_string(L, E'\\n'), coalesce(v_who, 'Unknown'), p_plan_id)\n    returning * into v_row;\n    return v_row;\n  end;\n  $function$\n",
+   "md5": "a2fa184580b3be907d9dad944775c6a2"
+  },
+  "delete_drill_plan(uuid)": {
+   "def": "CREATE OR REPLACE FUNCTION public.delete_drill_plan(p_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 delete a plan in the caller's OWN department. The session_plans.drill_plan_id FK (ON DELETE SET\n  -- NULL) clears its attachments; the per-session plan rows (and their text) are kept.\n  declare v_dept uuid := public.my_department_id();\n  begin\n    if v_dept is null or not coalesce(public.is_training_manager(), false) then\n      raise exception 'Only a Department Admin or training officer can delete drill plans.';\n    end if;\n    delete from public.drill_plans where id = p_id and department_id = v_dept;\n    if not found then raise exception 'That drill plan is not in your department.'; end if;\n  end;\n  $function$\n",
+   "md5": "fc5a12df02bf1216815c361f985aaa1b"
+  },
+  "dept_drill_plans()": {
+   "def": "CREATE OR REPLACE FUNCTION public.dept_drill_plans()\n RETURNS TABLE(id uuid, title text, category text, duration_min integer, audience text, content jsonb, status text, source text, created_by uuid, created_at timestamp with time zone, approved_by uuid, approved_at timestamp with time zone, updated_by uuid, updated_at timestamp with time zone, attached_sessions integer)\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 the caller's department library (any member), with how many session plans point at each.\n  select p.id, p.title, p.category, p.duration_min, p.audience, p.content, p.status, p.source,\n         p.created_by, p.created_at, p.approved_by, p.approved_at, p.updated_by, p.updated_at,\n         (select count(*)::int from public.session_plans sp where sp.drill_plan_id = p.id and sp.department_id = p.department_id)\n    from public.drill_plans p\n   where p.department_id = public.my_department_id()\n   order by p.status, p.updated_at desc, p.title;\n  $function$\n",
+   "md5": "d786d5593ef494c71549054d85864c8c"
+  },
+  "is_training_manager()": {
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers \u2014 THE training-management gate: a Department Admin in the caller's department (not Project Admin \u2014\n  -- deliberately not is_dept_admin()) OR an active training officer there. Schedules / edits / completes / reopens sessions\n  -- (meetings and board events included), marks the roster, manages categories and the drill-plan library.\n    select exists (\n      select 1 from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n         and m.department_id = public.my_department_id()\n         and m.access && array['Department Admin']::text[]\n    ) or public.is_training_officer();\n  $function$\n",
+   "md5": "472b87b0abca586ba0a13cd615b376fe"
+  },
+  "is_training_officer()": {
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_officer()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers \u2014 an ACTIVE registry row for the caller's member row in the caller's department. Department-scoped\n  -- (unlike is_equipment_manager()): an officer of one department is not one in another.\n    select exists (\n      select 1 from public.training_officer t\n       where t.member_id = public.my_member_id()\n         and t.department_id = public.my_department_id()\n         and t.removed_at is null\n    );\n  $function$\n",
+   "md5": "248392a51fe913771f725b2a51013302"
+  },
+  "my_department_id()": {
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n",
+   "md5": "87f546659c3804a943b48e419e017f18"
+  },
+  "my_member_id()": {
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n",
+   "md5": "3f66369c8af7bc07ec59831af6536fee"
+  },
+  "set_drill_plan(uuid,text,text,integer,text,jsonb,text)": {
+   "def": "CREATE OR REPLACE FUNCTION public.set_drill_plan(p_id uuid, p_title text, p_category text, p_duration_min integer, p_audience text, p_content jsonb, p_source text DEFAULT 'ai'::text)\n RETURNS drill_plans\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 create (p_id null, as a draft) or edit a plan in the caller's OWN department. Edit keeps status + source.\n  declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.drill_plans;\n  begin\n    if v_dept is null or not coalesce(public.is_training_manager(), false) then\n      raise exception 'Only a Department Admin or training officer can manage drill plans.';\n    end if;\n    if p_title is null or btrim(p_title) = '' then raise exception 'A drill plan needs a title.'; end if;\n    if p_content is null or jsonb_typeof(p_content) <> 'object' then raise exception 'A drill plan''s content must be a JSON object.'; end if;\n    if p_duration_min is not null and p_duration_min <= 0 then raise exception 'Duration must be a positive number of minutes.'; end if;\n    if p_id is null then\n      if p_source is null or p_source not in ('ai', 'manual') then raise exception 'A drill plan''s source must be ai or manual.'; end if;\n      insert into public.drill_plans (department_id, title, category, duration_min, audience, content, source, created_by, updated_by)\n      values (v_dept, btrim(p_title), nullif(btrim(p_category), ''), p_duration_min, nullif(btrim(p_audience), ''), p_content, p_source, v_me, v_me)\n      returning * into v_row;\n    else\n      update public.drill_plans\n         set title = btrim(p_title), category = nullif(btrim(p_category), ''), duration_min = p_duration_min,\n             audience = nullif(btrim(p_audience), ''), content = p_content, updated_by = v_me, updated_at = now()\n       where id = p_id and department_id = v_dept\n      returning * into v_row;\n      if not found then raise exception 'That drill plan is not in your department.'; end if;\n    end if;\n    return v_row;\n  end;\n  $function$\n",
+   "md5": "f574003f5c6905d120fd6365a1b7ce11"
+  },
+  "unapprove_drill_plan(uuid)": {
+   "def": "CREATE OR REPLACE FUNCTION public.unapprove_drill_plan(p_id uuid)\n RETURNS drill_plans\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:drill plans \u2014 pull a plan in the caller's OWN department back to draft. Already a draft: returned unchanged.\n  declare v_dept uuid := public.my_department_id(); v_row public.drill_plans;\n  begin\n    if v_dept is null or not coalesce(public.is_training_manager(), false) then\n      raise exception 'Only a Department Admin or training officer can change a drill plan''s approval.';\n    end if;\n    select * into v_row from public.drill_plans where id = p_id and department_id = v_dept for update;\n    if not found then raise exception 'That drill plan is not in your department.'; end if;\n    if v_row.status = 'draft' then return v_row; end if;\n    update public.drill_plans set status = 'draft', approved_by = null, approved_at = null\n     where id = p_id returning * into v_row;\n    return v_row;\n  end;\n  $function$\n",
+   "md5": "6012d001e95c3a5d6bdd0f6a49e8daf0"
+  }
+ },
+ "drill_plans_cols": [
+  "id uuid NOT NULL DEFAULT gen_random_uuid()",
+  "department_id uuid NOT NULL",
+  "title text NOT NULL",
+  "category text",
+  "duration_min integer",
+  "audience text",
+  "content jsonb NOT NULL",
+  "status text NOT NULL DEFAULT 'draft'::text",
+  "source text NOT NULL DEFAULT 'ai'::text",
+  "created_by uuid",
+  "created_at timestamp with time zone NOT NULL DEFAULT now()",
+  "approved_by uuid",
+  "approved_at timestamp with time zone",
+  "updated_by uuid",
+  "updated_at timestamp with time zone NOT NULL DEFAULT now()"
+ ],
+ "drill_plans_constraints": [
+  "drill_plans_content_chk | CHECK ((jsonb_typeof(content) = 'object'::text))",
+  "drill_plans_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+  "drill_plans_duration_chk | CHECK (((duration_min IS NULL) OR (duration_min > 0)))",
+  "drill_plans_pkey | PRIMARY KEY (id)",
+  "drill_plans_source_chk | CHECK ((source = ANY (ARRAY['ai'::text, 'manual'::text])))",
+  "drill_plans_status_chk | CHECK ((status = ANY (ARRAY['draft'::text, 'approved'::text])))",
+  "drill_plans_title_chk | CHECK ((btrim(title) <> ''::text))"
+ ],
+ "drill_plans_policies": [
+  "members read drill_plans | SELECT | authenticated | (department_id = my_department_id()) | "
+ ],
+ "drill_plans_rows": 0,
+ "drill_plans_triggers": [],
+ "fn_count": 220,
+ "name_clash": [],
+ "session_plans_drill_fk": [
+  "session_plans_drill_plan_id_fkey | FOREIGN KEY (drill_plan_id) REFERENCES drill_plans(id) ON DELETE SET NULL",
+  "session_plans_session_id_fkey | FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL"
+ ],
+ "standard_cert_types_pattern": {
+  "policies": [
+   "authenticated read standard_cert_types | SELECT | authenticated | true"
+  ],
+  "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}"
+ },
+ "table_clash": false,
+ "total_public_policies": 175,
+ "verified_presence": 959
+}
