@@ -4701,7 +4701,7 @@ function CertProposals({ S, notify }) {
           : <button style={{ ...FS.btn, padding: "5px 12px", fontSize: 12.5 }} onClick={() => setOpen(true)}><Plus size={14} color={FIRE.btnIcon} /> Propose a certification</button>}
       </div>
       {open && (<>
-        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "8px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it.</div>
+        <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5, margin: "8px 0 12px" }}>Add a cert to your record — attach a PDF or photo as proof. A leader reviews and approves it. Only you and your department's leaders can open the proof file.</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ ...S.field, flex: 1, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span><input style={FS.input} value={name} onChange={(e2) => setName(e2.target.value)} placeholder="e.g. EMT-B" /></label>
           <CertDatesFields S={S} exp={exp} setExp={setExp} noExpiry={noExpiry} setNoExpiry={setNoExpiry} achievedOn={achievedOn} setAchievedOn={setAchievedOn} />
@@ -21053,7 +21053,7 @@ function Expirations({ S, role, members, meId, notify }) {
           {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 10 }}>Couldn't refresh — showing what was last loaded.</div>}
         </>)}
       {ops && <ExpManage members={members} meId={meId} notify={notify} onChanged={reload} />}
-      <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>Expiry dates, class and pass/fail only — never the number, the scan, or any medical detail.</div>
+      <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>This tracker keeps expiry dates, class and pass/fail only — never a license number or any medical detail. Uploaded proof files (certificates, cards) can be opened only by the member and department leaders.</div>
       </NoirSkin>
     </PageShell>
   );

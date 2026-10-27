@@ -1,0 +1,477 @@
+{
+ "defs": {
+  "cancel_action_item(uuid,text)": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.cancel_action_item(p_id uuid, p_reason text)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare v_row public.action_items;\nbegin\n  if not public.is_canmanage() then raise exception 'Not authorized to cancel action items'; end if;\n  if p_reason is null or btrim(p_reason) = '' then\n    raise exception 'A reason is required to cancel an action item';\n  end if;\n  select * into v_row from public.action_items where id = p_id;\n  if not found then raise exception 'Action item not found'; end if;\n  if v_row.department_id <> public.my_department_id() then\n    raise exception 'Not authorized: belongs to another department';\n  end if;\n  update public.action_items set\n    status = 'cancelled',\n    cancelled_at = now(),\n    cancelled_by = public.my_member_id(),\n    cancel_reason = btrim(p_reason),\n    assignee_name = coalesce(\n      (select m.name from public.members m where m.id = v_row.assigned_to),\n      assignee_name\n    )\n  where id = p_id;\nend; $function$\n",
+   "definer": true,
+   "md5": "2c5cac1238c59f68b25c4e4013c0489f"
+  },
+  "complete_action_item(uuid)": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.complete_action_item(p_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare v_row public.action_items;\nbegin\n  if not public.is_canmanage() then raise exception 'Not authorized to complete action items'; end if;\n  select * into v_row from public.action_items where id = p_id;\n  if not found then raise exception 'Action item not found'; end if;\n  if v_row.department_id <> public.my_department_id() then raise exception 'Not authorized: belongs to another department'; end if;\n  update public.action_items set\n    status = 'done', completed_at = now(), completed_by = public.my_member_id(),\n    assignee_name = coalesce((select m.name from public.members m where m.id = v_row.assigned_to), assignee_name)\n  where id = p_id;\nend; $function$\n",
+   "definer": true,
+   "md5": "af1dc282df773b252b9ef4e2ffb67bf2"
+  },
+  "get_station_fundraisers()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.get_station_fundraisers()\n RETURNS TABLE(id uuid, name text, target_date date, tasks_done integer, tasks_total integer, next_steps jsonb)\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:station_fundraiser \u2014 counts + ticked open steps only; never money, donors, sponsors, or un-ticked text.\n  select f.id, f.name, f.target_date,\n         (select count(*) from public.action_items ai\n           where ai.fundraiser_id = f.id and coalesce(ai.status, 'open') = 'done')::integer as tasks_done,\n         (select count(*) from public.action_items ai\n           where ai.fundraiser_id = f.id and coalesce(ai.status, 'open') <> 'cancelled')::integer as tasks_total,\n         coalesce((select jsonb_agg(jsonb_build_object('text', s.text, 'due_date', s.due_date) order by s.due_date nulls last, s.created_at)\n                     from (select ai.text, ai.due_date, ai.created_at from public.action_items ai\n                            where ai.fundraiser_id = f.id and ai.station_visible\n                              and coalesce(ai.status, 'open') not in ('done', 'cancelled')\n                            order by ai.due_date nulls last, ai.created_at\n                            limit 3) s), '[]'::jsonb) as next_steps\n    from public.fundraisers f\n   where public.my_member_id() is not null\n     and f.department_id = public.my_department_id()\n     and f.shared_with_station\n     and f.status not in ('done', 'archived')\n     and f.target_date is not null\n     and f.target_date >= (now() at time zone 'America/Chicago')::date\n   order by f.target_date, f.name;\n$function$\n",
+   "definer": true,
+   "md5": "1d8634cfd5bdfcca54fe7379b36da916"
+  },
+  "is_canmanage()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.is_canmanage()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Board Member','Department Admin','Officer']::text[]\n  );\n$function$\n",
+   "definer": true,
+   "md5": "44083b6d721a50ace3ad21280e2260d3"
+  },
+  "is_canmanage_ops()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.is_canmanage_ops()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Department Admin','Officer']::text[]\n  );\n$function$\n",
+   "definer": true,
+   "md5": "92fa180343748968dff96fa044b0420d"
+  },
+  "is_dept_admin()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n",
+   "definer": true,
+   "md5": "c692e44f62923d2bf4c1a39a21a87bf7"
+  },
+  "is_leader()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.is_leader()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n",
+   "definer": true,
+   "md5": "3f462af26a46909309f856f769226baa"
+  },
+  "is_muted(uuid,text)": {
+   "anon": false,
+   "auth": false,
+   "def": "CREATE OR REPLACE FUNCTION public.is_muted(p_member uuid, p_family text)\n RETURNS boolean\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_enabled boolean;\nbegin\n  IF p_family IS NULL OR p_family NOT IN ('certs','gear','maint','events','tasks','shifts') THEN\n    RAISE EXCEPTION 'is_muted: unknown notification family %. A typo here would silently ignore a member''s opt-out.', coalesce(p_family, '<null>');\n  END IF;\n\n  select enabled into v_enabled\n    from public.notification_prefs\n   where member_id = p_member and family = p_family;\n\n  -- ABSENCE MEANS ON, matching the client: a member who has never opened the\n  -- preferences screen has no row, and no row is not an opt-out.\n  return v_enabled is not null and v_enabled = false;\nend;\n$function$\n",
+   "definer": true,
+   "md5": "4e5107d4104e2ac4a8bd2d2347b5db49"
+  },
+  "my_department_id()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n",
+   "definer": true,
+   "md5": "87f546659c3804a943b48e419e017f18"
+  },
+  "my_department_rollup()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_rollup()\n RETURNS TABLE(department_id uuid, department_name text, station text, city text, can_manage boolean, admin_name text, admin_email text, health text, last_activity timestamp with time zone, days_since_activity integer, active_members_30d bigint, member_count bigint, documents_count bigint, apparatus_count bigint, training_sessions_count bigint, profile_complete boolean, members_no_email_count bigint, documents_no_text_count bigint, expiring_certs_count bigint, expired_certs_count bigint, overdue_duties_count bigint, open_action_items_count bigint, my_attendance_pct integer, my_attendance_total integer, my_attendance_attended integer, my_certs_current integer, my_certs_expiring integer, my_certs_expired integer, my_open_duties integer, my_overdue_duties integer, my_next_event_date date, my_next_event_title text, my_next_event_type text)\n LANGUAGE plpgsql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  return query\n  with base as (\n    select\n      d.id as department_id, d.name as department_name, d.station, d.city,\n\n      -- WHAT THE CALLER IS **HERE**. me.my_access is this person's roles at THIS\n      -- department; a leader at one station is not a leader at the next.\n      coalesce(me.my_access && array['Board Member','Department Admin','Officer']::text[], false) as can_manage,\n      -- is_leader()'s array, used ONLY to decide whether restricted drills count\n      -- toward this member's own attendance rate (mirrors MemberDashboard).\n      coalesce(me.my_access && array['Project Admin','Department Admin','Board Member','Officer']::text[], false) as my_is_leader,\n      me.my_mid,\n\n      (select m.name from members m\n         where m.department_id = d.id and m.access && array['Department Admin']::text[]\n           and m.email is not null and btrim(m.email) <> ''\n         order by m.created_at asc nulls last limit 1) as admin_name,\n      (select lower(m.email) from members m\n         where m.department_id = d.id and m.access && array['Department Admin']::text[]\n           and m.email is not null and btrim(m.email) <> ''\n         order by m.created_at asc nulls last limit 1) as admin_email,\n      greatest(\n        (select max(sa.checked_in_at) from session_attendance sa where sa.department_id = d.id),\n        (select max(dl.done_at)       from duty_log dl          where dl.department_id = d.id),\n        (select max(ai.created_at)    from action_items ai      where ai.department_id = d.id),\n        (select max(doc.created_at)   from documents doc        where doc.department_id = d.id\n                                                                  and doc.deleted_at is null and doc.archived_at is null),\n        (select max(an.created_at)    from announcements an     where an.department_id = d.id),\n        (select max(ts.created_at)    from training_sessions ts where ts.department_id = d.id)\n      ) as last_activity,\n      (select count(distinct mid) from (\n          select sa.member_id as mid from session_attendance sa\n            where sa.department_id = d.id and sa.checked_in_at >= now() - interval '30 days'\n          union\n          select dl.done_by from duty_log dl\n            where dl.department_id = d.id and dl.done_at >= now() - interval '30 days'\n          union\n          select ai.completed_by from action_items ai\n            where ai.department_id = d.id and ai.completed_at >= now() - interval '30 days'\n       ) act where mid is not null) as active_members_30d,\n      (select count(*) from members mm where mm.department_id = d.id) as member_count,\n      (select count(*) from documents dc where dc.department_id = d.id\n                                          and dc.deleted_at is null and dc.archived_at is null) as documents_count,\n      (select count(*) from apparatus ap where ap.department_id = d.id) as apparatus_count,\n      (select count(*) from training_sessions ts where ts.department_id = d.id) as training_sessions_count,\n      (    d.tagline is not null and btrim(d.tagline) <> ''\n       and d.voice is not null and btrim(d.voice) <> ''\n       and d.primary_color is not null and d.primary_color <> '#B11E2A'\n       and d.accent_color is not null and d.accent_color <> '#1F4E79') as profile_complete,\n      (select count(*) from members mm where mm.department_id = d.id\n                                        and (mm.email is null or btrim(mm.email) = '')) as members_no_email_count,\n      (select count(*) from documents dc where dc.department_id = d.id\n                                          and dc.deleted_at is null and dc.archived_at is null\n                                          and (dc.content_text is null or btrim(dc.content_text) = '')) as documents_no_text_count,\n      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)\n           and not public.cert_never_expires(c.no_expiry, c.cert_type_id, c.department_id)\n           and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)\n             - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3) as expiring_certs_count,\n      (select count(*) from certs c where c.department_id = d.id and public.valid_exp_ym(c.exp)\n           and not public.cert_never_expires(c.no_expiry, c.cert_type_id, c.department_id)\n           and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)\n             - (extract(year from now())::int*12 + extract(month from now())::int) < 0) as expired_certs_count,\n      (select count(*) from duties du where du.department_id = d.id\n                                       and du.done = false and du.due_date is not null and du.due_date < current_date) as overdue_duties_count,\n      (select count(*) from action_items ai where ai.department_id = d.id and ai.status = 'open') as open_action_items_count,\n\n      -- ================= MEMBER-SCOPED =================\n      -- Every one of these is filtered to me.my_mid. They are computed for all\n      -- callers (they are the caller's OWN data, never anybody else's) and are\n      -- what a non-managing member sees in place of the leadership figures.\n\n      -- ATTENDANCE, this calendar month, mirroring MemberDashboard.monthRate:\n      -- a drill counts only if it is done, has at least one recorded attendee,\n      -- is not flagged optional, and \u2014 for a non-leader \u2014 is not restricted.\n      -- The \"has an attendee\" test is what makes this \"recorded drills\" rather\n      -- than \"scheduled drills\"; a session nobody signed into is not a missed\n      -- drill, it is an unheld one.\n      (select count(*) from training_sessions ts\n        where ts.department_id = d.id and ts.done\n          and date_trunc('month', ts.date) = date_trunc('month', current_date)\n          and coalesce(ts.counts_toward_attendance, true) <> false\n          and (coalesce(me.my_access && array['Project Admin','Department Admin','Board Member','Officer']::text[], false)\n               or coalesce(ts.audience,'everyone') not in ('leadership','board'))\n          and exists (select 1 from session_attendance sa where sa.session_id = ts.id)\n      )::int as my_attendance_total,\n      (select count(*) from training_sessions ts\n        where ts.department_id = d.id and ts.done\n          and date_trunc('month', ts.date) = date_trunc('month', current_date)\n          and coalesce(ts.counts_toward_attendance, true) <> false\n          and (coalesce(me.my_access && array['Project Admin','Department Admin','Board Member','Officer']::text[], false)\n               or coalesce(ts.audience,'everyone') not in ('leadership','board'))\n          and exists (select 1 from session_attendance sa\n                       where sa.session_id = ts.id and sa.member_id = me.my_mid)\n      )::int as my_attendance_attended,\n\n      -- CERTS \u2014 same month-arithmetic and same regex as the leadership columns\n      -- above, filtered to this member. The three buckets are disjoint, so a\n      -- cert is current, expiring, or expired, never two of them.\n      (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid\n           and (public.cert_never_expires(c.no_expiry, c.cert_type_id, c.department_id)\n                or (public.valid_exp_ym(c.exp)\n           and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)\n             - (extract(year from now())::int*12 + extract(month from now())::int) > 3)))::int as my_certs_current,\n      (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid\n           and public.valid_exp_ym(c.exp)\n           and not public.cert_never_expires(c.no_expiry, c.cert_type_id, c.department_id)\n           and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)\n             - (extract(year from now())::int*12 + extract(month from now())::int) between 0 and 3)::int as my_certs_expiring,\n      (select count(*) from certs c where c.department_id = d.id and c.member_id = me.my_mid\n           and public.valid_exp_ym(c.exp)\n           and not public.cert_never_expires(c.no_expiry, c.cert_type_id, c.department_id)\n           and (split_part(c.exp,'-',1)::int*12 + split_part(c.exp,'-',2)::int)\n             - (extract(year from now())::int*12 + extract(month from now())::int) < 0)::int as my_certs_expired,\n\n      -- DUTIES assigned to me here. Two numbers, because the card needs both:\n      -- open drives the \"N due\" stat, overdue drives the red edge.\n      (select count(*) from duties du where du.department_id = d.id\n                                       and du.assigned_to = me.my_mid and du.done = false)::int as my_open_duties,\n      (select count(*) from duties du where du.department_id = d.id\n                                       and du.assigned_to = me.my_mid and du.done = false\n                                       and du.due_date is not null and du.due_date < current_date)::int as my_overdue_duties,\n\n      -- NEXT EVENT across the same four calendar sources MemberDashboard reads.\n      -- Audience-aware: a non-leader is not told about a leadership-only drill\n      -- they cannot attend. content_calendar's text column is `caption`, not\n      -- `title` \u2014 confirmed against the live schema, not assumed.\n      nx.nd as my_next_event_date, nx.nt as my_next_event_title, nx.nk as my_next_event_type\n\n    from departments d\n    -- The caller's own member row AT THIS DEPARTMENT. Phase 1b's unique index on\n    -- (lower(email), department_id) guarantees at most one, so this cannot fan out;\n    -- the limit 1 is belt and braces.\n    left join lateral (\n      select m.id as my_mid, m.access as my_access\n        from members m\n       where m.email is not null\n         and lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n         and m.department_id = d.id\n       limit 1\n    ) me on true\n    left join lateral (\n      select x.d as nd, x.t as nt, x.k as nk\n        from (\n          select ts.date as d, ts.title as t, 'Training'::text as k\n            from training_sessions ts\n           where ts.department_id = d.id and ts.date >= current_date and coalesce(ts.status, 'scheduled') <> 'cancelled'\n             and (coalesce(me.my_access && array['Project Admin','Department Admin','Board Member','Officer']::text[], false)\n                  or coalesce(ts.audience,'everyone') not in ('leadership','board'))\n          union all\n          select fe.date, fe.title, 'Funding'::text\n            from funding_events fe where fe.department_id = d.id and fe.date >= current_date\n          union all\n          select re.date, re.title, 'Recruitment'::text\n            from recruitment_events re where re.department_id = d.id and re.date >= current_date\n          union all\n          select cc.date, cc.caption, 'Content'::text\n            from content_calendar cc where cc.department_id = d.id and cc.date >= current_date\n        ) x\n       order by x.d asc, x.k asc\n       limit 1\n    ) nx on true\n    -- UNCHANGED FROM PHASE 2 \u2014 the authorization boundary, verbatim.\n    where d.id in (\n      select m.department_id from public.members m\n      where lower(m.email) = lower(auth.email())\n        and m.status in ('Active','Probationary')\n    )\n  )\n  select\n    b.department_id, b.department_name, b.station, b.city,\n    b.can_manage,\n    -- EVERY leadership column is gated on can_manage. This is the whole point of\n    -- the migration: a non-managing member gets NULL over the wire, not a number\n    -- the client is trusted to hide.\n    case when b.can_manage then b.admin_name  end,\n    case when b.can_manage then b.admin_email end,\n    case when b.can_manage then\n      case when b.last_activity is null then 'RED'\n           when current_date - b.last_activity::date < 14 then 'GREEN'\n           when current_date - b.last_activity::date <= 30 then 'YELLOW'\n           else 'RED' end\n    end as health,\n    case when b.can_manage then b.last_activity end,\n    case when b.can_manage then\n      case when b.last_activity is null then null else current_date - b.last_activity::date end\n    end as days_since_activity,\n    case when b.can_manage then b.active_members_30d      end,\n    case when b.can_manage then b.member_count            end,\n    case when b.can_manage then b.documents_count         end,\n    case when b.can_manage then b.apparatus_count         end,\n    case when b.can_manage then b.training_sessions_count end,\n    case when b.can_manage then b.profile_complete        end,\n    case when b.can_manage then b.members_no_email_count  end,\n    case when b.can_manage then b.documents_no_text_count end,\n    case when b.can_manage then b.expiring_certs_count    end,\n    case when b.can_manage then b.expired_certs_count     end,\n    case when b.can_manage then b.overdue_duties_count    end,\n    case when b.can_manage then b.open_action_items_count end,\n    -- Member-scoped: always returned, always the caller's own data.\n    -- pct is NULL when the month held no qualifying drills \u2014 \"no drills yet\" and\n    -- \"attended none of them\" are different facts and must not both read as 0%.\n    case when b.my_attendance_total > 0\n         then round(b.my_attendance_attended * 100.0 / b.my_attendance_total)::int end as my_attendance_pct,\n    b.my_attendance_total, b.my_attendance_attended,\n    b.my_certs_current, b.my_certs_expiring, b.my_certs_expired,\n    b.my_open_duties, b.my_overdue_duties,\n    b.my_next_event_date, b.my_next_event_title, b.my_next_event_type\n  from base b\n  order by\n    case when b.last_activity is null then 0\n         when current_date - b.last_activity::date > 30 then 0\n         when current_date - b.last_activity::date >= 14 then 1 else 2 end,\n    b.last_activity asc nulls first, b.department_name asc;\nend;\n$function$\n",
+   "definer": true,
+   "md5": "7f9723c917b30cbe030db328fe6b8255"
+  },
+  "my_member_id()": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n",
+   "definer": true,
+   "md5": "3f66369c8af7bc07ec59831af6536fee"
+  },
+  "notify_action_item_assigned()": {
+   "anon": false,
+   "auth": false,
+   "def": "CREATE OR REPLACE FUNCTION public.notify_action_item_assigned()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nDECLARE\n  v_text text;\n  v_body text;\nBEGIN\n  IF TG_OP = 'UPDATE' AND NEW.assigned_to IS NOT DISTINCT FROM OLD.assigned_to THEN RETURN NULL; END IF;\n  IF NEW.department_id IS NULL THEN RETURN NULL; END IF;\n  IF coalesce(NEW.status, 'open') <> 'open' THEN RETURN NULL; END IF;\n  IF NEW.assigned_to = public.my_member_id() THEN RETURN NULL; END IF;\n  IF public.is_muted(NEW.assigned_to, 'tasks') THEN RETURN NULL; END IF;\n  v_text := coalesce(nullif(btrim(NEW.text), ''), 'A task has been assigned to you.');\n  IF length(v_text) > 120 THEN v_text := left(v_text, 117) || U&'\\2026'; END IF;\n  v_body := v_text || CASE WHEN NEW.due_date IS NOT NULL THEN ' \u00b7 due ' || to_char(NEW.due_date, 'Mon DD') ELSE '' END;\n  INSERT INTO public.notifications (department_id, member_id, type, title, body, subject_ref, severity)\n  VALUES (NEW.department_id, NEW.assigned_to, 'task_assigned', 'New task assigned', v_body, NEW.id::text, 'info')\n  ON CONFLICT (member_id, type, subject_ref) DO NOTHING;\n  RETURN NULL;\nEXCEPTION WHEN OTHERS THEN\n  RAISE WARNING 'notify_action_item_assigned failed for item %: %', NEW.id, SQLERRM;\n  RETURN NULL;\nEND;\n$function$\n",
+   "definer": true,
+   "md5": "55b3058c7977d0e1ce643c77cb4ac5eb"
+  },
+  "reopen_action_item(uuid)": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.reopen_action_item(p_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare v_row public.action_items; v_resolved timestamptz;\nbegin\n  if not public.is_canmanage() then raise exception 'Not authorized to reopen action items'; end if;\n  select * into v_row from public.action_items where id = p_id;\n  if not found then raise exception 'Action item not found'; end if;\n  if v_row.department_id <> public.my_department_id() then\n    raise exception 'Not authorized: belongs to another department';\n  end if;\n  v_resolved := coalesce(v_row.completed_at, v_row.cancelled_at);\n  if v_resolved is not null and (now() - v_resolved) >= interval '14 days' then\n    raise exception 'This item was resolved over 14 days ago and is now archived \u2014 it can no longer be reopened';\n  end if;\n  update public.action_items set\n    status = 'open',\n    completed_at = null, completed_by = null,\n    cancelled_at = null, cancelled_by = null, cancel_reason = null\n  where id = p_id;\nend; $function$\n",
+   "definer": true,
+   "md5": "76513cd2c2468faad981e52f61db6408"
+  },
+  "set_fundraiser_shared(uuid,boolean)": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.set_fundraiser_shared(p_fundraiser_id uuid, p_shared boolean)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:station_fundraiser \u2014 department-scoped leader write of fundraisers.shared_with_station ONLY.\ndeclare\n  v_my_dept uuid := public.my_department_id();\nbegin\n  if p_shared is null then raise exception 'Choose shared or not shared'; end if;\n  if v_my_dept is null or not exists (\n       select 1 from public.members m\n        where lower(m.email) = lower(auth.email()) and m.department_id = v_my_dept\n          and m.access && array['Board Member', 'Department Admin', 'Officer']::text[]) then\n    raise exception 'Only leaders can share a fundraiser with the station';\n  end if;\n  update public.fundraisers set shared_with_station = p_shared\n   where id = p_fundraiser_id and department_id = v_my_dept;\n  if not found then raise exception 'Not in your department'; end if;\n  return p_shared;\nend;\n$function$\n",
+   "definer": true,
+   "md5": "6dc0f4c97d2b4426c259025f4a8e588e"
+  },
+  "set_fundraiser_step_visible(uuid,boolean)": {
+   "anon": false,
+   "auth": true,
+   "def": "CREATE OR REPLACE FUNCTION public.set_fundraiser_step_visible(p_item_id uuid, p_visible boolean)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:station_fundraiser \u2014 department-scoped leader write of action_items.station_visible ONLY.\ndeclare\n  v_my_dept uuid := public.my_department_id();\nbegin\n  if p_visible is null then raise exception 'Choose shown or hidden'; end if;\n  if v_my_dept is null or not exists (\n       select 1 from public.members m\n        where lower(m.email) = lower(auth.email()) and m.department_id = v_my_dept\n          and m.access && array['Board Member', 'Department Admin', 'Officer']::text[]) then\n    raise exception 'Only leaders can choose what the station sees';\n  end if;\n  update public.action_items ai set station_visible = p_visible\n   where ai.id = p_item_id and ai.department_id = v_my_dept\n     and ai.fundraiser_id is not null\n     and exists (select 1 from public.fundraisers f where f.id = ai.fundraiser_id and f.department_id = v_my_dept);\n  if not found then raise exception 'Not a planning step of your department''s fundraiser'; end if;\n  return p_visible;\nend;\n$function$\n",
+   "definer": true,
+   "md5": "3b3c1da70032b0b83c20113d39db3d68"
+  }
+ },
+ "depts": [
+  {
+   "da": 2,
+   "id": "94667450-481c-4f40-a6b6-86e1b364be93",
+   "name": "B4C Demo Department",
+   "officer": 1,
+   "recruitment_events": 0
+  },
+  {
+   "da": 2,
+   "id": "5bc40678-2775-46c2-af35-fbc7a37792a6",
+   "name": "Granbury Fire Station",
+   "officer": 1,
+   "recruitment_events": 0
+  },
+  {
+   "da": 7,
+   "id": "6fbb2d91-62d1-4c4a-997e-ad54c0569974",
+   "name": "Indian Harbor Volunteer Fire Department",
+   "officer": 6,
+   "recruitment_events": 0
+  },
+  {
+   "da": 3,
+   "id": "a8dbabd1-541d-435e-a8cf-5eebc80f2576",
+   "name": "Lipan Volunteer Fire Department",
+   "officer": 4,
+   "recruitment_events": 1
+  },
+  {
+   "da": 4,
+   "id": "6d51b00a-bdb0-4807-8e45-70bb53d4dcff",
+   "name": "North Hood County Volunteer Fire Department",
+   "officer": 9,
+   "recruitment_events": 5
+  }
+ ],
+ "fn_count": 220,
+ "fn_snapshot_md5": "808e30564ef303adacb8e6bc616cb53f",
+ "member_status_values": {
+  "Active": 96,
+  "Inactive": 9,
+  "Probationary": 10
+ },
+ "name_clash": [],
+ "policy_snapshot_md5": "2d65a184762a62c7e3d76fe5fe595e67",
+ "server_version": "17.6",
+ "table_clash": [],
+ "tables": {
+  "action_items": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "meeting_id uuid",
+    "text text NOT NULL",
+    "owner text",
+    "status text DEFAULT 'open'::text",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "assigned_to uuid",
+    "due_date date",
+    "completed_by uuid",
+    "completed_at timestamp with time zone",
+    "source_label text",
+    "assignee_name text",
+    "cancelled_at timestamp with time zone",
+    "cancelled_by uuid",
+    "cancel_reason text",
+    "source_output_id uuid",
+    "fundraiser_id uuid",
+    "station_visible boolean NOT NULL DEFAULT false"
+   ],
+   "constraints": [
+    "action_items_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+    "action_items_fundraiser_id_fkey | FOREIGN KEY (fundraiser_id) REFERENCES fundraisers(id) ON DELETE SET NULL",
+    "action_items_meeting_id_fkey | FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE SET NULL",
+    "action_items_pkey | PRIMARY KEY (id)",
+    "action_items_source_output_id_fkey | FOREIGN KEY (source_output_id) REFERENCES ai_outputs(id) ON DELETE SET NULL"
+   ],
+   "indexes": [
+    "action_items_dept_idx | CREATE INDEX action_items_dept_idx ON public.action_items USING btree (department_id)",
+    "action_items_fundraiser_idx | CREATE INDEX action_items_fundraiser_idx ON public.action_items USING btree (fundraiser_id)",
+    "action_items_pkey | CREATE UNIQUE INDEX action_items_pkey ON public.action_items USING btree (id)"
+   ],
+   "policies": [
+    "canmanage insert action_items | INSERT | authenticated |  | (is_canmanage() AND (department_id = my_department_id()))",
+    "leaders can read action_items | SELECT | public | (is_leader() AND (department_id = my_department_id())) | ",
+    "members read own action_items | SELECT | authenticated | (assigned_to = my_member_id()) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 16,
+   "triggers": [
+    "CREATE TRIGGER trg_action_item_assigned AFTER INSERT OR UPDATE OF assigned_to ON public.action_items FOR EACH ROW WHEN ((new.assigned_to IS NOT NULL)) EXECUTE FUNCTION notify_action_item_assigned()"
+   ]
+  },
+  "ai_outputs": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "feature text NOT NULL",
+    "title text",
+    "ai_text text NOT NULL",
+    "current_text text",
+    "created_by uuid",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "edited_by uuid",
+    "edited_at timestamp with time zone",
+    "deleted_at timestamp with time zone",
+    "source text NOT NULL DEFAULT 'ai'::text",
+    "source_file_path text",
+    "fundraiser_id uuid",
+    "session_id uuid"
+   ],
+   "constraints": [
+    "ai_outputs_fundraiser_id_fkey | FOREIGN KEY (fundraiser_id) REFERENCES fundraisers(id) ON DELETE SET NULL",
+    "ai_outputs_pkey | PRIMARY KEY (id)",
+    "ai_outputs_session_id_fkey | FOREIGN KEY (session_id) REFERENCES training_sessions(id) ON DELETE SET NULL",
+    "ai_outputs_session_id_minutes_only | CHECK (((session_id IS NULL) OR (feature = 'minutes'::text)))",
+    "ai_outputs_source_check | CHECK ((source = ANY (ARRAY['ai'::text, 'imported'::text])))"
+   ],
+   "indexes": [
+    "ai_outputs_fundraiser_id_idx | CREATE INDEX ai_outputs_fundraiser_id_idx ON public.ai_outputs USING btree (fundraiser_id) WHERE (fundraiser_id IS NOT NULL)",
+    "ai_outputs_pkey | CREATE UNIQUE INDEX ai_outputs_pkey ON public.ai_outputs USING btree (id)",
+    "ai_outputs_session_id_idx | CREATE INDEX ai_outputs_session_id_idx ON public.ai_outputs USING btree (session_id) WHERE (session_id IS NOT NULL)"
+   ],
+   "policies": [
+    "canmanage insert ai_outputs | INSERT | authenticated |  | ((department_id = my_department_id()) AND (created_by = my_member_id()) AND (((feature = 'report'::text) AND is_dept_admin()) OR ((feature <> 'report'::text) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text])))))))",
+    "canmanage update ai_outputs | UPDATE | authenticated | ((department_id = my_department_id()) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text]))))) | ((department_id = my_department_id()) AND (edited_by = my_member_id()) AND (is_canmanage_ops() OR (is_canmanage() AND (feature = ANY (ARRAY['minutes'::text, 'agenda'::text])))))",
+    "dept reads ai_outputs | SELECT | public | (department_id = my_department_id()) | ",
+    "pa hard delete ai_outputs | DELETE | authenticated | ((department_id = my_department_id()) AND (EXISTS ( SELECT 1\n   FROM members\n  WHERE ((lower(members.email) = lower(auth.email())) AND (members.access && ARRAY['Project Admin'::text]))))) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 30,
+   "triggers": [
+    "CREATE TRIGGER trg_guard_ai_outputs_deleted_at BEFORE UPDATE ON public.ai_outputs FOR EACH ROW EXECUTE FUNCTION guard_ai_outputs_deleted_at()",
+    "CREATE TRIGGER trg_guard_ai_outputs_session_id BEFORE INSERT OR UPDATE OF session_id ON public.ai_outputs FOR EACH ROW EXECUTE FUNCTION guard_ai_outputs_session_id()"
+   ]
+  },
+  "departments": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "name text NOT NULL",
+    "station text",
+    "primary_color text DEFAULT '#B11E2A'::text",
+    "accent_color text DEFAULT '#1F4E79'::text",
+    "font text DEFAULT 'Modern sans'::text",
+    "tagline text",
+    "voice text",
+    "logo_url text",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "city text",
+    "disabled_modules text[] NOT NULL DEFAULT '{}'::text[]",
+    "station_lat double precision",
+    "station_lng double precision",
+    "station_radius_m integer NOT NULL DEFAULT 150",
+    "week_start_day smallint NOT NULL DEFAULT 1",
+    "max_shift_hours smallint NOT NULL DEFAULT 10",
+    "geofence_enabled boolean NOT NULL DEFAULT false",
+    "geofence_backstop_hours integer",
+    "expected_shift_hours integer",
+    "aftercall_enabled boolean NOT NULL DEFAULT false",
+    "probation_enabled boolean NOT NULL DEFAULT false"
+   ],
+   "constraints": [
+    "departments_max_shift_hours_range | CHECK (((max_shift_hours >= 1) AND (max_shift_hours <= 48)))",
+    "departments_pkey | PRIMARY KEY (id)",
+    "departments_week_start_day_range | CHECK (((week_start_day >= 0) AND (week_start_day <= 6)))"
+   ],
+   "indexes": [
+    "departments_pkey | CREATE UNIQUE INDEX departments_pkey ON public.departments USING btree (id)"
+   ],
+   "policies": [
+    "DA can update own department | UPDATE | authenticated | ((id = my_department_id()) AND is_dept_admin()) | ((id = my_department_id()) AND is_dept_admin())",
+    "signed in can read departments | SELECT | authenticated | true | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 5,
+   "triggers": [
+    "CREATE TRIGGER departments_probation_enabled_guard BEFORE UPDATE OF probation_enabled ON public.departments FOR EACH ROW EXECUTE FUNCTION tg_departments_probation_enabled_guard()",
+    "CREATE TRIGGER trg_seed_resources_on_new_department AFTER INSERT ON public.departments FOR EACH ROW EXECUTE FUNCTION seed_resources_on_new_department()"
+   ]
+  },
+  "funding_events": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "title text NOT NULL",
+    "date date NOT NULL",
+    "color text NOT NULL DEFAULT '#9A6B12'::text",
+    "notes text",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "source_label text",
+    "fundraiser_id uuid",
+    "start_time time without time zone",
+    "end_time time without time zone",
+    "location_label text"
+   ],
+   "constraints": [
+    "funding_events_fundraiser_id_fkey | FOREIGN KEY (fundraiser_id) REFERENCES fundraisers(id) ON DELETE SET NULL",
+    "funding_events_pkey | PRIMARY KEY (id)"
+   ],
+   "indexes": [
+    "funding_events_fundraiser_idx | CREATE INDEX funding_events_fundraiser_idx ON public.funding_events USING btree (fundraiser_id)",
+    "funding_events_pkey | CREATE UNIQUE INDEX funding_events_pkey ON public.funding_events USING btree (id)"
+   ],
+   "policies": [
+    "leaders delete funding_events | DELETE | authenticated | ((department_id = my_department_id()) AND is_canmanage_ops()) | ",
+    "leaders update funding_events | UPDATE | authenticated | ((department_id = my_department_id()) AND is_canmanage_ops()) | ((department_id = my_department_id()) AND is_canmanage_ops())",
+    "leaders write funding_events | INSERT | authenticated |  | ((department_id = my_department_id()) AND is_canmanage_ops())",
+    "members read funding_events | SELECT | authenticated | (department_id = my_department_id()) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 1,
+   "triggers": []
+  },
+  "fundraisers": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "name text NOT NULL",
+    "description text",
+    "target_date date",
+    "goal_amount numeric",
+    "status text NOT NULL DEFAULT 'planning'::text",
+    "point_person_id uuid",
+    "campaign_id uuid",
+    "proceeds numeric",
+    "sort integer NOT NULL DEFAULT 0",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "created_by uuid",
+    "color text",
+    "shared_with_station boolean NOT NULL DEFAULT false"
+   ],
+   "constraints": [
+    "fundraisers_campaign_id_fkey | FOREIGN KEY (campaign_id) REFERENCES donation_campaigns(id) ON DELETE SET NULL",
+    "fundraisers_created_by_fkey | FOREIGN KEY (created_by) REFERENCES members(id) ON DELETE SET NULL",
+    "fundraisers_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+    "fundraisers_id_dept_key | UNIQUE (id, department_id)",
+    "fundraisers_pkey | PRIMARY KEY (id)",
+    "fundraisers_point_person_id_fkey | FOREIGN KEY (point_person_id) REFERENCES members(id) ON DELETE SET NULL",
+    "fundraisers_status_check | CHECK ((status = ANY (ARRAY['planning'::text, 'active'::text, 'done'::text, 'archived'::text])))"
+   ],
+   "indexes": [
+    "fundraisers_dept_idx | CREATE INDEX fundraisers_dept_idx ON public.fundraisers USING btree (department_id)",
+    "fundraisers_id_dept_key | CREATE UNIQUE INDEX fundraisers_id_dept_key ON public.fundraisers USING btree (id, department_id)",
+    "fundraisers_pkey | CREATE UNIQUE INDEX fundraisers_pkey ON public.fundraisers USING btree (id)",
+    "fundraisers_status_idx | CREATE INDEX fundraisers_status_idx ON public.fundraisers USING btree (status)"
+   ],
+   "policies": [
+    "fundraisers_leadership | ALL | authenticated | ((department_id = my_department_id()) AND is_canmanage()) | ((department_id = my_department_id()) AND is_canmanage())"
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 2,
+   "triggers": []
+  },
+  "members": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "name text NOT NULL",
+    "role text",
+    "access text[] NOT NULL DEFAULT ARRAY['Member'::text]",
+    "status text DEFAULT 'Active'::text",
+    "phone text",
+    "joined text",
+    "participation integer",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "email text",
+    "mentor_id uuid",
+    "reach_out_member_id uuid",
+    "password_set boolean NOT NULL DEFAULT false"
+   ],
+   "constraints": [
+    "members_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+    "members_mentor_id_fkey | FOREIGN KEY (mentor_id) REFERENCES members(id) ON DELETE SET NULL",
+    "members_pkey | PRIMARY KEY (id)",
+    "members_reach_out_member_id_fkey | FOREIGN KEY (reach_out_member_id) REFERENCES members(id) ON DELETE SET NULL",
+    "members_status_allowed | CHECK ((status = ANY (ARRAY['Active'::text, 'Probationary'::text, 'Inactive'::text, 'Removed'::text, 'Banned'::text])))"
+   ],
+   "indexes": [
+    "members_dept_idx | CREATE INDEX members_dept_idx ON public.members USING btree (department_id)",
+    "members_email_lower_dept_unique | CREATE UNIQUE INDEX members_email_lower_dept_unique ON public.members USING btree (lower(email), department_id) WHERE (email IS NOT NULL)",
+    "members_pkey | CREATE UNIQUE INDEX members_pkey ON public.members USING btree (id)"
+   ],
+   "policies": [
+    "dept admins update members | UPDATE | authenticated | (is_dept_admin() AND (department_id = my_department_id())) | (is_dept_admin() AND (department_id = my_department_id()))",
+    "leaders delete members | DELETE | authenticated | (is_leader() AND (department_id = my_department_id())) | ",
+    "leaders insert members | INSERT | authenticated |  | (is_leader() AND (department_id = my_department_id()))",
+    "leaders read members base table | SELECT | public | (is_leader() AND (department_id = my_department_id())) | ",
+    "members read own row | SELECT | authenticated | (email = auth.email()) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 115,
+   "triggers": []
+  },
+  "notifications": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "member_id uuid NOT NULL",
+    "type text NOT NULL",
+    "title text NOT NULL",
+    "body text",
+    "subject_ref text",
+    "severity text NOT NULL DEFAULT 'info'::text",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "read_at timestamp with time zone",
+    "pushed_at timestamp with time zone"
+   ],
+   "constraints": [
+    "notifications_department_id_fkey | FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+    "notifications_member_id_fkey | FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE",
+    "notifications_pkey | PRIMARY KEY (id)",
+    "notifications_severity_check | CHECK ((severity = ANY (ARRAY['info'::text, 'warning'::text, 'critical'::text])))"
+   ],
+   "indexes": [
+    "notifications_dedupe_idx | CREATE UNIQUE INDEX notifications_dedupe_idx ON public.notifications USING btree (member_id, type, subject_ref) NULLS NOT DISTINCT",
+    "notifications_dept_idx | CREATE INDEX notifications_dept_idx ON public.notifications USING btree (department_id, created_at DESC)",
+    "notifications_member_unread_idx | CREATE INDEX notifications_member_unread_idx ON public.notifications USING btree (member_id, read_at) WHERE (read_at IS NULL)",
+    "notifications_pkey | CREATE UNIQUE INDEX notifications_pkey ON public.notifications USING btree (id)",
+    "notifications_unpushed_idx | CREATE INDEX notifications_unpushed_idx ON public.notifications USING btree (created_at) WHERE (pushed_at IS NULL)"
+   ],
+   "policies": [
+    "notifications_select | SELECT | authenticated | ((member_id = my_member_id()) OR (is_leader() AND (department_id = my_department_id()))) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 570,
+   "triggers": []
+  },
+  "recruitment_events": {
+   "cols": [
+    "id uuid NOT NULL DEFAULT gen_random_uuid()",
+    "department_id uuid NOT NULL",
+    "title text NOT NULL",
+    "date date NOT NULL",
+    "color text NOT NULL DEFAULT '#1F4E79'::text",
+    "notes text",
+    "created_at timestamp with time zone NOT NULL DEFAULT now()",
+    "start_time time without time zone",
+    "end_time time without time zone",
+    "location_label text"
+   ],
+   "constraints": [
+    "recruitment_events_pkey | PRIMARY KEY (id)"
+   ],
+   "indexes": [
+    "recruitment_events_pkey | CREATE UNIQUE INDEX recruitment_events_pkey ON public.recruitment_events USING btree (id)"
+   ],
+   "policies": [
+    "leaders delete recruitment_events | DELETE | authenticated | ((department_id = my_department_id()) AND is_canmanage_ops()) | ",
+    "leaders update recruitment_events | UPDATE | authenticated | ((department_id = my_department_id()) AND is_canmanage_ops()) | ((department_id = my_department_id()) AND is_canmanage_ops())",
+    "leaders write recruitment_events | INSERT | authenticated |  | ((department_id = my_department_id()) AND is_canmanage_ops())",
+    "members read recruitment_events | SELECT | authenticated | (department_id = my_department_id()) | "
+   ],
+   "relacl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "rows": 6,
+   "triggers": []
+  }
+ },
+ "total_policies": 175,
+ "verified_presence": 957
+}

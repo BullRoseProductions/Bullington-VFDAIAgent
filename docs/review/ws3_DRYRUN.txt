@@ -1,0 +1,56 @@
+pins: 4/4 mock bodies md5-equal to the live pins 
+before: member a2 can read 3 cert-proof file(s) that aren't theirs (the M-4 leak, reproduced)
+migration: applied. state row: {"select_policies":["cert_proofs_read_owner_or_leader","station_docs_read_own_dept"],"storage_policies":7,"verified_presence":2,"cert_proof_objects":5}
+after: member a2 reads 1 cert-proof file(s) (own only) of 4 visible objects
+re-run: refused -> PREFLIGHT: expected 6 storage policies, found 7. Re-audit.
+RETEST:
+PASS  O1 7 storage policies; 2 SELECT (carve-out + owner-or-leader), both TO authenticated
+PASS  O2 the 5 write policies are untouched
+— Alpha (mock)
+   PASS  T1 a plain member sees 0 of 4 cert-proofs and all 3 other documents
+   PASS  T2 the real owner sees exactly their own 2 proof file(s), nobody else's
+   PASS  T3 DA, Officer, Board and PA each see all 4 cert-proofs
+   PASS  T4 another department's Department Admin sees none of this department's files
+   PASS  T5 anon sees no objects
+— Bravo (mock)
+   PASS  T1 a plain member sees 0 of 1 cert-proofs and all 1 other documents
+   PASS  T2 the real owner sees exactly their own 1 proof file(s), nobody else's
+   PASS  T3 DA, Officer, Board and PA each see all 1 cert-proofs
+   PASS  T4 another department's Department Admin sees none of this department's files
+   PASS  T5 anon sees no objects
+PASS  T6 verified count 2 unchanged
+13 passed, 0 failed, 0 skipped
+drift "is_leader() drifted": refused -> PREFLIGHT: public.is_leader() is missing or has drifted (pinned 3f462af26a46909309f856f769226baa). Re-audit.
+drift "the read policy drifted": refused -> PREFLIGHT: station_docs_read_own_dept is not the audited text. Re-audit.
+mutations:
+   M1 carve-out not applied (read stays department-wide): migration REFUSED -> POST: the two SELECT policies are not as intended.
+   M2 owner can't read their own (leaders only): migration REFUSED -> POST: the two SELECT policies are not as intended.
+   M3 leaders narrowed to is_canmanage_ops (Board + PA lose it): migration REFUSED -> POST: the two SELECT policies are not as intended.
+   M4 owner-or-leader read without the department check: migration REFUSED -> POST: the two SELECT policies are not as intended.
+   M5 any member reads any proof (owner check dropped): migration REFUSED -> POST: the two SELECT policies are not as intended.
+   M6 another storage policy touched: migration REFUSED -> POST: another storage policy changed — it must not.
+post-apply drift (RETEST alone must catch):
+   D1 read policy re-widened to the whole department:
+      FAIL  T1 plain member sees 4 cert-proofs (want 0), 3/3 other docs
+      FAIL  T2 owner sees 4 (own 2), others' 2
+      10 passed, 3 failed, 0 skipped
+   D2 owner-or-leader loses the owner arm:
+      FAIL  T2 owner sees 0 (own 2), others' 0
+      FAIL  T2 owner sees 0 (own 1), others' 0
+      11 passed, 2 failed, 0 skipped
+   D3 leaders narrowed to DA/Officer:
+      FAIL  T3 leaders short of 4: board:0 pa:0
+      FAIL  T3 leaders short of 1: board:0 pa:0
+      11 passed, 2 failed, 0 skipped
+   D4 department check dropped:
+      FAIL  T4 other-department DA sees 4
+      FAIL  T4 other-department DA sees 1
+      11 passed, 2 failed, 0 skipped
+   D5 any authenticated member reads every proof:
+      FAIL  T1 plain member sees 4 cert-proofs (want 0), 3/3 other docs
+      FAIL  T2 owner sees 4 (own 2), others' 2
+      10 passed, 3 failed, 0 skipped
+   D6 anon handed a read:
+      FAIL  O1 storage policy set not as intended
+      FAIL  O2 a write policy changed
+      9 passed, 4 failed, 0 skipped

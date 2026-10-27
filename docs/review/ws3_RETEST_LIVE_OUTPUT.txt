@@ -1,0 +1,22 @@
+PASS  O1 7 storage policies; 2 SELECT (carve-out + owner-or-leader), both TO authenticated
+PASS  O2 the 5 write policies are untouched
+— B4C Demo Department
+   SKIP  no cert-proof files in this department
+— Granbury Fire Station
+   SKIP  no cert-proof files in this department
+— Indian Harbor Volunteer Fire Department
+   PASS  T1 a plain member sees 0 of 201 cert-proofs and all 5 other documents
+   PASS  T2 the real owner sees exactly their own 23 proof file(s), nobody else's
+   PASS  T3 DA, Officer, Board and PA each see all 201 cert-proofs
+   PASS  T4 another department's Department Admin sees none of this department's files
+   PASS  T5 anon sees no objects
+— Lipan Volunteer Fire Department
+   SKIP  no cert-proof files in this department
+— North Hood County Volunteer Fire Department
+   PASS  T1 a plain member sees 0 of 51 cert-proofs and all 43 other documents
+   PASS  T2 the real owner sees exactly their own 1 proof file(s), nobody else's
+   PASS  T3 DA, Officer, Board and PA each see all 51 cert-proofs
+   PASS  T4 another department's Department Admin sees none of this department's files
+   PASS  T5 anon sees no objects
+PASS  T6 verified count 959 unchanged
+13 passed, 0 failed, 3 skipped
