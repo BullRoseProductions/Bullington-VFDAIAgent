@@ -1,0 +1,45 @@
+{
+ "per_dept": [
+  {
+   "dept": "6fbb2d91",
+   "docs": 2,
+   "max_doc": 161901,
+   "total_chars": 307617
+  },
+  {
+   "dept": "a8dbabd1",
+   "docs": 2,
+   "max_doc": 41412,
+   "total_chars": 77365
+  },
+  {
+   "dept": "6d51b00a",
+   "docs": 5,
+   "max_doc": 28824,
+   "total_chars": 63420
+  }
+ ],
+ "auth_users": 115,
+ "image_usage": [
+  {
+   "dept": "6d51b00a",
+   "count": 9,
+   "month": "2026-10-01"
+  }
+ ],
+ "assistant_usage": [
+  {
+   "dept": "6d51b00a",
+   "count": 17,
+   "month": "2026-10-01"
+  },
+  {
+   "dept": "6fbb2d91",
+   "count": 1,
+   "month": "2026-10-01"
+  }
+ ],
+ "ai_outputs_last_30d": 3,
+ "auth_users_without_member": 28,
+ "auth_users_without_active_member": 36
+}
