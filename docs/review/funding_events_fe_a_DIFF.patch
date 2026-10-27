@@ -1,0 +1,253 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 3b5ee53..c3b2cd5 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1781,7 +1781,7 @@ const NAV = [
+   { key: "stationhours", label: "Station Hours", Icon: Clock, roles: ROLES },
+   { key: "duties", label: "Station Duties", Icon: ClipboardCheck, roles: ROLES },
+   { key: "recruit", label: "Recruitment", Icon: Megaphone, roles: LEADERSHIP },
+-  { key: "funding", label: "Funding", Icon: DollarSign, roles: LEADERSHIP },
++  { key: "funding", label: "Funding & Events", Icon: DollarSign, roles: LEADERSHIP },   // label only — the key stays "funding" so restored views keep working
+   { key: "visibility", label: "Public Relations", Icon: Calendar, roles: LEADERSHIP },
+   { key: "minutes", label: "Meetings", Icon: ClipboardList, roles: LEADERSHIP },
+   { key: "reports", label: "Reports", Icon: BarChart3, roles: LEADERSHIP },   // DA/PA land on the generator; Board/Officer on read-only BoardStats (routed in App)
+@@ -6208,11 +6208,11 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
+       ]} />}
+ 
+       {/* The recruitment events calendar moved: community / outreach events now live with fundraisers on ONE calendar
+-          (EventsCalendar, Funding → Fundraisers → Fundraising & Community Events). Same recruitment_events rows; one
++          (EventsCalendar, at the top of Funding & Events). Same recruitment_events rows; one
+           place to add and see them, so there's no second copy that can drift. The planner above writes no events. */}
+       <div style={{ ...FS.cardNoir, padding: "11px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: FIRE.textSecondary }}>
+         <Calendar size={15} color={FIRE.catGreen} style={{ flexShrink: 0 }} />
+-        <span>Community events — open houses, booths, school visits — are now on the <b style={{ color: FIRE.textPrimary }}>Fundraising &amp; Community Events</b> calendar, under Funding → Fundraisers.</span>
++        <span>Community events — open houses, booths, school visits — are now on the <b style={{ color: FIRE.textPrimary }}>Fundraising &amp; Community Events</b> calendar, at the top of Funding &amp; Events.</span>
+       </div>
+ 
+       <GraphicStudio S={S} brand={brand} />
+@@ -7682,10 +7682,17 @@ function ContentCalendar({ S, role, notify }) {
+                                         refuses a Project Admin who isn't DA / Officer — so in practice: Department Admin.
+    EVERY EDIT AND DELETE READS BACK ITS ROW COUNT. PostgREST answers a write that RLS filtered to zero rows with no
+    error; checking `error` alone made a refused delete look like it worked. `.select("id")` on the mutation returns
+-   the rows it touched, and zero is reported as a failure. */
++   the rows it touched, and zero is reported as a failure.
++
++   THE TYPE IS PICKED, NEVER DEFAULTED (FE-A). "Add an event" opens two tiles — Fundraiser event / Community event —
++   and the form appears only once one is chosen. It used to open on Fundraiser with a small toggle, so a community
++   event added in a hurry silently landed in funding_events. The kind still can't change on edit (it would be a move
++   between the two tables); the edit form says so. Community subtypes wait for FE-B's recruitment_events.event_type. */
+ const EVENT_KINDS = {
+-  fundraiser: { table: "funding_events", label: "Fundraiser", noun: "fundraising event", accent: FIRE.catAmber },
+-  community: { table: "recruitment_events", label: "Community event", noun: "community event", accent: FIRE.catGreen },
++  fundraiser: { table: "funding_events", label: "Fundraiser", pick: "Fundraiser event", noun: "fundraising event", accent: FIRE.catAmber,
++                blurb: "Raises money — a breakfast, a raffle, or one of a fundraiser's key dates." },
++  community: { table: "recruitment_events", label: "Community event", pick: "Community event", noun: "community event", accent: FIRE.catGreen,
++               blurb: "Outreach — an open house, a booth, a school visit, a parade." },
+ };
+ const evHHMM = (t) => (t ? String(t).slice(0, 5) : "");   // "18:00:00" -> "18:00" for <input type="time">
+ function eventTimeRange(start, end) {
+@@ -7793,11 +7800,12 @@ function EventsCalendar({ S, role, notify }) {
+     .sort((a, b) => (a.d - b.d) || String(a.startTime || "").localeCompare(String(b.startTime || "")));
+ 
+   // ---- add
+-  const blank = (day) => ({ kind: "fundraiser", title: "", day, start: "", end: "", loc: "", notes: "", color: CATEGORY_COLORS[0], fr: "" });
++  const blank = (day) => ({ kind: null, title: "", day, start: "", end: "", loc: "", notes: "", color: CATEGORY_COLORS[0], fr: "" });   // kind: null = the type tiles show first
+   const [adding, setAdding] = useState(null);   // null = form closed
+   const [addBusy, setAddBusy] = useState(false);
+   async function addEvent() {
+     const f = adding; const t = f.title.trim();
++    if (!EVENT_KINDS[f.kind]) { notify({ kind: "error", title: "Pick a type", text: "Choose Fundraiser event or Community event first." }); return; }
+     if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
+     if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time is before the start time." }); return; }
+     setAddBusy(true);
+@@ -7851,12 +7859,14 @@ function EventsCalendar({ S, role, notify }) {
+     setOpenKey(null); setEdit(null); loadItems();
+   }
+ 
+-  const kindToggle = (value, onPick) => (
+-    <div style={{ display: "inline-flex", border: `1px solid ${FIRE.line2Noir}`, borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
+-      {Object.entries(EVENT_KINDS).map(([k, v], i) => (
+-        <button key={k} type="button" onClick={() => onPick(k)}
+-          style={{ border: "none", borderLeft: i ? `1px solid ${FIRE.line2Noir}` : "none", background: value === k ? `${v.accent}33` : FIRE.card2Noir, color: value === k ? FIRE.textPrimary : FIRE.navLabel, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+-          <span style={{ width: 7, height: 7, borderRadius: 999, background: v.accent }} />{v.label}
++  // Step 1 of an add: what kind of event is this? Each tile routes to its own table; nothing is preselected.
++  const kindTiles = (onPick) => (
++    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 10, flexBasis: "100%" }}>
++      {Object.entries(EVENT_KINDS).map(([k, v]) => (
++        <button key={k} type="button" data-testid={`event-kind-${k}`} onClick={() => onPick(k)}
++          style={{ ...NOIR_INSET, borderLeft: `4px solid ${v.accent}`, padding: "12px 14px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", gap: 4 }}>
++          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 700, color: FIRE.textPrimary }}><span style={{ width: 8, height: 8, borderRadius: 999, background: v.accent }} />{v.pick}</span>
++          <span style={{ fontSize: 12, color: FIRE.textSecondary, lineHeight: 1.4 }}>{v.blurb}</span>
+         </button>
+       ))}
+     </div>
+@@ -7866,10 +7876,20 @@ function EventsCalendar({ S, role, notify }) {
+     <div>
+       {adding && canWrite && (
+         <div style={{ ...S.opCard, ...FS.card, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+-          <div style={{ flexBasis: "100%" }}>{kindToggle(adding.kind, (k) => setAdding((p) => ({ ...p, kind: k, fr: k === "fundraiser" ? p.fr : "" })))}</div>
+-          <EventFields S={S} f={adding} set={(patch) => setAdding((p) => ({ ...p, ...patch }))} frs={frs} frColorMap={frColorMap} withDay dim={dim} />
+-          <button style={{ ...FS.btnPrimary, opacity: addBusy ? 0.7 : 1 }} onClick={addEvent} disabled={addBusy}>{addBusy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Add to {CAL_MONTHS[cur.m]}</button>
+-          <button style={FS.btn} onClick={() => setAdding(null)} disabled={addBusy}>Cancel</button>
++          {!adding.kind ? (<>
++            <div style={{ flexBasis: "100%", fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>What kind of event is it?</div>
++            {kindTiles((k) => setAdding((p) => ({ ...p, kind: k, fr: k === "fundraiser" ? p.fr : "" })))}
++            <button style={FS.btn} onClick={() => setAdding(null)}>Cancel</button>
++          </>) : (<>
++            <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 10 }}>
++              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: EVENT_KINDS[adding.kind].accent }}>
++                <span style={{ width: 8, height: 8, borderRadius: 999, background: EVENT_KINDS[adding.kind].accent }} />{EVENT_KINDS[adding.kind].pick}</span>
++              <button type="button" style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }} onClick={() => setAdding((p) => ({ ...p, kind: null }))} disabled={addBusy}>Change type</button>
++            </div>
++            <EventFields S={S} f={adding} set={(patch) => setAdding((p) => ({ ...p, ...patch }))} frs={frs} frColorMap={frColorMap} withDay dim={dim} />
++            <button style={{ ...FS.btnPrimary, opacity: addBusy ? 0.7 : 1 }} onClick={addEvent} disabled={addBusy}>{addBusy ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Add to {CAL_MONTHS[cur.m]}</button>
++            <button style={FS.btn} onClick={() => setAdding(null)} disabled={addBusy}>Cancel</button>
++          </>)}
+         </div>
+       )}
+ 
+@@ -7917,6 +7937,7 @@ function EventsCalendar({ S, role, notify }) {
+               {edit ? (
+                 <div style={{ padding: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                   <EventFields S={S} f={edit} set={(patch) => setEdit((p) => ({ ...p, ...patch }))} frs={frs} frColorMap={frColorMap} />
++                  <div style={{ flexBasis: "100%", fontSize: 12, color: FIRE.textMuted }}>This is a {k.noun} — the type can't be changed here. Wrong type? Delete it and add it again.</div>
+                   <div style={{ flexBasis: "100%", display: "flex", gap: 8, marginTop: 4 }}>
+                     <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} onClick={saveEdit} disabled={busy}>{busy ? <Loader2 size={15} className="spin" /> : <Pencil size={15} />} Save changes</button>
+                     <button style={FS.btn} onClick={() => setEdit(null)} disabled={busy}>Cancel</button>
+@@ -8716,7 +8737,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
+       notify({ kind: "success", title: "Added to this fundraiser", text: `${items.length} task${items.length === 1 ? "" : "s"} and ${events.length} date${events.length === 1 ? "" : "s"} added.` });
+       setPlanReview(null); setExErr("");
+       load();                                        // Jobs and Key dates below pick them up
+-      if (events.length) onWorkAdded?.();            // and the funding calendar further down re-reads
++      if (events.length) onWorkAdded?.();            // optional hook; the hub's events calendar re-reads when you go back to it
+       return;
+     }
+     if (!itemsErr && eventsErr) { notify({ kind: "error", title: "Tasks added — dates didn't", text: `${items.length} task(s) created, but the ${events.length} date(s) failed. Fix and retry the dates.`, details: eventsErr.message }); setPlanReview((pv) => ({ ...pv, actionItems: [] })); load(); }
+@@ -9528,9 +9549,6 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+      not exist when it last loaded. */
+   const [focusFr, setFocusFr] = useState(null); const [frReload, setFrReload] = useState(0);
+   const [creatingFr, setCreatingFr] = useState(false); const [frName, setFrName] = useState("");
+-  // Remounts EventsCalendar so events created elsewhere on this page show without a navigation.
+-  // Bumped by the HQ now (via onWorkAdded) rather than by the planner, which no longer writes events.
+-  const [fundingReloadKey, setFundingReloadKey] = useState(0);
+   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
+   const canManage = hasAny(role, CANMANAGE_OPS_ROLES);   // ai_outputs write — ops only (DA/Officer, excludes Board + PA; Board can still VIEW Funding)
+   const [saving, setSaving] = useState(false); const [saveTitle, setSaveTitle] = useState("");
+@@ -9701,7 +9719,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+   return (
+     <PageShell band watermark="FUNDS" kicker="FUNDRAISERS" title="Plan fundraisers, write the appeals, line up sponsors"
+       sub="Ideas to run, a hand to plan and write the asks, sponsor packages — and a log of what you've run recently so you're not repeating yourself by accident."
+-      above={<>{loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}{back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}</>}>
++      above={<>{loadErr && <OfflineNotice onRetry={loadFundraiserLog} what="funding" />}{back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding &amp; Events</button>}</>}>
+       <NoirSkin>
+ 
+       {/* THE EVENTS THEMSELVES, above the planner. The planner is a tool you reach for once; the
+@@ -9710,7 +9728,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+           by RLS, so a Project Admin would otherwise get an empty list with no explanation. */}
+       {canManage && <FundraiserIndex S={S} notify={notify} meId={meId} members={members} dept={dept}
+                                      focusId={focusFr} reloadKey={frReload} onFocusHandled={() => setFocusFr(null)}
+-                                     onOpenDoc={reopen} onWorkAdded={() => setFundingReloadKey((k) => k + 1)} />}
++                                     onOpenDoc={reopen} />}
+ 
+       <div style={NOIR_AI_BANNER}>
+         <div style={{ flex: 1 }}>
+@@ -9807,9 +9825,6 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+         </div>
+       </>)}
+ 
+-      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISING &amp; COMMUNITY EVENTS</div>
+-      <EventsCalendar key={fundingReloadKey} S={S} role={role} notify={notify} />
+-
+       <div style={{ ...NOIR_LABEL, marginBottom: 8, display: "flex", alignItems: "center" }}>
+         <DollarSign size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />RECENT FUNDRAISERS
+         {totalRaised > 0 && <span style={{ marginLeft: "auto", fontWeight: 700, color: FIRE.greenText, fontSize: 12 }}>${totalRaised.toLocaleString()} raised</span>}
+@@ -9901,7 +9916,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
+    LEFT OUT OF THE MOCK ON PURPOSE — no data behind them: "tickets sold", "tasks 4 of 11 done", and the
+    planner's inline prompt + idea chips (the planner's state lives in Fundraisers; the card opens it).
+    App wording kept for donor stages (Prospect / Talking / Committed / Gave / Declined). */
+-function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open }) {
++function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open, calendar }) {
+   const [funds, setFunds] = useState(null), [acts, setActs] = useState(null), [frs, setFrs] = useState(null), [donors, setDonors] = useState(null);
+   const [err, setErr] = useState(false);
+   const load = () => {
+@@ -9964,6 +9979,8 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
+     </div>
+     <div style={{ fontSize: 11, color: FIRE.textMuted, margin: "-4px 0 12px" }}>Raised this year counts donations and fundraiser proceeds dated in {year}; the Fundraisers quick-log isn't dated, so it isn't included.</div>
+ 
++    {calendar /* the events calendar — under the stat chips, above the cards (FE-A) */}
++
+     <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+       <CardHead icon={DollarSign} title="Funds" right={link("Manage funds", "donations")} />
+       {funds && liveFunds.length === 0 ? <div style={{ fontSize: 13, color: FIRE.textMuted }}>No funds yet — set one up under Manage funds.</div> : (
+@@ -9993,7 +10010,7 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
+     </Card>
+ 
+     <Card padding="14px 16px" style={{ marginBottom: 12 }}>
+-      <CardHead icon={PartyPopper} title="Fundraisers" right={link("Funding calendar", "fundraisers")} />
++      <CardHead icon={PartyPopper} title="Fundraisers" right={link("All fundraisers", "fundraisers")} />
+       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
+         <div>
+           {frs && frRows.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>No fundraisers yet.</div>}
+@@ -10064,8 +10081,9 @@ function FundingOverview({ year, raisedTotal, donationsYtd, fundraisersYtd, open
+    in the one comment that describes this page is worse than no comment: the planner NO LONGER
+    writes action_items or funding_events. Its plan-phase action is "Create fundraiser" (5a), and
+    extraction moved into FundraiserHQ (5b), where the tasks and dates it produces are tagged to a
+-   fundraiser instead of scattering into two shared pools. fundingReloadKey survives and still
+-   remounts the calendar, but the HQ bumps it now, through onWorkAdded.
++   fundraiser instead of scattering into two shared pools. The events calendar itself moved UP to
++   this hub (FE-A), so fundingReloadKey is gone: dates an HQ adds show when you come back here,
++   because returning mounts the calendar fresh. onWorkAdded stays optional on the HQ (unused).
+ 
+    Mirrors SettingsHub's hub pattern (shell / backBtn / card) rather than inventing a third one.
+ 
+@@ -10149,9 +10167,22 @@ function Funding({ S, role, notify, dept, meId, members }) {
+     </Card>
+   );
+ 
++  /* THE EVENTS CALENDAR LIVES HERE NOW (FE-A) — its one mount, at the top of the hub, so what's coming up is visible
++     the moment you open Funding & Events instead of two taps down under Fundraisers. Everyone who reaches this page
++     sees it: both event tables are department-readable, and EventsCalendar gates add / edit / delete itself
++     (CANMANAGE_OPS_ROLES; delete also the typed-delete gate). A Project Admin's fundraiser read returns no rows, which
++     only empties the "Part of a fundraiser" names — the events still show. No reload key: an HQ is only reachable
++     under Fundraisers, and coming back here mounts the calendar fresh. */
++  const eventsCalendar = (
++    <div style={{ marginBottom: 4 }}>
++      <div style={{ ...NOIR_LABEL, marginBottom: 8 }}><Calendar size={13} style={{ marginRight: 5, verticalAlign: "-2px" }} />FUNDRAISING &amp; COMMUNITY EVENTS</div>
++      <EventsCalendar S={S} role={role} notify={notify} />
++    </div>
++  );
++
+   /* THE MOCK'S HUB (b4c_funding_noir.html) for the people who can see the money (canManage — see above);
+      everyone else in leadership keeps the tile list, which only offers what their RLS can read. */
+-  return (<PageShell band watermark="FUNDS" kicker={dept?.name ? `FUNDING · ${dept.name}` : "FUNDING"} title="Money in, and where it came from" sub="Plan and run fundraisers, and keep track of the people and businesses who give."
++  return (<PageShell band watermark="FUNDS" kicker={dept?.name ? `FUNDING & EVENTS · ${dept.name}` : "FUNDING & EVENTS"} title="Money in, and where it came from" sub="Plan and run fundraisers and community events, and keep track of the people and businesses who give."
+     actions={canSeeDonations ? (
+       <div style={{ display: "flex", gap: 9, flexWrap: "wrap", position: "relative" }}>
+         <button style={FS.btn} onClick={() => setView("fundraisers")}><PartyPopper size={14} color={FIRE.btnIcon} /> New fundraiser</button>
+@@ -10160,12 +10191,13 @@ function Funding({ S, role, notify, dept, meId, members }) {
+     ) : null}>
+     <NoirSkin>
+     {canSeeDonations ? (
+-      <FundingOverview year={year} raisedTotal={raisedTotal} donationsYtd={donationsYtd} fundraisersYtd={fundraisersYtd} open={setView} />
+-    ) : (
++      <FundingOverview year={year} raisedTotal={raisedTotal} donationsYtd={donationsYtd} fundraisersYtd={fundraisersYtd} open={setView} calendar={eventsCalendar} />
++    ) : (<>
++      {eventsCalendar}
+       <div style={S.opGrid}>
+-        {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, keep the funding calendar, and log what you've raised.")}
++        {card("fundraisers", PartyPopper, "Fundraisers", "Plan an event with a hand from B4C, write the appeals, and log what you've raised.")}
+       </div>
+-    )}
++    </>)}
+     </NoirSkin>
+   </PageShell>);
+ }
+@@ -10209,7 +10241,7 @@ function Donations({ S, role, notify, dept, meId, members, back }) {
+   return (
+     <PageShell band watermark="FUNDS" kicker="DONATIONS" title="What you're raising for, and who gives"
+       sub="Keep track of the businesses and people who support the department, and the funds you're asking them to help with."
+-      above={back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding</button>}>
++      above={back && <button style={{ ...FS.btn, margin: "6px 0 10px" }} onClick={back}><ArrowLeft size={15} /> Funding &amp; Events</button>}>
+       <NoirSkin>
+ 
+       {/* STACKED, not tabbed. The two answer different questions — "what are we raising for" and
