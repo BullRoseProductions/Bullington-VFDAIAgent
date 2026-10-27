@@ -16,6 +16,8 @@ import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, 
 import { mergeStationHours, rollupStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
 import { shiftSpan, shiftHoursText } from "../shared/shift-span.js";   // WS-4a G: "Voided" / "< 1 min" on every shift row
+import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";   // WS-4b A: one "ready" for every screen + the email
+import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";   // WS-4b F-2: the email's maintenance rule
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -400,13 +402,10 @@ import { ymLabel, certDatesError } from "../shared/expiry.js";   // cert dates (
 // Event audience: 'everyone' | 'leadership' | 'board'. A RESTRICTED event (leadership OR board)
 // is pulled out of regular training stats and shown labeled to all. rollFor = who is accountable /
 // expected for an event: everyone -> all; leadership -> isLeader; board -> isBoard.
-const isRestrictedEvent = (s) => s?.audience === "leadership" || s?.audience === "board";
-// A session feeds the attendance RATE only if it's a regular (non-restricted) event AND not
-// flagged optional. Two INDEPENDENT reasons to exclude — they compose: a restricted event stays
-// out via audience, a regular off-hours/one-off stays out via the flag, a normal drill counts.
-// Optional sessions still record + display attendance; we drop them from the denominator, not the record.
-const isOptionalEvent = (s) => s?.countsAttendance === false;
-const countsTowardRate = (s) => !isRestrictedEvent(s) && !isOptionalEvent(s);
+// isRestrictedEvent / isOptionalEvent / countsTowardRate now live in shared/attendance.js (WS-4b) — the
+// weekly email imports the same three, so "counts toward the rate" can't mean two things.
+import { isRestrictedEvent, isOptionalEvent, countsTowardRate, expectedAfterJoin, memberAttendance, drillsScheduled,
+  deptAttendance as deptAttendanceShared } from "../shared/attendance.js";
 const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : s?.audience === "leadership" ? isLeader(m?.access)
   : true;
@@ -3243,37 +3242,16 @@ const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, 
 // Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
 const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // never a selectable assignee (owner/test by id + any Project Admin by role)
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
-/* JOIN-DATE CUTOFF. A drill held before someone joined was never theirs to attend: it renders "—"
-   (not expected) and stays out of their denominator, everywhere attendance is computed.
-   Full join date if on file; else Jan 1 of a leading 4-digit `joined` year; else NO cutoff
-   (eligible from the start — missing join info must never wrongly exclude). */
-const joinCutoff = (m) => {
-  const d = String(m?.joinedOn || "");
-  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
-  const y = /^\s*(\d{4})/.exec(String(m?.joined ?? ""));
-  return y ? `${y[1]}-01-01` : null;
-};
-const expectedAfterJoin = (m, s) => { const c = joinCutoff(m); return !c || toISODate(sessDate(s)) >= c; };
+/* JOIN-DATE CUTOFF — joinCutoff / expectedAfterJoin now live in shared/attendance.js (WS-4b), so the weekly
+   email applies the same cutoff (it had none: a September joiner read as absent for every January drill). */
 /* The server refuses attendance outside a member's membership window (join date .. termination date — the trigger in
    sql/membership_window). Its message carries no date (a termination date is Department-Admin-only); match the prefix. */
 const isMembershipWindowErr = (e) => /^MEMBERSHIP_WINDOW:/.test(String(e?.message || ""));
-function deptAttendance(members, sessions, year, range) {
-  // scope by date range {from,to} (ISO) when given (empty bound = unbounded); else the original year filter — backward-compatible for dashboards
-  const inScope = range
-    ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
-    : (s) => s.y === year;
-  const doneThisYear = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && countsTowardRate(s));   // TRAINING only — leadership EVENTS + optional (off-hours/one-off) sessions excluded from the rate; people/roles untouched
-  const rows = (members || []).filter(countsInStats).map((m) => {   // exclude owner/test from denominators + the attendance table
-    const memberLeader = isLeader(m.access);
-    const eligible = doneThisYear.filter((s) => expectedAfterJoin(m, s));   // audience='everyone' → everyone, but only drills on/after this member's join date
-    const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
-    const pct = eligible.length ? Math.round((attended / eligible.length) * 100) : null;
-    return { id: m.id, name: m.name, role: m.role, status: m.status, attended, eligible: eligible.length, pct, leader: memberLeader };
-  });
-  const rated = rows.filter((r) => r.pct != null);
-  const avg = rated.length ? Math.round(rated.reduce((s, r) => s + r.pct, 0) / rated.length) : 0;
-  return { rows, avg, doneThisYear };
-}
+// WS-4b: the rule lives in shared/attendance.js (the weekly email imports it too). This wrapper only supplies WHO is
+// counted — countsInStats, unchanged until WS-4c's shared/members.js. Returns { rows, avg (null = "—"), doneThisYear
+// (the attendance denominator, meetings in), drillsHeld (no meetings), needsRoll }.
+const deptAttendance = (members, sessions, year, range) => deptAttendanceShared(members, sessions, year, range, countsInStats);
+const pctOrDash = (p) => (p == null ? "—" : `${p}%`);   // C-3: an attendance % nobody was rated for reads "—", never 0%
 // BOARD-EVENT accountability track: board members' attendance at audience='board' sessions
 // (board meetings). Board has a formal duty to attend, so this is the ONE governance stat we
 // measure. Leadership events still exist + are still pulled from training stats, but are NOT
@@ -5084,7 +5062,9 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
   const lastMonth = memberAttendance(me, sess, myMonths[myMonths.length - 2]);
   const hasThisMonth = !!thisMonth;                                                 // this month has ≥1 recorded drill
   const trend = (thisMonth && lastMonth) ? thisMonth.pct - lastMonth.pct : null;    // only when BOTH months have data
-  const trainingsThisMonth = sess.filter((s) => s.y === today.getFullYear() && s.m === today.getMonth()).length;
+  // WS-4b D-1: "N scheduled" = drills on this calendar month's calendar — not cancelled, counting toward the rate, not a
+  // business meeting (shared drillsScheduled). It used to count every session, cancelled and leadership-only included.
+  const trainingsThisMonth = drillsScheduled(sess, { from: toISODate(new Date(today.getFullYear(), today.getMonth(), 1)), to: toISODate(new Date(today.getFullYear(), today.getMonth() + 1, 0)) }).length;
   // certs, duties and upcoming-training derivations all moved to PersonalView with the cards that
   // used them — MemberDashboard now renders that component instead of its own copy.
   // ---- Next event: soonest upcoming across the SAME 4 live calendar tables DashboardCalendar reads (NOT the unused `events` table) ----
@@ -13480,8 +13460,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
   const cov = certCoverage(members, { includeProbationary: true });
   const certPct = cov.pct;
   // Real attendance — shared deptAttendance calc, now RANGE-scoped (a period fact). Dashboards still call the year form.
-  const { rows: attRows, avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
-  const drillsHeld = drills.length;   // training sessions held (with attendance) during the period
+  const { rows: attRows, avg: avgPart, drillsHeld: heldList } = deptAttendance(members, sessions, null, range);
+  const drillsHeld = heldList.length;   // WS-4b D: drills held (roll taken, not cancelled, no business meetings) during the period
   const attById = new Map(attRows.map((r) => [r.id, r.pct]));
   // Recent training — real recent DONE sessions with recorded attendance (drills only; no meetings/calls exist in the data).
   const sessMs = (s) => new Date(s.y, s.m, s.d).getTime();
@@ -13620,6 +13600,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
       readiness: apOk ? {
         ...ap.totals, asOf: todayLabel,
         flaggedRigs: ap.flaggedRigs.map((r) => ({ name: r.name, note: r.note })),
+        neverCheckedRigs: ap.neverCheckedRigs.map((r) => ({ name: r.name, note: r.note })),
         oosRigs: ap.oosRigs.map((r) => ({ name: r.name, note: r.note })),
       } : null,
     };
@@ -13639,7 +13620,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
       ``,
       `=== DURING THE REPORT PERIOD (${periodLabel}) — what happened in this window ===`,
       `Training sessions held (attendance recorded): ${drillsHeld}`,
-      `Average training attendance during the period: ${avgPart}%`,
+      `Average training attendance during the period: ${avgPart == null ? "not measured (no drills with a roll)" : `${avgPart}%`}`,
       `Duties completed: ${dutiesDone}`,
       `Action items resolved (completed or cancelled): ${actionsResolved}`,
       ...(shOk ? [
@@ -13681,9 +13662,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
       `Upcoming training: ${topN(upcoming, (s) => `${s.title} on ${fmtSess(s)}`)}`,
       `Pending certification approvals: ${topN(pendingCerts, (p) => `${nameById.get(p.member_id) || "a member"}'s ${p.name}`)}`,
       ...(apOk ? [
-        `Apparatus readiness: ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.oos} out of service (${ap.totals.total} total)`,
+        `Apparatus readiness (ready = in service, passed, checked, not overdue): ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.neverChecked} never checked, ${ap.totals.oos} out of service (${ap.totals.total} total)`,
         `Open apparatus check failures not yet resolved: ${ap.totals.openFailures}`,
         `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
+        `Apparatus never checked: ${topN(ap.neverCheckedRigs, (r) => r.name)}`,
         `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
       ] : [`Apparatus readiness: unavailable — the record could not be read, so no readiness figure is provided.`]),
       ...(onMod("equipment") ? (eq.ok ? [
@@ -13738,7 +13720,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
         <CardHead icon={CalendarCheck} title="During this period" right={periodLabel} style={{ marginTop: 4 }} />
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
           <Stat S={S} dark n={String(drillsHeld)} label="Training sessions" />
-          <Stat S={S} dark n={`${avgPart}%`} label="Avg attendance" />
+          <Stat S={S} dark n={pctOrDash(avgPart)} label="Avg attendance" />
           <Stat S={S} dark n={String(dutiesDone)} label="Duties completed" />
           <Stat S={S} dark n={String(actionsResolved)} label="Action items resolved" />
         </div>
@@ -13813,10 +13795,10 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
           </div>
         ) : apOk && (
           <>
-            <SubHead>Apparatus readiness — {ap.totals.ready} ready · {ap.totals.flagged} needs attention · {ap.totals.oos} out of service</SubHead>
+            <SubHead>Apparatus readiness — {ap.totals.ready} ready · {ap.totals.flagged} needs attention · {ap.totals.neverChecked} never checked · {ap.totals.oos} out of service</SubHead>
             {ap.totals.openFailures > 0 && <Line>⚠ {ap.totals.openFailures} open check failure{ap.totals.openFailures > 1 ? "s" : ""}</Line>}
-            {[...ap.flaggedRigs, ...ap.oosRigs].length === 0 ? <Line>All apparatus in service and passing.</Line>
-              : [...ap.flaggedRigs, ...ap.oosRigs].slice(0, 6).map((r) => <Line key={r.id}>{r.name}{r.note ? ` · ${r.note}` : ""}{r.inService ? "" : " · out of service"}</Line>)}
+            {[...ap.flaggedRigs, ...ap.neverCheckedRigs, ...ap.oosRigs].length === 0 ? <Line>All apparatus in service, checked and passing.</Line>
+              : [...ap.flaggedRigs, ...ap.neverCheckedRigs, ...ap.oosRigs].slice(0, 6).map((r) => <Line key={r.id}>{r.name}{r.note ? ` · ${r.note}` : ""}{!r.inService ? " · out of service" : !r.lastCheckAt ? " · never checked" : ""}</Line>)}
           </>
         )}
         {onMod("equipment") && (eq.err ? <Unavail what="Equipment readiness" retry={eq.retry} /> : eq.ok && (<>
@@ -13948,7 +13930,7 @@ function Reports({ S, role, members, sessions, dept, meId, notify }) {
 function ReportsHub({ S, members, sessions, dept, open }) {
   const year = useMemo(() => presetRange("year"), []);
   const cov = certCoverage(members, { includeProbationary: true });
-  const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, year);
+  const { avg: avgPart, drillsHeld: drills } = deptAttendance(members, sessions, null, year);   // WS-4b: drills = held, no meetings; avg null → "—"
   const onSH = moduleEnabled("stationhours", dept?.disabled_modules), onAp = moduleEnabled("apparatus", dept?.disabled_modules);
   const sh = useStationHoursRange(year);
   const ap = useApparatusReadiness();
@@ -13962,12 +13944,12 @@ function ReportsHub({ S, members, sessions, dept, open }) {
   const h1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toFixed(1);
   // Values follow the colour rule — green good, amber warning, red bad — not a fixed accent per tile.
   const tone = (p) => p == null ? FIRE.textSecondary : p >= 75 ? FIRE.greenText : p >= 50 ? FIRE.amberText : FIRE.redText;
-  const apTone = !apOk ? FIRE.textSecondary : ap.totals.oos ? FIRE.redText : ap.totals.flagged ? FIRE.amberText : FIRE.greenText;
+  const apTone = !apOk ? FIRE.textSecondary : ap.totals.oos ? FIRE.redText : (ap.totals.flagged || ap.totals.neverChecked) ? FIRE.amberText : FIRE.greenText;
   const glance = [
     ["Cert coverage", cov.pct == null ? "—" : `${cov.pct}%`, cov.total ? `${cov.covered} of ${cov.total} covered` : "no active members", tone(cov.pct)],
-    ["Avg attendance", drills.length ? `${avgPart}%` : "—", `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, tone(drills.length ? avgPart : null)],
+    ["Avg attendance", pctOrDash(avgPart), `${drills.length} drill${drills.length === 1 ? "" : "s"} held`, tone(avgPart)],
     ...(onSH ? [["Station hrs credited", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : (sh.err ? "unavailable" : "loading"), FIRE.greenText]] : []),
-    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), apTone]] : []),
+    ...(onAp ? [["Apparatus ready", apOk ? `${ap.totals.ready}/${ap.totals.total}` : "—", apOk ? `${ap.totals.flagged} need attention · ${ap.totals.neverChecked} never checked · ${ap.totals.oos} OOS` : (ap.err ? "unavailable" : "loading"), apTone]] : []),
   ];
   const card = (key, Icon, acc, title, blurb, pv, pm, badge, pvColor) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => open(key)}>
@@ -14003,7 +13985,7 @@ function ReportsHub({ S, members, sessions, dept, open }) {
       <div style={{ fontSize: 11.5, color: FIRE.textMuted, margin: "0 2px 14px", lineHeight: 1.45 }}>A summary of the numbers a chief gets asked for — the reports below document each one for the council, the board, and the county.</div>
       <SectionBar label="Reports — open any to view, draft, or download" style={{ marginTop: 0 }} />
       <div style={S.opGrid}>
-        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", drills.length ? `${avgPart}%` : "—", `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`, null, tone(drills.length ? avgPart : null))}
+        {card("attendance", CalendarCheck, NOIR_AI.blue, "Yearly Attendance", "Full-year training attendance per member — the durable record for audits, not the rolling calendar view.", pctOrDash(avgPart), `avg · ${drills.length} drill${drills.length === 1 ? "" : "s"}`, null, tone(avgPart))}
         {card("chief", BarChart3, FIRE.redBright, "Chief's Report", "The board & city readiness report — the chief's narrative over your locked, period-filtered facts.", last ? fmtShort(last.edited_at || last.created_at) : (saved ? "None yet" : "—"), saved ? `${last ? "last saved · " : ""}${saved.length} saved` : null, "AI-drafted", last ? FIRE.textPrimary : FIRE.textMuted)}
         {card("actions", ClipboardCheck, FIRE.amberText, "Action Items", "The actual items behind the Chief's Report count — completed and cancelled for a date range, plus everything still open today.", null, null)}
         {onSH && card("stationhours", Clock, FIRE.green, "Station Hours", "Credited standby and training hours by member — for ISO, LOSAP, and staffing.", shOk ? `${h1(sh.totals.credited)}h` : "—", shOk ? `credited · ${sh.totals.members} member${sh.totals.members === 1 ? "" : "s"}` : null, null, shOk ? FIRE.greenText : FIRE.textSecondary)}
@@ -14079,10 +14061,10 @@ function BoardStats({ S, role, members, sessions, dept }) {
   const newThisYear = cm.filter((m) => joinedYear(m) === thisYear).length;
 
   // Attendance + drills — THIS PERIOD.
-  const { avg: avgPart, doneThisYear: drills } = deptAttendance(members, sessions, null, range);
+  const { avg: avgPart, drillsHeld: drills } = deptAttendance(members, sessions, null, range);   // WS-4b: drills = held, no meetings; avg null → "—"
   const { avg: boardPct, doneBoard, rows: boardRows } = boardAttendance(members, sessions, null, range);
   const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / board members in the period → "—"
-  const attRated = drills.length > 0;                          // no drills in the period → "—", not 0%
+  const attRated = avgPart != null;                            // nobody rated in the period → "—", not 0% (C-3; meetings still rate, D-2)
   // Charts follow the period picker: one point / one bar per month of the selected range.
   const trendMonths = useMemo(() => monthsBetween(range.from, range.to, 24), [range.from, range.to]);
   const trend = useMemo(() => attendanceSeries(members, sessions, trendMonths.months), [members, sessions, trendMonths]);
@@ -14145,6 +14127,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
               {ap.loaded && (ap.flaggedRigs.length > 0 || ap.oosRigs.length > 0) && (
                 <div style={{ marginTop: 10, paddingTop: 4, borderTop: `1px solid ${FIRE.lineNoir}` }}>
                   <StatsRigList label="Needs attention" rigs={ap.flaggedRigs} />
+                  <StatsRigList label="Never checked" rigs={ap.neverCheckedRigs} />
                   <StatsRigList label="Out of service" rigs={ap.oosRigs} />
                 </div>
               )}
@@ -14787,27 +14770,29 @@ function useApparatusReadiness() {
   const load = () => {
     setErr("");
     Promise.all([
-      supabase.from("apparatus").select("id, name, type, status, note, in_service").is("deleted_at", null).order("name", { ascending: true }),
+      supabase.from("apparatus").select("id, name, type, status, note, in_service, last_check_at, check_interval_days").is("deleted_at", null).order("name", { ascending: true }),
       supabase.from("apparatus_check_results")
         .select("id, apparatus_checks!inner(apparatus_name, state)")
         .eq("result", "fail").is("resolved_at", null).eq("apparatus_checks.state", "finalized"),
     ]).then(([a, b]) => {
       if (a.error || b.error) { setErr((a.error || b.error).message || "Please try again."); return; }
-      setRigs((a.data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false })));
+      setRigs((a.data || []).map((r) => ({ id: r.id, name: r.name, type: r.type, status: r.status, note: r.note || "", inService: r.in_service !== false, lastCheckAt: r.last_check_at || null, checkIntervalDays: r.check_interval_days ?? null })));
       setFailures(b.data || []);
       setLoaded(true);
     });
   };
   useEffect(() => { load(); }, []);
   useReconnect(() => { if (err) load(); });
-  const inService = rigs.filter((r) => r.inService);
-  const readyRigs = inService.filter((r) => r.status === "Pass");
-  const flaggedRigs = inService.filter((r) => r.status !== "Pass");
-  const oosRigs = rigs.filter((r) => !r.inService);
+  // WS-4b (rulings A-1 + A-3, strict): the buckets come from shared/apparatus-status.js — the email reads the same.
+  // ready = in service ∧ Pass ∧ checked ∧ not overdue; never checked is its own bucket; overdue → needs attention.
+  // `flagged` keeps its name (= needs attention) so every consumer reads ready + flagged + neverChecked + oos = total.
+  const now = Date.now();
+  const by = (s) => rigs.filter((r) => rigStatus(r, { now }) === s);
+  const readyRigs = by("ready"), flaggedRigs = by("needs_attention"), neverCheckedRigs = by("never_checked"), oosRigs = by("out_of_service");
   return {
     loaded, err, retry: load, rigs,
-    totals: { total: rigs.length, ready: readyRigs.length, flagged: flaggedRigs.length, oos: oosRigs.length, openFailures: failures.length },
-    flaggedRigs, oosRigs,
+    totals: { total: rigs.length, ready: readyRigs.length, flagged: flaggedRigs.length, neverChecked: neverCheckedRigs.length, oos: oosRigs.length, openFailures: failures.length },
+    flaggedRigs, neverCheckedRigs, oosRigs,
   };
 }
 
@@ -16049,7 +16034,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
 function AttendanceReport({ S, members, sessions, dept, back }) {
   const [presetKey, setPresetKey] = useState("year");                  // default This Year (matches prior on-load behavior)
   const [range, setRange] = useState(() => presetRange("year"));
-  const { rows: attRows, avg: avgPct, doneThisYear } = deptAttendance(members, sessions, null, range);   // range-filtered (dashboards still call the year form)
+  const { rows: attRows, avg: avgPct, doneThisYear, drillsHeld, needsRoll } = deptAttendance(members, sessions, null, range);   // range-filtered (dashboards still call the year form); WS-4b: drillsHeld = no meetings, needsRoll = held without a roll
   const fmtD = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
   const rangeText = `${fmtD(range.from)} – ${fmtD(range.to)}`;
   const rows = [...attRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));   // best rate first, unrated last (matches RosterAttendance)
@@ -16121,16 +16106,16 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
 
       <div style={S.statRow}>
-        <Stat S={S} dark n={String(doneThisYear.length)} label="Drills held" />
-        <Stat S={S} dark n={`${avgPct}%`} label="Avg attendance" />
+        <Stat S={S} dark n={String(drillsHeld.length)} label="Drills held" />
+        <Stat S={S} dark n={pctOrDash(avgPct)} label="Avg attendance" />
         <Stat S={S} dark n={String(rows.length)} label="Members" />
       </div>
 
       {!detail && trend.length > 0 && (
         <div style={{ ...FS.cardNoir, padding: "14px 16px", marginTop: 14 }}>
-          <CardHead icon={BarChart3} title="Attendance trend" right={<span>avg per month{doneThisYear.length ? <> · period <b style={{ color: FIRE.textPrimary }}>{avgPct}%</b></> : ""}</span>} />
+          <CardHead icon={BarChart3} title="Attendance trend" right={<span>avg per month{avgPct != null ? <> · period <b style={{ color: FIRE.textPrimary }}>{avgPct}%</b></> : ""}</span>} />
           <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 6, height: 150, padding: "18px 2px 0" }}>
-            {doneThisYear.length > 0 && (
+            {avgPct != null && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 19 + avgPct,   /* px: 15px month label + 4px gap + the bar scale (1px = 1%) */ borderTop: `1px dashed ${FIRE.line2Noir}`, pointerEvents: "none" }}>
                 <span style={{ position: "absolute", left: 0, top: -15, fontSize: 10, color: FIRE.textSecondary, background: FIRE.cardNoir, padding: "0 4px 0 0" }}>{avgPct}% avg</span>
               </div>
@@ -16205,6 +16190,8 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
       </div>
       )}
       {doneThisYear.length === 0 && <div style={{ fontSize: 12.5, color: FIRE.textMuted, marginTop: 10 }}>No completed drills with recorded attendance for {rangeText} yet.</div>}
+      {/* WS-4b D-3: a finalized drill with no roll is not "held" (it can't be rated) — name it so someone takes the roll. */}
+      {needsRoll.length > 0 && <div data-testid="needs-roll" style={{ fontSize: 12.5, color: FIRE.amberText, marginTop: 8 }}>{needsRoll.length} finalized drill{needsRoll.length === 1 ? "" : "s"} in {rangeText} {needsRoll.length === 1 ? "needs" : "need"} a roll — not counted as held until attendance is recorded.</div>}
       </NoirSkin>
     </PageShell>
   );
@@ -17014,8 +17001,15 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
      loader, not here. */
   useAutoRefresh(loadRigs);
   const inServiceRigs = rigs.filter((r) => r.inService);   // out-of-service rigs excluded from readiness stats
-  const ready = inServiceRigs.filter((r) => r.status === "Pass").length;
-  const flagged = inServiceRigs.filter((r) => r.status !== "Pass").length;   // computed directly on in-service rigs, NOT total − ready
+  // WS-4b (A-1 + A-3, strict): every bucket below, the card pill and the detail line come from rigStatus
+  // (shared/apparatus-status.js) — the dashboards and the weekly email read the same rule. "In service" now
+  // only ever means AVAILABLE; a passed, checked, on-schedule rig reads "Ready".
+  const RIG_LABEL = { ready: "Ready", needs_attention: "Needs attention", never_checked: "Never checked", out_of_service: "Out of service" };
+  const rigLook = (r) => { const s = rigStatus(r); return { s, text: RIG_LABEL[s], tone: s === "out_of_service" ? FIRE.redBright : s === "ready" ? FIRE.green : FIRE.amberText }; };
+  const countOf = (s) => rigs.filter((r) => rigStatus(r) === s).length;
+  const ready = countOf("ready");
+  const flagged = countOf("needs_attention");   // includes a rig whose scheduled check is OVERDUE (A-3)
+  const neverCheckedN = countOf("never_checked");
   const outOfServiceCount = rigs.length - inServiceRigs.length;
   function startEditRig(r) { setEditingRigId(r.id); setRigBuf({ name: r.name || "", type: r.type || "Pumper", purchaseYear: r.purchaseYear ?? "", purchaseCost: r.purchaseCost ?? "", currentCost: r.currentCost ?? "", inflationRate: r.inflationRate ?? "", replaceYear: r.replaceYear ?? "", replaceCost: r.replaceCost ?? "" }); }
   async function saveEditRig(id) {
@@ -17070,8 +17064,11 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
      rather than by luck, and a failed my_stations() read degrades to one ungrouped list instead of
      a wall of empty headers. Same rule as the picker and the B3b hours breakdown. */
   const allMode = activeStationId === ALL_STATIONS;
-  const stations = useStationList(allMode);
+  const stations = useStationList(activeStationId !== undefined);   // WS-4b: also read in single-house mode — it names the scope below
   const grouped = allMode && (stations || []).length > 1;
+  // WS-4b (A-4): one house of a multi-house department → name it next to the counts. One-house departments and
+  // the all-stations view ARE the department, so they carry no label.
+  const scopeName = !allMode && activeStationId && (stations || []).length > 1 ? ((stations || []).find((st) => st.station_id === activeStationId)?.name || null) : null;
   const stationSections = grouped ? groupByStation(rigs, stations) : [];
   /* One rig card. Extracted from the list so it can be rendered once per house in all-stations
      mode without duplicating 50 lines of card. The card itself is unchanged. */
@@ -17080,8 +17077,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
     const ok = r.status === "Pass";
     const outOfService = !r.inService;
     const openMaint = maintItems.filter((i2) => i2.rigId === r.id && i2.status !== "Current");
-    const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText;
-    const statusText = outOfService ? "Out of service" : ok ? "In service" : "Needs attention";
+    const { tone, text: statusText } = rigLook(r);   // WS-4b: the label used to say "In service" for Pass
     const on = openRigId === r.id;
     return (
       <button key={r.id} type="button" aria-expanded={on} onClick={() => setOpenRigId(on ? null : r.id)}
@@ -17119,10 +17115,10 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 21, color: FIRE.textPrimary, lineHeight: 1.1 }}>{r.name}</div>
-            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, outOfService ? "Out of service" : ok ? "In service" : "Needs attention"].filter(Boolean).join(" · ")}</div>
+            <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 3 }}>{[r.type, r.purchaseYear, rigLook(r).text].filter(Boolean).join(" · ")}</div>
           </div>
-          {(() => { const tone = outOfService ? FIRE.redBright : ok ? FIRE.green : FIRE.amberText; return (
-            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{outOfService ? "Out of service" : ok ? "In service" : "Needs attention"}</span>
+          {(() => { const { tone } = rigLook(r); return (
+            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: 6, letterSpacing: ".03em", color: tone, background: `${tone}1F`, border: `1px solid ${tone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: tone }} />{rigLook(r).text}</span>
           ); })()}
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {canManage && editMode && <button title="Edit" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={() => startEditRig(r)}><Pencil size={14} color={FIRE.textSecondary} /></button>}
@@ -17251,25 +17247,23 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
           const small = (t) => <span style={{ fontSize: 14, color: FIRE.textMuted }}>{t}</span>;
           return [
             chip(Truck, "In service", <>{inServiceRigs.length}{small(`/${rigs.length}`)}</>, outOfServiceCount ? `${outOfServiceCount} out of service` : "whole fleet available", outOfServiceCount ? FIRE.amberText : FIRE.greenText),
-            // Honest count: "passed" requires a check on file. A Pass rig with no check ever logged (added as
-            // "Ready") is split out as never checked rather than reading as passed.
+            // WS-4b (A-1, strict): ready = in service ∧ passed ∧ checked ∧ not overdue (rigStatus). A rig with no
+            // check on file is never ready — it is counted on its own line, not hidden inside "passed".
+            chip(CheckCircle2, "Ready to roll", <>{ready}{small(`/${rigs.length}`)}</>, neverCheckedN ? `checked, passed & on schedule · ${neverCheckedN} never checked` : "checked, passed & on schedule", ready ? FIRE.greenText : null),
+            // WS-4b (A-3): an OVERDUE scheduled check now counts as needs attention (it used to ride underneath as a
+            // sub-line) — otherwise "ready" could be months stale. The sub-line says how many of them are overdue.
             (() => {
-              const passedChecked = inServiceRigs.filter((r) => r.status === "Pass" && r.everChecked).length;
-              const neverChecked = inServiceRigs.filter((r) => r.status === "Pass" && !r.everChecked).length;
-              return chip(CheckCircle2, "Ready to roll", String(passedChecked), neverChecked ? `checked & passed · ${neverChecked} never checked` : "checked & passed", passedChecked ? FIRE.greenText : null);
-            })(),
-            // Overdue checks (derived by checkDue — in-service, scheduled, past due or never checked) ride under
-            // the flagged count as their own line; they are NOT added to it — a missed check isn't a failed one.
-            (() => {
-              const odN = inServiceRigs.filter((r) => checkDue(r)?.state === "overdue").length;
+              const odN = rigs.filter((r) => r.inService && r.lastCheckAt && checkOverdue(r)).length;
               return chip(AlertTriangle, "Needs attention", String(flagged),
-                odN ? <>in service, flagged<br /><span style={{ color: FIRE.amberText, fontWeight: 600 }}>{odN} check{odN === 1 ? "" : "s"} overdue</span></> : "in service, flagged",
+                odN ? <>in service · failed or overdue<br /><span style={{ color: FIRE.amberText, fontWeight: 600 }}>{odN} check{odN === 1 ? "" : "s"} overdue</span></> : "in service · failed or overdue",
                 flagged ? FIRE.redText : null);
             })(),
             chip(Wrench, "Open maintenance", String(openN), overdueN ? `${overdueN} overdue` : "nothing overdue", overdueN ? FIRE.redText : openN ? FIRE.amberText : null),
           ];
         })()}
       </div>
+      {/* WS-4b (A-4): dashboards and the email count the whole DEPARTMENT; this page can be one house, so it says so. */}
+      {scopeName && <div data-testid="apparatus-scope" style={{ fontSize: 12, color: FIRE.textSecondary, margin: "-4px 0 6px" }}><b style={{ color: FIRE.textPrimary }}>{scopeName}</b> · {ready} of {rigs.length} ready · department-wide figures are on the dashboard</div>}
       {outOfServiceCount > 0 && <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "-4px 0 10px" }}>{outOfServiceCount} out of service · not counted in readiness</div>}
       {/* AFTER-CALL CHECKLIST — the way into the branch view.
 
@@ -18396,15 +18390,13 @@ function ApparatusPhotos({ S, rig, meId, notify }) {
 }
 
 /* ---------------- Maintenance reminders + checklists ---------------- */
-const MAINT_CADENCE_DAYS = { Weekly: 7, Monthly: 30, Quarterly: 90, Annual: 365 };
-// Compute a maintenance item's status from cadence + when it was last done (status is NOT stored).
-function maintStatus(cadence, lastDoneAt) {
-  const interval = MAINT_CADENCE_DAYS[cadence] || 30;
-  if (!lastDoneAt) return "Due soon";                 // never done → needs doing, but not "Overdue" on a fresh add
-  const days = (Date.now() - new Date(lastDoneAt).getTime()) / 86400000;
-  if (days > interval) return "Overdue";              // past the full interval
-  if (days >= interval * 0.8) return "Due soon";      // within the last 20% before it's due
-  return "Current";
+// Compute a maintenance item's status (status is NOT stored). WS-4b F-2: the RULE is shared/maint-due.js — the one the
+// weekly email and the daily overdue push already use — so the three can't disagree about the same pump test. That
+// rule: never done = OVERDUE (it is the most overdue thing on the truck), "due soon" = within 14 days, local midnight.
+// (The app's own copy had never-done = "Due soon" and a last-20%-of-the-interval window.) Display labels unchanged.
+function maintStatus(row) {
+  const s = maintRule(row, startOfToday());
+  return !s ? "Current" : s.kind === "maint_overdue" ? "Overdue" : "Due soon";
 }
 const MAINT_COLOR = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.green };   // the status set: red bad, amber warning, green good
 const MAINT_FIRE = { Overdue: FIRE.redText, "Due soon": FIRE.amberText, Current: FIRE.greenText };
@@ -18436,17 +18428,17 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
   const [maintLoaded, setMaintLoaded] = useState(false);
   const loadMaint = () => {
     supabase.from("apparatus_maintenance")
-      .select("id, rig_id, task, cadence, last_done_at")
+      .select("id, department_id, rig_id, task, cadence, last_done_at, apparatus(deleted_at)")   // WS-4b: + the rig's deleted_at (retired → out) and department_id (the shared rule reads it)
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (error || !data) { setMaintErr(true); return; }   // keep last-known items
         setMaintErr(false); setMaintLoaded(true);
-        setItems(data.map((r) => ({
+        setItems(data.filter((r) => !r.apparatus?.deleted_at).map((r) => ({   // a task on a RETIRED rig is not due (A-2; the email drops it too)
           id: r.id, rigId: r.rig_id,
           unit: r.rig_id ? (rigNameById.get(r.rig_id) || "Unknown unit") : "All units",
           task: r.task, cadence: r.cadence,
           last: r.last_done_at ? new Date(r.last_done_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
-          status: maintStatus(r.cadence, r.last_done_at),
+          status: maintStatus(r),
         })));
       });
   };
@@ -19873,7 +19865,6 @@ function Equipment({ S, role, members, meId, notify }) {
   const allUnits = types.flatMap((t) => t.units);
   const totalUnits = allUnits.length;
   const available = allUnits.filter((u) => u.status === "in_inventory").length;
-  const flagged = allUnits.filter((u) => u.condition !== "Serviceable").length;
   const categories = [...new Set(types.map((t) => t.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const isManager = managers.some((m) => m.memberId === meId);
   // Registry write gate — same pair the custody RPCs use (is_dept_admin() OR is_equipment_manager()),
@@ -19885,6 +19876,11 @@ function Equipment({ S, role, members, meId, notify }) {
   const canManage = isDA || isManager;
   useEffect(() => { if (canManage && activeStationId !== undefined) loadIssues(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [canManage, activeStationId]);
   const issuesByEq = new Map(); openIssues.forEach((x) => issuesByEq.set(x.equipment_id, (issuesByEq.get(x.equipment_id) || 0) + 1));
+  // WS-4b F-4: "need attention" is DERIVED FROM OPEN ISSUES — the same rule as the per-unit "Needs attention" pill and
+  // useEquipmentReadiness (the dashboards). It used to be condition ≠ Serviceable, so a member's report showed on the pill
+  // but not in the count. Issues are read only for managers / DAs; for anyone else the count is unknown (null), not 0.
+  const issuesKnown = canManage && !issuesErr;
+  const flagged = issuesKnown ? allUnits.filter((u) => issuesByEq.get(u.id) > 0).length : null;
   const eligibleForMgr = (members || []).filter((m) => isAssignable(m) && m.status === "Active" && !managers.some((mg) => mg.memberId === m.id));
   const availableUnits = types.flatMap((t) => t.units.filter((u) => u.status === "in_inventory")
     .map((u) => ({ id: u.id, typeName: t.name, category: t.category, serial: u.serial, asset: u.asset, condition: u.condition })));
@@ -20194,7 +20190,7 @@ function Equipment({ S, role, members, meId, notify }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 10, marginBottom: 14 }}>
             {chip(Briefcase, "Total gear", String(totalUnits), "tracked items")}
             {chip(Users, "Issued", <>{issuedN}<span style={{ fontSize: 14, color: FIRE.textMuted }}> / {available} free</span></>, "held by members")}
-            {chip(CheckCircle2, "Serviceable", servPct == null ? "—" : `${servPct}%`, flagged ? `${flagged} need attention` : "by condition", servPct == null ? null : servPct >= 90 ? FIRE.greenText : servPct >= 70 ? FIRE.amberText : FIRE.redText)}
+            {chip(CheckCircle2, "Serviceable", servPct == null ? "—" : `${servPct}%`, flagged ? `by condition · ${flagged} need attention` : "by condition", servPct == null ? null : servPct >= 90 ? FIRE.greenText : servPct >= 70 ? FIRE.amberText : FIRE.redText)}
             {chip(AlertTriangle, "Aging out", String(agingN), "past or within 3 mo of service life", agingN ? FIRE.amberText : null)}
           </div>
         );
@@ -20292,7 +20288,7 @@ function Equipment({ S, role, members, meId, notify }) {
         const aging = rows.filter((r) => r.g.rank <= 1).sort((a, b) => a.g.rank - b.g.rank || a.g.retire - b.g.retire);
         const cats = [...new Set(types.map((t) => t.category || "Other"))].map((c) => {
           const cr = rows.filter((r) => (r.t.category || "Other") === c);
-          return { c, n: cr.length, retire: cr.filter((r) => r.g.rank === 0).length, soon: cr.filter((r) => r.g.rank === 1).length, attn: cr.filter((r) => r.u.condition !== "Serviceable" && r.g.rank !== 0).length };
+          return { c, n: cr.length, retire: cr.filter((r) => r.g.rank === 0).length, soon: cr.filter((r) => r.g.rank === 1).length, attn: issuesKnown ? cr.filter((r) => issuesByEq.get(r.u.id) > 0 && r.g.rank !== 0).length : 0 };   // WS-4b F-4: open issues, as the pill
         }).filter((x) => x.n > 0);
         const lifeLeft = (g) => { const mo = Math.round((g.retire - new Date()) / (30.44 * 86400000)); return mo <= 0 ? "past service life" : `retires in ${mo} mo`; };
         return (<>
@@ -20331,7 +20327,7 @@ function Equipment({ S, role, members, meId, notify }) {
                     <div style={{ fontSize: 12, color: FIRE.textSecondary, fontWeight: 600, marginBottom: 7 }}>{x.c}</div>
                     <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{x.n}</div>
                     <div style={{ fontSize: 10.5, marginTop: 6, color: x.retire || x.soon || x.attn ? FIRE.amberText : FIRE.greenText }}>
-                      {x.retire || x.soon || x.attn ? [x.retire ? `${x.retire} retire` : null, x.soon ? `${x.soon} soon` : null, x.attn ? `${x.attn} need attention` : null].filter(Boolean).join(" · ") : "all serviceable"}
+                      {x.retire || x.soon || x.attn ? [x.retire ? `${x.retire} retire` : null, x.soon ? `${x.soon} soon` : null, x.attn ? `${x.attn} need attention` : null].filter(Boolean).join(" · ") : "nothing flagged"}
                     </div>
                   </div>
                 ))}
@@ -21159,7 +21155,8 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
         ...(sh.totals.autoClosed ? [`Auto-closed shifts awaiting an officer's confirmation: ${sh.totals.autoClosed} (hours not credited until reviewed)`] : []),
       ] : [`Station hours: unavailable — not read, so no hours figure is provided.`]),
       ...(apOk ? [
-        `Apparatus readiness as of today: ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.oos} out of service (${ap.totals.total} total); ${ap.totals.openFailures} open check failures`,
+        `Apparatus readiness as of today (ready = in service, passed, checked, not overdue): ${ap.totals.ready} ready, ${ap.totals.flagged} needing attention, ${ap.totals.neverChecked} never checked, ${ap.totals.oos} out of service (${ap.totals.total} total); ${ap.totals.openFailures} open check failures`,
+        `Apparatus never checked: ${topN(ap.neverCheckedRigs, (r) => r.name)}`,
         `Apparatus needing attention: ${topN(ap.flaggedRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
         `Apparatus out of service: ${topN(ap.oosRigs, (r) => `${r.name}${r.note ? ` — ${r.note}` : ""}`)}`,
       ] : [`Apparatus readiness: unavailable — not read, so no readiness figure is provided.`]),
@@ -21236,7 +21233,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
     </div>
   );
   const nextSess = upcoming[0];
-  const apAttn = apOk ? ap.totals.flagged + ap.totals.oos : null;
+  const apAttn = apOk ? ap.totals.flagged + ap.totals.neverChecked + ap.totals.oos : null;   // WS-4b: never checked needs attention too (A-1)
   return (
     <div>
       <div style={{ ...FS.cardNoir, padding: "13px 15px", marginBottom: 16 }}>
@@ -28145,16 +28142,7 @@ const monthsBetween = (from, to, max = 12) => {
   }
   return { months: all.slice(-max), truncated: all.length > max };
 };
-// ONE member's own attendance over a date range — the member dashboard's rule set: finalized drills with a
-// roll taken, optional events excluded, leadership events counted only for leaders (scored off the member's
-// ACTUAL roles, not "View as"), and nothing before their join date. null = no drills they were expected at.
-const memberAttendance = (me, sessions, range) => {
-  const meLeader = isLeader(me?.access);
-  const rec = (sessions || []).filter((s) => { const iso = toISODate(sessDate(s)); return s.done && (s.attendance || []).length > 0 && iso >= range.from && iso <= range.to && !isOptionalEvent(s) && (meLeader || !isRestrictedEvent(s)) && expectedAfterJoin(me, s); });
-  if (!rec.length) return null;
-  const attended = me ? rec.filter((s) => (s.attendance || []).includes(me.id)).length : 0;
-  return { total: rec.length, attended, pct: Math.round((attended / rec.length) * 100) };
-};
+// ONE member's own attendance over a date range — memberAttendance now lives in shared/attendance.js (WS-4b).
 const memberAttendanceSeries = (me, sessions, months) => months.map((m) => {
   const r = memberAttendance(me, sessions, m);
   return { label: m.label, partial: m.partial, drills: r ? r.total : 0, pct: r ? r.pct : null };
@@ -28166,7 +28154,7 @@ const lastMonths = (n) => { const t = new Date(); return monthsBetween(toISODate
 const attendanceSeries = (members, sessions, months) => months.map((m) => {
   const a = deptAttendance(members, sessions, null, m);
   const rated = a.rows.some((r) => r.pct != null);
-  return { label: m.label, partial: m.partial, drills: a.doneThisYear.length, pct: a.doneThisYear.length && rated ? a.avg : null };
+  return { label: m.label, partial: m.partial, drills: a.drillsHeld.length, pct: a.doneThisYear.length && rated ? a.avg : null };   // WS-4b: drills = held (no meetings); the % keeps meetings (D-2)
 });
 // Grow-in on mount, skipped entirely under prefers-reduced-motion.
 function useChartGrow() {
@@ -28332,11 +28320,12 @@ function ApparatusReadinessView({ ap }) {
   const { grown, transition } = useChartGrow();
   if (ap.err) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>— Couldn't load apparatus. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={ap.retry}>Retry</button></div>;
   if (!ap.loaded) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>—</div>;
-  const { total, ready, flagged, oos } = ap.totals;
+  const { total, ready, flagged, neverChecked = 0, oos } = ap.totals;
   if (!total) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No apparatus on the roster yet.</div>;
   const parts = [
     { key: "ready", n: ready, label: "Ready", color: FIRE.green },
     { key: "flagged", n: flagged, label: "Needs attention", color: FIRE.amberText },
+    { key: "never", n: neverChecked, label: "Never checked", color: FIRE.textMuted },   // WS-4b A-1: its own bucket, never "ready"
     { key: "oos", n: oos, label: "Out of service", color: FIRE.redText },
   ];
   const W = 600, gap = 4, live = parts.filter((p) => p.n > 0);
@@ -28345,7 +28334,7 @@ function ApparatusReadinessView({ ap }) {
   const rects = live.map((p) => { const w = (p.n / total) * usable; const r = { ...p, x, w }; x += w + gap; return r; });
   return (
     <>
-      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Apparatus: ${ready} ready, ${flagged} need attention, ${oos} out of service, of ${total}`} preserveAspectRatio="none" style={BAR_SVG(22)}>
+      <svg viewBox={`0 0 ${W} 34`} role="img" aria-label={`Apparatus: ${ready} ready, ${flagged} need attention, ${neverChecked} never checked, ${oos} out of service, of ${total}`} preserveAspectRatio="none" style={BAR_SVG(22)}>
         {rects.map((p) => (
           <g key={p.key}>
             <rect x={p.x} y={4} width={grown ? p.w : 0} height={24} rx={3} fill={p.color} style={{ transition }}><title>{`${p.label}: ${p.n} of ${total}`}</title></rect>
@@ -28740,7 +28729,7 @@ function DutyOpenList({ duties, members, dept, cap = 3 }) {
 }
 function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, boardFirst, extraHero, hoursBeforeCerts, overview, actionCenter }) {
   const yr = new Date().getFullYear();
-  const { avg: avgPart, doneThisYear } = deptAttendance(members, sessions, yr);
+  const { avg: avgPart, drillsHeld: heldList } = deptAttendance(members, sessions, yr);
   const { avg: boardPct, rows: boardRows, doneBoard } = boardAttendance(members, sessions, yr);   // board-event accountability track
   const boardRated = boardRows.some((r) => r.pct != null);   // no board meetings / no board members → "—", not 0%
   const trend = useMemo(() => attendanceSeries(members, sessions, lastMonths(8)), [members, sessions]);
@@ -28759,7 +28748,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   // ROSTER COVERAGE, not records — see certCoverage. expdC is "any expired cert exists", a different question.
   let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp, c.neverExpires).rank === 0) expdC++; }));
   const cov = certCoverage(members, { includeProbationary: true });
-  const drillsHeld = doneThisYear.length;
+  const drillsHeld = heldList.length;   // WS-4b D-1: held = roll taken, not cancelled, not a business meeting
   const dutyList = duties || [];
   const dutyDone = dutyList.filter((d) => isDoneThisPeriod(d, (dept?.week_start_day ?? 1))).length;
   // null, NOT 100 — a department with no duties configured has nothing measured; the bar says "No duties set".
@@ -28802,7 +28791,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
                 <StationHoursBars months={ovMonths} />
               </MiniChart>
             )}
-            <MiniChart title="Training Attendance" onOpen={to("roster", "attendance")} caption={drillsHeld ? `last ${ovSpan} months · ${avgPart}% this year` : `last ${ovSpan} months`}
+            <MiniChart title="Training Attendance" onOpen={to("roster", "attendance")} caption={avgPart != null ? `last ${ovSpan} months · ${avgPart}% this year` : `last ${ovSpan} months`}
               swatch={<span style={{ width: 8, height: 8, borderRadius: 999, background: FIRE.redBright, boxShadow: `0 0 0 2px ${FIRE.barGlowNoir}`, flexShrink: 0 }} />}>
               <AttendanceTrend series={ovTrend} />
             </MiniChart>
@@ -28847,7 +28836,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
       {/* Desktop: a compact multi-column grid (2–3 across) so the section fits on about one screen.
           Phone: min(300px, 100%) collapses it to one column with no horizontal scroll. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))", gap: 12, marginTop: 12 }}>
-        <ChartPanel icon={GraduationCap} title="Training attendance" note={drillsHeld ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
+        <ChartPanel icon={GraduationCap} title="Training attendance" note={avgPart != null ? `last 8 months · ${avgPart}% this year` : "last 8 months"} onOpen={to("roster", "attendance")}>
           <AttendanceTrend series={trend} />
         </ChartPanel>
         {/* DA dashboard (hoursBeforeCerts): Station hours takes the Certifications slot and Certifications

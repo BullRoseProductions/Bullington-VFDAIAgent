@@ -174,7 +174,9 @@ const cos = fnIn(report, "closeOpenShift"), co = fnIn(report, "confirmOut");
 ok("closeOpenShift checks end > start and ≤ now BEFORE closeShiftAt (inline, no RPC)", cos.includes(RULE) && cos.indexOf(RULE) < cos.indexOf("closeShiftAt("));
 ok("confirmOut checks end > start and ≤ now BEFORE resolve_auto_closed_shift", co.includes(RULE) && co.indexOf(RULE) < co.indexOf('rpc("resolve_auto_closed_shift"'));
 ok("checkOut's rule is the one mirrored (unchanged)", fnIn(report, "checkOut").includes("if (when <= inAt || when > new Date())"));
-ok("digest: apparatus read filters retired rigs (deleted_at IS NULL)", dig.includes('sb.from("apparatus").select("department_id, in_service").is("deleted_at", null)'));
+// Re-baselined in WS-4b: that slice widened the select (status, last_check_at, check_interval_days for the strict
+// "ready"); the 4a fence is the retired-rig filter itself, which must survive any column change.
+ok("digest: apparatus read filters retired rigs (deleted_at IS NULL)", /sb\.from\("apparatus"\)\.select\("department_id, in_service[^"]*"\)\.is\("deleted_at", null\)/.test(dig));
 // The DELTA fences are PINNED to WS-4a's own code commit (cc719d6, parent dfd9866; released in industrial-noir-37):
 // "vs origin/main" goes red once the slice is on main. The structural guards above still read today's tree.
 const REL = "cc719d6";

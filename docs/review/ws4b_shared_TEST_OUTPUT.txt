@@ -1,0 +1,45 @@
+PASS A-1: a rig with no check on file is never_checked, not ready (even with status Pass) 
+PASS A-3: a scheduled check past due makes a passed rig needs_attention 
+PASS strict ready = in service ∧ Pass ∧ checked ∧ not overdue (r1, r6); failed → needs_attention; OOS; retired 
+PASS overdue boundary: exactly at last + interval is not overdue; 1 ms later is 
+PASS the App's camelCase rigs read exactly as the email's snake_case rows 
+PASS A-2: counts are over non-retired rigs and sum to the total (2 ready · 2 attention · 1 never · 1 OOS = 6) {"total":6,"ready":2,"needsAttention":2,"neverChecked":1,"outOfService":1}
+PASS faithful lift: deptAttendance matches the original on 3,000 random fixtures (rows · counting sessions · avg where rated) 3000/3000 
+PASS …and where NOBODY is rated the original said 0% and the shared rule says null (C-3) — the only avg change 
+PASS faithful lift: memberAttendance matches the original on the same 3,000 fixtures 3000/3000
+PASS a CANCELLED session never counts (even finalized with a roll) 
+PASS D-2: a business meeting stays in the attendance % (doneThisYear) but is not a drill held 
+PASS the % is over drill + meeting: A 2/2 = 100%, B 1/2 = 50% → avg 75% [100,50]
+PASS D-3: a finalized drill with no roll is 'needs roll', never held 
+PASS C-3: nobody rated → avg null ("—"), not 0 
+PASS D-1: drillsScheduled = not cancelled · counts toward the rate · not a meeting · any state (drill, noroll, future) 
+PASS memberAttendance: a cancelled session never counts 
+PASS with cancelled + meetings mixed in: shared = original-without-cancelled, and drillsHeld = that minus meetings (1,000 fixtures) 1000/1000
+PASS email: the September joiner is not absent for January (join-date cutoff) and the cancelled drill doesn't count → 100% 100
+PASS email: without a join date it falls back to the `joined` year (Jan 1) — the January drill counts against them → 75% 
+PASS email: nobody rated → null ("—") 
+PASS ApparatusReadinessBar: Ready / Needs attention / Never checked / Out of service = apparatusCounts (2 · 2 · 1 · 1) Ready: 2 of 6Needs attention: 2 of 6Never checked: 1 of 6Out of service: 1 of 6Ready 2Needs attention 2Never checked 1Out of service 1
+PASS useApparatusReadiness reads last_check_at + check_interval_days (the strict rule needs both) id, name, type, status, note, in_service, last_check_at, check_interval_days
+PASS rendering wrote nothing 
+PASS PIN App: imports rigStatus + checkOverdue from ../shared/apparatus-status.js 
+PASS PIN App: imports the attendance rule from ../shared/attendance.js 
+PASS PIN App: imports maintStatus (as maintRule) + startOfToday from ../shared/maint-due.js 
+PASS PIN App: no local copy of the attendance rule (deptAttendance is the countsInStats wrapper; no memberAttendance / joinCutoff / countsTowardRate body) 
+PASS PIN useApparatusReadiness: buckets from rigStatus; no local Pass test 
+PASS PIN Apparatus page: chips + card + detail read rigStatus via rigLook; the card no longer says 'In service' for Pass 
+PASS PIN Apparatus page: A-4 scope label for one house of a multi-house department 
+PASS PIN MemberDashboard: 'N scheduled' = drillsScheduled 
+PASS PIN maintenance: the app's maintStatus is the shared rule (no local cadence arithmetic) 
+PASS PIN digest: imports apparatusCounts + deptAttendance from shared/ 
+PASS PIN digest: apparatus metric = apparatusCounts; the tile is 'Apparatus ready' = ready/total 
+PASS PIN digest: trainingCompliancePct delegates to deptAttendance (no local eligibility copy) 
+PASS C-2: the email tile reads 'Attendance' (not 'Training' under 'Readiness at a glance'); the PDF 'AVG ATTENDANCE' 
+PASS C-3: the PDF dashes a null attendance % 
+PASS A: the PDF names never checked 
+PASS A-2: app, email and daily push all drop a RETIRED rig's maintenance tasks 
+PASS F-2: never done reads Overdue (was 'Due soon'); 10 of 30 days → Current; 20 of 30 → Due soon (14-day window); 31 → Overdue 
+PASS F-4: Equipment 'need attention' (chip + per category) = units with an OPEN issue, not condition ≠ Serviceable 
+PASS runtime files changed vs origin/main = App.jsx, report.js, digest.js, pulse.js + the two new shared helpers ["api/digest.js","api/pulse.js","shared/apparatus-status.js","shared/attendance.js","src/App.jsx","src/report.js"]
+PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 132 · 32
+PASS no station_presence write added (no added line touches it) 
+PASS Notify crew held back 
