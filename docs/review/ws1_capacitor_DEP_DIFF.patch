@@ -1,0 +1,121 @@
+diff --git a/ios/App/CapApp-SPM/Package.swift b/ios/App/CapApp-SPM/Package.swift
+index f45de54..8fdbad8 100644
+--- a/ios/App/CapApp-SPM/Package.swift
++++ b/ios/App/CapApp-SPM/Package.swift
+@@ -11,7 +11,7 @@ let package = Package(
+             targets: ["CapApp-SPM"])
+     ],
+     dependencies: [
+-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
++        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.3"),
+         .package(name: "CapacitorApp", path: "../../../node_modules/@capacitor/app"),
+         .package(name: "CapacitorFilesystem", path: "../../../node_modules/@capacitor/filesystem"),
+         .package(name: "CapacitorPushNotifications", path: "../../../node_modules/@capacitor/push-notifications"),
+diff --git a/package-lock.json b/package-lock.json
+index 286a347..e319a6d 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -8,11 +8,11 @@
+       "name": "dayroom-prototype",
+       "version": "0.1.0",
+       "dependencies": {
+-        "@capacitor/android": "^8.5.0",
++        "@capacitor/android": "^8.5.3",
+         "@capacitor/app": "^8.1.1",
+-        "@capacitor/core": "^8.5.0",
++        "@capacitor/core": "^8.5.3",
+         "@capacitor/filesystem": "^8.1.3",
+-        "@capacitor/ios": "^8.5.0",
++        "@capacitor/ios": "^8.5.3",
+         "@capacitor/push-notifications": "^8.1.2",
+         "@capacitor/share": "^8.0.2",
+         "@supabase/supabase-js": "^2.108.2",
+@@ -29,7 +29,7 @@
+       },
+       "devDependencies": {
+         "@capacitor/assets": "^3.0.5",
+-        "@capacitor/cli": "^8.5.0",
++        "@capacitor/cli": "^8.5.3",
+         "@vitejs/plugin-react": "^4.3.1",
+         "eslint": "^10.9.0",
+         "globals": "^17.11.0",
+@@ -328,9 +328,9 @@
+       }
+     },
+     "node_modules/@capacitor/android": {
+-      "version": "8.5.0",
+-      "resolved": "https://registry.npmjs.org/@capacitor/android/-/android-8.5.0.tgz",
+-      "integrity": "sha512-Rb3prJeQiTp0pQhSSOReJuG9VgibOGMG4ECs+UhMwr6TCCHZ3NCZO811bDA0HxD0xrT/gCrJAsY5yfEATu84JQ==",
++      "version": "8.5.3",
++      "resolved": "https://registry.npmjs.org/@capacitor/android/-/android-8.5.3.tgz",
++      "integrity": "sha512-ilH4gSSz3DrketMkzDVAvY9JsWJ//rCQnECLTdcFRO7xXDogwAbUvQAnIAbiqefwV/D1xfjEL4Gw1MJXEcaA9g==",
+       "license": "MIT",
+       "peerDependencies": {
+         "@capacitor/core": "^8.5.0"
+@@ -772,9 +772,9 @@
+       "license": "ISC"
+     },
+     "node_modules/@capacitor/cli": {
+-      "version": "8.5.0",
+-      "resolved": "https://registry.npmjs.org/@capacitor/cli/-/cli-8.5.0.tgz",
+-      "integrity": "sha512-rLdzMUM5QV4WITcqoWv04p32i14BXgUH2diqEH6MWQlWaJfiyNrvOyt/+d5vHAfOxOm1klBu637VDEobctlwBA==",
++      "version": "8.5.3",
++      "resolved": "https://registry.npmjs.org/@capacitor/cli/-/cli-8.5.3.tgz",
++      "integrity": "sha512-/G6xwna+p4GS3lthSdWN3OThCH2F85O0Ukdy8rv3oAXvgEMeyFgPEIA3PMAS++IkHwUuBYBAKOQJnZfcrh1n0w==",
+       "dev": true,
+       "license": "MIT",
+       "dependencies": {
+@@ -819,9 +819,9 @@
+       }
+     },
+     "node_modules/@capacitor/core": {
+-      "version": "8.5.0",
+-      "resolved": "https://registry.npmjs.org/@capacitor/core/-/core-8.5.0.tgz",
+-      "integrity": "sha512-Ca4krtqH1hothjtBIwf2J2TW7IhYq1ujp8QeItTiJohNsqij8ja2DYYH3DU0l8RmxCWaBAFTGA2TgOgOMCSNsQ==",
++      "version": "8.5.3",
++      "resolved": "https://registry.npmjs.org/@capacitor/core/-/core-8.5.3.tgz",
++      "integrity": "sha512-oBE1oGuYE4ZzYYrulC75OuHdSsD6zLUy7d5o1tFwDLG4govGoubY15cxpiI5l0+q87Lm5p0bhbehMdzJg4aFag==",
+       "license": "MIT",
+       "dependencies": {
+         "tslib": "^2.1.0"
+@@ -840,9 +840,9 @@
+       }
+     },
+     "node_modules/@capacitor/ios": {
+-      "version": "8.5.0",
+-      "resolved": "https://registry.npmjs.org/@capacitor/ios/-/ios-8.5.0.tgz",
+-      "integrity": "sha512-7k1TfohJu5BzRXc1F3g04Q8QQ0fyQgms6h1AvhnHb04VaNr9EdHOx03hL8O+OigEKMQnyJd1ZOjTPPNHCqL5Yw==",
++      "version": "8.5.3",
++      "resolved": "https://registry.npmjs.org/@capacitor/ios/-/ios-8.5.3.tgz",
++      "integrity": "sha512-HnnV92Jl8+3x0JUloXUMjFcUsQI8wHFVsKwkLn72DfRZXYGZW11tQbmNOWOnRTljaU18FdI1b9ipT09SzzPDNw==",
+       "license": "MIT",
+       "peerDependencies": {
+         "@capacitor/core": "^8.5.0"
+diff --git a/package.json b/package.json
+index d1059e4..1f638cc 100644
+--- a/package.json
++++ b/package.json
+@@ -14,11 +14,11 @@
+     "lint": "eslint ."
+   },
+   "dependencies": {
+-    "@capacitor/android": "^8.5.0",
++    "@capacitor/android": "^8.5.3",
+     "@capacitor/app": "^8.1.1",
+-    "@capacitor/core": "^8.5.0",
++    "@capacitor/core": "^8.5.3",
+     "@capacitor/filesystem": "^8.1.3",
+-    "@capacitor/ios": "^8.5.0",
++    "@capacitor/ios": "^8.5.3",
+     "@capacitor/push-notifications": "^8.1.2",
+     "@capacitor/share": "^8.0.2",
+     "@supabase/supabase-js": "^2.108.2",
+@@ -35,7 +35,7 @@
+   },
+   "devDependencies": {
+     "@capacitor/assets": "^3.0.5",
+-    "@capacitor/cli": "^8.5.0",
++    "@capacitor/cli": "^8.5.3",
+     "@vitejs/plugin-react": "^4.3.1",
+     "eslint": "^10.9.0",
+     "globals": "^17.11.0",
