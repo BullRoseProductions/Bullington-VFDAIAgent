@@ -1,0 +1,78 @@
+{
+ "cert_proof_owner_is_member": 246,
+ "cert_proof_paths_wellformed": {
+  "total": 252,
+  "uuid_owner_segment": 252
+ },
+ "certs_proof_not_under_cert_proofs": 0,
+ "certs_with_proof": 185,
+ "current_user": "postgres",
+ "foldername_def": "CREATE OR REPLACE FUNCTION storage.foldername(name text)\n RETURNS text[]\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\nDECLARE\n    _parts text[];\nBEGIN\n    -- Split on \"/\" to get path segments\n    SELECT string_to_array(name, '/') INTO _parts;\n    -- Return everything except the last segment\n    RETURN _parts[1 : array_length(_parts,1) - 1];\nEND\n$function$\n",
+ "md5": {
+  "is_canmanage_ops()": "92fa180343748968dff96fa044b0420d",
+  "is_dept_admin()": "c692e44f62923d2bf4c1a39a21a87bf7",
+  "is_equipment_manager()": "a979933dac145e88d58331a04d6c918a",
+  "is_leader()": "3f462af26a46909309f856f769226baa",
+  "my_department_id()": "87f546659c3804a943b48e419e017f18",
+  "my_member_id()": "3f66369c8af7bc07ec59831af6536fee",
+  "storage.foldername(text)": "93671af66e1fe108a56068ad4137d001"
+ },
+ "objects_by_kind": {
+  "(root)": 27,
+  "apparatus": 8,
+  "cert-proofs": 252,
+  "equipment": 1,
+  "minutes": 12,
+  "plans": 9
+ },
+ "objects_owner": "supabase_storage_admin",
+ "other_storage_policies": 0,
+ "postgres_member_of_owner": false,
+ "storage_policies": [
+  {
+   "check": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND ((storage.foldername(name))[2] = 'equipment'::text) AND (is_dept_admin() OR is_equipment_manager()))",
+   "cmd": "INSERT",
+   "name": "equipment photos upload da or manager",
+   "qual": null,
+   "roles": "public"
+  },
+  {
+   "check": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND ((storage.foldername(name))[2] = 'cert-proofs'::text) AND ((storage.foldername(name))[3] = (my_member_id())::text))",
+   "cmd": "INSERT",
+   "name": "members upload own cert proofs",
+   "qual": null,
+   "roles": "authenticated"
+  },
+  {
+   "check": null,
+   "cmd": "DELETE",
+   "name": "station_docs_delete_leadership",
+   "qual": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND is_canmanage_ops())",
+   "roles": "authenticated"
+  },
+  {
+   "check": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND is_canmanage_ops())",
+   "cmd": "INSERT",
+   "name": "station_docs_insert_leadership",
+   "qual": null,
+   "roles": "authenticated"
+  },
+  {
+   "check": null,
+   "cmd": "SELECT",
+   "name": "station_docs_read_own_dept",
+   "qual": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text))",
+   "roles": "authenticated"
+  },
+  {
+   "check": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND is_canmanage_ops())",
+   "cmd": "UPDATE",
+   "name": "station_docs_update_leadership",
+   "qual": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND is_canmanage_ops())",
+   "roles": "authenticated"
+  }
+ ],
+ "submissions_proof_not_under_cert_proofs": 0,
+ "total_storage_policies": 6,
+ "verified_presence": 957
+}
