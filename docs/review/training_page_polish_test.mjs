@@ -136,7 +136,9 @@ const at = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuff
 const rel = at(REL), relParent = at(`${REL}^1`);
 const changedFiles = execSync(`git diff --name-only ${REL}^1 ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 ok("Training page polish (c6aa254) changed only src/App.jsx (runtime) vs its parent", JSON.stringify(changedFiles) === '["src/App.jsx"]', JSON.stringify(changedFiles));
-ok("the toggle is in no PageShell `above` slot any more", !/above=\{[^}]*viewToggle/.test(src) && (src.match(/\{viewToggle\}\{\/\* Schedule \| Training Plans/g) || []).length === 3);
+// 4 in-body sites since Training Library slice 1 added the third tab (the Library view puts the toggle in its body too —
+// the invariant this guards, "never in the band's `above` slot", is unchanged).
+ok("the toggle is in no PageShell `above` slot any more", !/above=\{[^}]*viewToggle/.test(src) && (src.match(/\{viewToggle\}\{\/\* Schedule \| Training Plans/g) || []).length === 4);
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token count unchanged by Training page polish (c6aa254) vs its parent", tok(rel) === tok(relParent), `${tok(rel)} vs ${tok(relParent)}`);
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));

@@ -431,68 +431,55 @@ function statusOf(m, t) {
 }
 
 /* ---- library ------------------------------------------------------- */
-const SEED = [
-  { id: "fire-203", code: "FIRE-203", track: "Fire", title: "Primary Search & Rescue", level: "Intermediate", time: "90 min", updated: "May 2026",
-    objective: "Crews conduct a coordinated primary search with crew integrity, accountability, and a charged-line tie-in where required.",
-    equipment: ["Full PPE / SCBA", "Search rope / TIC if available", "Accountability board"],
-    instructorGuide: "Live fire is NOT part of this drill. Run cold or in a smoke-free prop. A qualified safety officer must be assigned for any heat evolution.",
-    steps: [{ t: "Briefing & accountability", d: "Set crew assignments and the accountability system.", m: 15 }, { t: "Search patterns", d: "Right/left-hand search, maintaining crew contact.", m: 20 }, { t: "Evolution", d: "Two-in/two-out, oriented search of the prop.", m: 35 }, { t: "Debrief", d: "Communication, air management, accountability gaps.", m: 20 }],
-    scenario: "Reported occupant in a single-story residence, moderate (simulated) smoke. Conduct primary search.",
-    discussion: ["Where did crew integrity break down?", "How was air management communicated?"],
-    safety: ["Assign a safety officer", "No live fire in this drill", "Confirm SCBA checks before entry", "RIT/two-out in place"],
-    evaluation: ["Maintains crew contact throughout", "Communicates air status", "Follows accountability system"],
-    debrief: ["Did everyone know who was where?", "What would you change on a real fireground?"] },
-  { id: "fire-118", code: "FIRE-118", track: "Fire", title: "Mayday Operations & Self-Survival", level: "Intermediate", time: "75 min", updated: "Mar 2026",
-    objective: "Members declare a Mayday correctly, perform self-survival actions, and practice the LUNAR sequence.",
-    equipment: ["Full PPE / SCBA", "Radios", "Reduced-profile prop"],
-    instructorGuide: "Keep it low-stress and repeatable. The goal is muscle memory, not a gauntlet. No fire.",
-    steps: [{ t: "Why Mayday early", d: "Discuss hesitation and the cost of delay.", m: 15 }, { t: "Declaration drill", d: "Radio Mayday with LUNAR information.", m: 20 }, { t: "Self-survival", d: "Reduced profile, SCBA emergency procedures.", m: 25 }, { t: "Debrief", d: "What made declaring hard?", m: 15 }],
-    scenario: "Firefighter disoriented and low on air during search. Declare and self-rescue.",
-    discussion: ["Why do firefighters delay calling Mayday?", "What does command need to hear first?"],
-    safety: ["Assign a safety officer", "No live fire", "Medical standby for strenuous evolutions"],
-    evaluation: ["Declares Mayday without prompting", "Transmits LUNAR clearly", "Performs self-survival steps"],
-    debrief: ["Did you hesitate? Why?", "Was your transmission clear under stress?"] },
-  { id: "ems-114", code: "EMS-114", track: "EMS", title: "Stroke Recognition (BE-FAST)", level: "All levels", time: "60 min", updated: "May 2026",
-    objective: "Members identify stroke signs using BE-FAST, document last-known-well time, and select the correct destination per regional protocol.",
-    equipment: ["Stroke scale cards", "Simulated patient", "Run report forms"],
-    instructorGuide: "Open with why time-to-treatment drives outcomes. Run two short scenarios, then debrief documentation.",
-    steps: [{ t: "Briefing", d: "Field-level stroke pathophysiology and why last-known-well matters.", m: 10 }, { t: "BE-FAST walkthrough", d: "Demonstrate each element; practice on a volunteer.", m: 15 }, { t: "Scenario A", d: "Posterior stroke presenting as dizziness.", m: 12 }, { t: "Scenario B", d: "Facial droop with uncertain onset.", m: 12 }, { t: "Debrief", d: "Documentation and destination decisions.", m: 11 }],
-    scenario: "Family reports a 71-year-old 'not acting right' since waking. Establish last-known-well and assess.",
-    discussion: ["What complicates establishing last-known-well?", "When does your region bypass to a stroke center?"],
-    safety: ["Confirm scene safety", "Standard BSI precautions"],
-    evaluation: ["Completes BE-FAST in order", "Documents last-known-well", "States correct destination"],
-    debrief: ["What slowed your assessment?", "Was destination selection clear?"] },
-  { id: "ems-203", code: "EMS-203", track: "EMS", title: "Pediatric Emergencies — Assessment Triangle", level: "All levels", time: "75 min", updated: "Apr 2026",
-    objective: "Members apply the Pediatric Assessment Triangle, size equipment correctly, and adjust communication for caregivers.",
-    equipment: ["Length-based tape", "Pediatric BVM", "Sim doll if available"],
-    instructorGuide: "Emphasize the from-the-doorway impression before touching the child. Practice sizing under time pressure.",
-    steps: [{ t: "PAT overview", d: "Appearance, work of breathing, circulation to skin.", m: 15 }, { t: "Equipment sizing", d: "Length-based tape drills, repeat for speed.", m: 20 }, { t: "Scenario", d: "Febrile seizure with anxious caregiver.", m: 20 }, { t: "Debrief", d: "Caregiver communication and transport.", m: 20 }],
-    scenario: "2-year-old post-seizure, now postictal. Caregiver is panicking.",
-    discussion: ["How does caregiver anxiety affect your assessment?", "When is rapid transport warranted?"],
-    safety: ["Scene safety", "BSI precautions", "Keep caregiver involved to reduce child distress"],
-    evaluation: ["Forms doorway impression first", "Sizes equipment correctly", "Communicates clearly"],
-    debrief: ["What was hardest under time pressure?", "Did you size gear right the first try?"] },
-  { id: "lead-140", code: "LEAD-140", track: "Leadership", title: "Volunteer Retention — Stay Conversations", level: "Officers", time: "60 min", updated: "Apr 2026",
-    objective: "Officers run a structured 'stay interview' and identify the top three drivers pushing members out.",
-    equipment: ["Stay-interview question sheet", "Whiteboard"],
-    instructorGuide: "Frame retention as cheaper than recruitment. Role-play the conversation; it's harder than it looks.",
-    steps: [{ t: "The cost of turnover", d: "What it takes to replace a trained member.", m: 10 }, { t: "Stay-interview structure", d: "Five questions that surface real friction.", m: 15 }, { t: "Role-play", d: "Pairs practice both sides.", m: 20 }, { t: "Action planning", d: "Each officer commits to two conversations.", m: 15 }],
-    scenario: "A reliable five-year member has quietly stopped showing up. Re-engage without guilt-tripping.",
-    discussion: ["What pushes good members out?", "Do you lose people in year one or year five?"],
-    safety: ["Keep conversations confidential and judgment-free"],
-    evaluation: ["Asks open questions", "Listens more than talks", "Leaves with a follow-up"],
-    debrief: ["What surprised you?", "Which driver shows up most here?"] },
-  { id: "ops-120", code: "OPS-120", track: "Operations", title: "Run It Like a Business — Annual Operating Plan", level: "Chiefs & Admin", time: "75 min", updated: "Jun 2026",
-    objective: "Leadership builds a one-page operating plan: budget, funding sources, staffing targets, and key metrics — mission-first, run with business discipline.",
-    equipment: ["Operating-plan template", "Prior-year budget", "Call volume data"],
-    instructorGuide: "Not about going corporate — about clarity: where money comes from, where people come from, and how you know it's working.",
-    steps: [{ t: "Money in, money out", d: "Map funding sources against costs.", m: 20 }, { t: "People plan", d: "Set staffing and a recruitment/retention number.", m: 20 }, { t: "Pick 3 metrics", d: "Three numbers leadership reviews monthly.", m: 15 }, { t: "Reporting cadence", d: "What the board / municipality sees, and when.", m: 20 }],
-    scenario: "The municipality asks for a one-page plan justifying next year's funding. Build it.",
-    discussion: ["What single number best shows your department is healthy?", "Where is funding most fragile?"],
-    safety: ["Keep financial and personnel records per agency policy and law"],
-    evaluation: ["Identifies all funding sources", "Sets staffing targets", "Names three review metrics"],
-    debrief: ["Where's your biggest financial risk?", "Who owns this plan after today?"] },
-];
+/* TRAINING LIBRARY (slice 1) — the REAL catalog. The 6 packets that used to be hard-coded here (SEED) now live in
+   library_drills (a global, curated table — sql/library_s1_catalog_DRAFT.sql moved them in verbatim). Members read only
+   PUBLISHED rows; which department shared a drill is not selectable, so the columns are always listed (never select *).
+   libRowToPacket maps a row onto the packet shape Library / Packet already render: the content jsonb carries the
+   drill_plans keys (summary, objectives, run_of_show, materials, safety) plus the packet-only ones (instructor_guide,
+   scenario, discussion, debrief, evaluation, revised). */
+const LIB_COLS = "id, code, title, track, level, duration_min, audience, content, origin, credit_name, published_at";
+function libRowToPacket(r) {
+  const c = (r && r.content) || {};
+  const list = (a) => (Array.isArray(a) ? a.filter((x) => x != null && String(x).trim() !== "").map(String) : []);
+  const steps = (Array.isArray(c.run_of_show) ? c.run_of_show : []).filter((s) => s && typeof s === "object").map((s) => {
+    const m = /^(.*?)\s+—\s+(\d+)\s*min$/.exec(String(s.t || ""));   // "Briefing — 15 min" → { t: "Briefing", m: 15 }
+    return { t: m ? m[1] : String(s.t || "Step"), m: m ? Number(m[2]) : null, d: String(s.d || "") };
+  });
+  const published = r.published_at ? new Date(r.published_at).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "";
+  return {
+    id: r.id, libraryId: r.id, code: r.code || "", track: TRACKS[r.track] ? r.track : "Operations", title: r.title || "Untitled drill",
+    level: r.level || "", time: r.duration_min ? `${r.duration_min} min` : "", updated: c.revised || published,
+    objective: typeof c.summary === "string" ? c.summary : "", equipment: list(c.materials),
+    instructorGuide: typeof c.instructor_guide === "string" ? c.instructor_guide : "", steps,
+    scenario: typeof c.scenario === "string" ? c.scenario : "", safety: list(c.safety), discussion: list(c.discussion),
+    evaluation: list(c.evaluation).length ? list(c.evaluation) : list(c.objectives), debrief: list(c.debrief),
+    creditName: r.credit_name || null, origin: r.origin || "seed",
+  };
+}
+/* The catalog + its counts-only usage (library_drill_usage: "held N times in M departments" — never which department) +
+   which drills THIS department has already pulled (drill_plans.library_id; dept-scoped by RLS). A failed catalog READ
+   keeps the last-known list and says so (never blank on error); usage / pulled are best-effort decorations. */
+function useLibraryCatalog() {
+  const [rows, setRows] = useState([]);
+  const [usage, setUsage] = useState({});
+  const [pulled, setPulled] = useState(() => new Set());
+  const [err, setErr] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const load = () => Promise.all([
+    supabase.from("library_drills").select(LIB_COLS).order("published_at", { ascending: false }),
+    supabase.rpc("library_drill_usage"),
+    supabase.from("drill_plans").select("library_id").not("library_id", "is", null),
+  ]).then(([c, u, p]) => {
+    if (c.error || !Array.isArray(c.data)) { console.error("[library] catalog read failed — keeping last-known:", c.error); setErr(true); return; }
+    setRows(c.data); setErr(false); setLoaded(true);
+    if (!u.error && Array.isArray(u.data)) setUsage(Object.fromEntries(u.data.map((x) => [x.library_id, { held: x.held || 0, departments: x.departments || 0 }])));
+    if (!p.error && Array.isArray(p.data)) setPulled(new Set(p.data.map((x) => x.library_id)));
+  });
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const items = useMemo(() => rows.map(libRowToPacket), [rows]);
+  return { items, usage, pulled, err, loaded, reload: load, markPulled: (id) => setPulled((s) => new Set([...s, id])) };
+}
+const libUsageText = (u) => (u && u.held > 0 ? `Held ${u.held} time${u.held === 1 ? "" : "s"} in ${u.departments} department${u.departments === 1 ? "" : "s"}` : "");
 
 
 // Shared one-shot device-location capture. Resolves { lat, lng, accuracy }; rejects with a BARE reason
@@ -2378,7 +2365,6 @@ export default function App() {
   placeRef.current = { screen, packetId, navArg, ask: { open: askOpen, msgs: askMsgs.slice(-20), draft: askDraft } };
   useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
   const [drawer, setDrawer] = useState(false);
-  const [library, setLibrary] = useState(SEED);
   const [requests, setRequests] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
@@ -2573,6 +2559,25 @@ export default function App() {
       });
   };
   useEffect(() => { loadPlans(); }, []);
+  // TRAINING LIBRARY (slice 1): the real catalog (library_drills) — see useLibraryCatalog. `library` keeps its old name
+  // and shape (packets) so Library / Packet / openPacket are unchanged consumers.
+  const lib = useLibraryCatalog();
+  const library = lib.items;
+  // "Add to my plans": pull_library_drill copies a PUBLISHED drill into this department's drill plans as a DRAFT (its
+  // officer approves before it can be attached). Gate = is_training_manager() at the DB; canManageTraining is its twin.
+  const [libAddedNonce, setLibAddedNonce] = useState(0);   // tells a mounted Training Plans to re-read its list
+  async function addLibraryDrill(libraryId) {
+    const { error } = await supabase.rpc("pull_library_drill", { p_library_id: libraryId });
+    if (error) {
+      const m = String(error.message || "");
+      if (/^ALREADY_PULLED/.test(m)) { lib.markPulled(libraryId); notify({ kind: "info", title: "Already in your plans", text: "This drill is already in Training Plans." }); return false; }
+      notify({ kind: "error", title: "Couldn't add the drill", text: m.replace(/^[A-Z_]+:\s*/, "") || "Something went wrong — please try again.", details: m });
+      return false;
+    }
+    lib.markPulled(libraryId); setLibAddedNonce((n) => n + 1);
+    notify({ kind: "success", title: "Added to Training Plans", text: "It's a draft in your plans — an officer approves it before it can be attached to a session." });
+    return true;
+  }
   const [trainingSessions, setTrainingSessions] = useState([]);
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
@@ -3068,6 +3073,9 @@ export default function App() {
   // redirect at the top of the component.
   useEffect(() => { if (!moduleEnabled(screen, disabledModules)) setScreen("dashboard"); }, [screen, dept]);
   const packet = library.find((p) => p.id === packetId);
+  // A restored place can name a packet the catalog no longer has (the old hard-coded ids like "fire-203", or a withdrawn
+  // drill). Once the catalog has loaded, fall back to the Library instead of a blank screen.
+  useEffect(() => { if (screen === "packet" && lib.loaded && !packet) setScreen("library"); }, [screen, lib.loaded, packet]);
 
   return (
     <CertTypesCtx.Provider value={{ types: certTypes, typeMap: certTypeMap, reload: reloadCertTypes }}>
@@ -3155,8 +3163,10 @@ export default function App() {
           <ErrorBoundary key={screen}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
-          {screen === "library" && <Library S={S} library={library} openPacket={openPacket} />}
-          {screen === "training" && <Training S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)} />}
+          {/* ONE library (L0/L1): the nav "Training Library" opens Training on its Library tab — the same view as the tab.
+              keyed by screen so switching between the two nav entries lands on the right tab. */}
+          {(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"} S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)}
+            lib={lib} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
@@ -3166,7 +3176,9 @@ export default function App() {
             role={role} go={go} dept={dept} msgs={askMsgs} setMsgs={setAskMsgs} draft={askDraft} setDraft={setAskDraft} />
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
-          {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")} />}
+          {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")}
+            usage={lib.usage[packet.libraryId]} added={lib.pulled.has(packet.libraryId)}
+            canAdd={hasAny(role, ["Department Admin"]) || !!isTrainingOfficer} onAdd={() => addLibraryDrill(packet.libraryId)} />}
           {screen === "readsign" && <ReadSign notify={notify} onCountChange={() => rsQueue.reload()} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} dept={dept} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
@@ -3196,7 +3208,7 @@ export default function App() {
             ? <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />
             : <BoardStats S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />)}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} setMembers={setMembers} meId={myMemberId} notify={notify} />}
-          {screen === "admin" && <Admin S={S} library={library} setLibrary={setLibrary} feedback={feedback} />}
+          {screen === "admin" && <Admin S={S} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
           {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
           </ErrorBoundary>
@@ -4613,7 +4625,7 @@ const QUICK = {
   funding: { accent: "#9A6B12", blurb: "Plan fundraisers, draft appeals, and line up sponsors." },
   minutes: { accent: "#3A4750", blurb: "Turn rough notes into clean minutes and track every action item." },
   request: { accent: "#3A4750", blurb: "Tell us what your crew needs; we build it into the next drop." },
-  admin:   { accent: "#B11E2A", blurb: "Publish new monthly materials to the library." },
+  admin:   { accent: "#B11E2A", blurb: "Library status and field signal from AI-plan ratings." },
 };
 function QuickAccess({ S, role, go, isEqMgr, disabledModules }) {
   const items = NAV.filter((n) => n.key !== "dashboard" && (hasAny(role, n.roles) || (n.key === "equipment" && isEqMgr)))   // same equipment-manager exception as the sidebar (visibleNav)
@@ -5162,7 +5174,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
 }
 
 /* ---------------- Library ---------------- */
-function Library({ S, library, openPacket }) {
+function Library({ S, library, openPacket, viewToggle, usage, pulled, loaded, err, reload }) {
   const [q, setQ] = useState(""); const [track, setTrack] = useState("All");
   const results = useMemo(() => library.filter((p) => {
     const okT = track === "All" || p.track === track;
@@ -5176,9 +5188,11 @@ function Library({ S, library, openPacket }) {
   const shelves = Object.keys(TRACKS).map((k) => ({ k, T: TRACKS[k], items: results.filter((p) => p.track === k) })).filter((sh) => sh.items.length > 0);
   const tint = (hex, a) => `${hex}${a}`;
   return (
-    <PageShell band kicker="TRAINING LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Every packet is ready to run tonight."
+    <PageShell band kicker="TRAINING · LIBRARY" title="Find a packet" sub="Search by topic or filter by track. Published drills from the shared B4C library — add one to your plans and run it."
       watermark="LIB">
       <NoirSkin>
+      {viewToggle}{/* Schedule | Training Plans | Library — first in the body, the same spot on all three views */}
+      {err && <OfflineNotice onRetry={reload} what="the library" />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 10, padding: "11px 14px" }}>
         <Search size={18} color={FIRE.btnIcon} />
         <input style={{ ...S.searchInput, color: FIRE.textPrimary }} placeholder="Search packets (e.g. stroke, mayday, budget)…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -5191,7 +5205,7 @@ function Library({ S, library, openPacket }) {
         })}
       </div>
       {results.length === 0 ? (
-        <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>No packets match that yet. Try a broader term, or request a custom packet from the menu.</Card>
+        <Card padding={36} style={{ textAlign: "center", color: FIRE.textMuted }}>{!loaded && !err ? "Loading the library…" : library.length === 0 ? "The library is empty right now." : "No packets match that yet. Try a broader term, or request a custom packet from the menu."}</Card>
       ) : (<>
         {/* SPOTLIGHT — the newest matching packet, track-coloured */}
         {spot && (() => { const T = TRACKS[spot.track]; return (
@@ -5204,6 +5218,8 @@ function Library({ S, library, openPacket }) {
               <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, maxWidth: 620 }}>{spot.objective}</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12, color: FIRE.textMuted, marginTop: 8 }}>
                 <span><Clock size={12} style={{ verticalAlign: "-2px" }} /> <b style={{ color: FIRE.textSecondary }}>{spot.time}</b></span><span>·</span><span>Updated {spot.updated}</span>
+                {libUsageText(usage?.[spot.libraryId]) && <><span>·</span><span>{libUsageText(usage[spot.libraryId])}</span></>}
+                {pulled?.has(spot.libraryId) && <><span>·</span><span style={{ color: FIRE.greenText, fontWeight: 600 }}>In your plans</span></>}
               </div>
             </div>
             <span style={{ ...FS.btnPrimary, position: "relative", background: T.accent, flexShrink: 0 }}>View packet <ChevronRight size={15} /></span>
@@ -5219,7 +5235,7 @@ function Library({ S, library, openPacket }) {
               {track === "All" && <button onClick={() => setTrack(k)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 11.5, color: FIRE.textSecondary, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 2 }}>See all <ChevronRight size={13} /></button>}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))", gap: 10 }}>
-              {items.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} />)}
+              {items.map((p) => <RunCard key={p.id} S={S} p={p} onClick={() => openPacket(p.id)} usage={usage?.[p.libraryId]} added={!!pulled?.has(p.libraryId)} />)}
             </div>
           </section>
         ))}
@@ -5229,7 +5245,7 @@ function Library({ S, library, openPacket }) {
   );
 }
 // A packet card on its track shelf: bolder track colour (top edge, tinted icon well, code), Oswald title.
-function RunCard({ S, p, onClick }) {
+function RunCard({ S, p, onClick, usage, added }) {
   const T = TRACKS[p.track];
   return (
     <button style={{ ...FS.cardNoir, cursor: "pointer", textAlign: "left", fontFamily: "inherit", padding: "13px 14px", display: "flex", flexDirection: "column", gap: 6, borderTop: `3px solid ${T.accent}`, minWidth: 0 }} onClick={onClick}>
@@ -5240,13 +5256,18 @@ function RunCard({ S, p, onClick }) {
       <h4 style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15.5, lineHeight: 1.15, margin: "2px 0 0", color: FIRE.textPrimary }}>{p.title}</h4>
       <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: FIRE.textMuted, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.objective}</p>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: FIRE.textMuted, marginTop: "auto", paddingTop: 4 }}><span><Clock size={12} style={{ verticalAlign: "-2px" }} /> {p.time}</span><span>Updated {p.updated}</span></div>
+      {(libUsageText(usage) || added) && <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: FIRE.textMuted }}>
+        <span>{libUsageText(usage)}</span>{added && <span style={{ color: FIRE.greenText, fontWeight: 600 }}>In your plans</span>}</div>}
     </button>
   );
 }
 
 /* ---------------- Packet ---------------- */
-function Packet({ S, packet, dept, notify, back }) {
+function Packet({ S, packet, dept, notify, back, usage, added, canAdd, onAdd }) {
   const T = TRACKS[packet.track];
+  // Training Library slice 1: "Add to my plans" (training managers) → pull_library_drill → a draft in Training Plans.
+  const [adding, setAdding] = useState(false);
+  async function add() { if (adding || !onAdd) return; setAdding(true); try { await onAdd(); } finally { setAdding(false); } }
   /* "Download packet (PDF)" had no handler — a dead button. It now goes through printDocument, the one
      print/share path (web: print view → Save as PDF; iOS app: a real PDF to the share sheet), built from the
      same packet fields the screen renders, in the same order. Nothing is fetched or written. */
@@ -5258,7 +5279,7 @@ function Packet({ S, packet, dept, notify, back }) {
       { type: "h2", text: "Objective" }, { type: "p", text: packet.objective || "" },
       { type: "h2", text: "Required equipment" }, list(packet.equipment),
       { type: "h2", text: "Instructor guide" }, { type: "p", text: packet.instructorGuide || "" },
-      { type: "h2", text: "Step-by-step lesson plan" }, { type: "list", ordered: true, items: (packet.steps || []).map((st) => `${st.t} (${st.m} min) — ${st.d}`) },
+      { type: "h2", text: "Step-by-step lesson plan" }, { type: "list", ordered: true, items: (packet.steps || []).map((st) => `${st.t}${st.m ? ` (${st.m} min)` : ""} — ${st.d}`) },
       { type: "h2", text: "Scenario / drill setup" }, { type: "p", text: packet.scenario || "" },
       { type: "h2", text: "Safety considerations" }, list(packet.safety),
       { type: "h2", text: "Discussion questions" }, list(packet.discussion),
@@ -5282,30 +5303,38 @@ function Packet({ S, packet, dept, notify, back }) {
         <div style={{ ...S.packetHeadInner, padding: "18px 20px" }}>
           <div style={S.metaRow}><span style={{ ...S.runCode, color: T.accent }}>{packet.code}</span><TrackPill S={S} track={packet.track} /></div>
           <h1 style={{ ...S.packetTitle, color: FIRE.textPrimary }}>{packet.title}</h1>
-          <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark /></div>
-          <button style={{ ...FS.btnPrimary, opacity: printing ? 0.7 : 1 }} onClick={downloadPacket} disabled={printing}>{printing ? <><Loader2 size={16} className="spin" /> Preparing…</> : <><Download size={16} /> Download packet (PDF)</>}</button>
+          <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark />{libUsageText(usage) && <Meta Icon={CheckCircle2} text={libUsageText(usage)} dark />}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {canAdd && (added
+              ? <span data-testid="lib-added" style={{ ...FS.btn, cursor: "default", color: FIRE.greenText }}><CheckCircle2 size={16} /> In your plans</span>
+              : <button data-testid="lib-add" style={{ ...FS.btnPrimary, opacity: adding ? 0.7 : 1 }} onClick={add} disabled={adding}>{adding ? <Loader2 size={16} className="spin" /> : <Plus size={16} />} Add to my plans</button>)}
+            <button style={{ ...(canAdd ? FS.btn : FS.btnPrimary), opacity: printing ? 0.7 : 1 }} onClick={downloadPacket} disabled={printing}>{printing ? <><Loader2 size={16} className="spin" /> Preparing…</> : <><Download size={16} /> Download packet (PDF)</>}</button>
+          </div>
+          {canAdd && !added && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 6 }}>Adds a copy to Training Plans as a draft — an officer approves it before it can be attached to a session.</div>}
         </div>
       </div>
       <Disclaimer S={S} dark />
-      <Section S={S} Icon={ClipboardList} title="Objective"><p style={body}>{packet.objective}</p></Section>
-      <Section S={S} Icon={Wrench} title="Required equipment"><ul style={list}>{packet.equipment.map((e, i) => <li key={i}>{e}</li>)}</ul></Section>
-      <Section S={S} Icon={GraduationCap} title="Instructor guide"><p style={body}>{packet.instructorGuide}</p></Section>
-      <Section S={S} Icon={FileText} title="Step-by-step lesson plan">
+      {/* Library drills that aren't one of the original packets (AI drops, shared drills — later slices) may leave a
+          packet-only section empty; an empty section is skipped rather than shown as a blank card. */}
+      {packet.objective && <Section S={S} Icon={ClipboardList} title="Objective"><p style={body}>{packet.objective}</p></Section>}
+      {packet.equipment.length > 0 && <Section S={S} Icon={Wrench} title="Required equipment"><ul style={list}>{packet.equipment.map((e, i) => <li key={i}>{e}</li>)}</ul></Section>}
+      {packet.instructorGuide && <Section S={S} Icon={GraduationCap} title="Instructor guide"><p style={body}>{packet.instructorGuide}</p></Section>}
+      {packet.steps.length > 0 && <Section S={S} Icon={FileText} title="Step-by-step lesson plan">
         <div style={S.steps}>{packet.steps.map((s, i) => (
           <div key={i} style={S.step}><span style={{ ...S.stepNum, background: FIRE.red, color: FIRE.white }}>{String(i + 1).padStart(2, "0")}</span>
-            <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.t} <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.m} min</span></div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.d}</div></div></div>
+            <div style={{ flex: 1 }}><div style={{ ...S.stepTitle, color: FIRE.textPrimary }}>{s.t} {s.m ? <span style={{ ...S.stepMin, color: FIRE.textMuted }}>{s.m} min</span> : null}</div><div style={{ ...S.stepDetail, color: FIRE.textSecondary }}>{s.d}</div></div></div>
         ))}</div>
-      </Section>
-      <Section S={S} Icon={Flame} title="Scenario / drill setup"><p style={body}>{packet.scenario}</p></Section>
-      <div style={{ ...S.safetyBox, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.amberText}`, padding: "14px 16px", marginBottom: 10 }}>
+      </Section>}
+      {packet.scenario && <Section S={S} Icon={Flame} title="Scenario / drill setup"><p style={body}>{packet.scenario}</p></Section>}
+      {packet.safety.length > 0 && <div style={{ ...S.safetyBox, ...FS.cardNoir, borderLeft: `3px solid ${FIRE.amberText}`, padding: "14px 16px", marginBottom: 10 }}>
         <CardHead icon={ShieldAlert} title="Safety considerations" />
         <ul style={list}>{packet.safety.map((s, i) => <li key={i}>{s}</li>)}</ul>
-      </div>
-      <Section S={S} Icon={Users} title="Discussion questions"><ul style={list}>{packet.discussion.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
-      <Section S={S} Icon={CheckCircle2} title="Evaluation checklist">
+      </div>}
+      {packet.discussion.length > 0 && <Section S={S} Icon={Users} title="Discussion questions"><ul style={list}>{packet.discussion.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>}
+      {packet.evaluation.length > 0 && <Section S={S} Icon={CheckCircle2} title="Evaluation checklist">
         <div style={S.checklist}>{packet.evaluation.map((e, i) => <label key={i} style={{ ...S.check, color: FIRE.textSecondary }}><input type="checkbox" style={{ accentColor: FIRE.red }} /> <span>{e}</span></label>)}</div>
-      </Section>
-      <Section S={S} Icon={ClipboardList} title="Debrief questions"><ul style={list}>{packet.debrief.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>
+      </Section>}
+      {packet.debrief.length > 0 && <Section S={S} Icon={ClipboardList} title="Debrief questions"><ul style={list}>{packet.debrief.map((d, i) => <li key={i}>{d}</li>)}</ul></Section>}
     </div>
   );
 }
@@ -23750,7 +23779,7 @@ function TrainingCategoriesCard({ S, categories, loadPlans, notify }) {
     </div>
   );
 }
-function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan }) {
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan, reloadNonce }) {
   const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
@@ -23779,6 +23808,8 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     setLoadErr(""); setPlans(data); return { error: null };
   }
   useEffect(() => { load(); }, []);
+  // A drill added from the Library (pull_library_drill) lands here as a draft — re-read when one is added.
+  useEffect(() => { if (reloadNonce) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [reloadNonce]);
   useReconnect(() => { if (loadErr) load(); });
 
   const list = plans || [];
@@ -23848,7 +23879,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   }
 
   const field = (label, el, wide) => <label style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: wide ? "1 / -1" : undefined }}><span style={tpLabel}>{label}</span>{el}</label>;
-  const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : "Draft"} tone="warn" />;
+  const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : p.source === "library" ? "Draft · from the library" : "Draft"} tone="warn" />;
   const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && !isMeeting(s)).sort(sessSort);   // Slice 4: drill plans go on trainings — meetings take an agenda (their row's "Attach agenda")
 
   return (
@@ -23934,11 +23965,11 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
         {sel && (
           <div ref={featRef}>
             <div style={tpSecLab}><ClipboardList size={16} color={FIRE.redBright} />{sel.status === "draft" ? "Awaiting review" : "Approved plan"}
-              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>{sel.status === "draft" ? (sel.source === "ai" ? "AI-drafted · needs an officer's approval" : "Draft · needs an officer's approval") : `Approved${nameOf(sel.approved_by) ? ` by ${nameOf(sel.approved_by)}` : ""} · ${tpDate(sel.approved_at)}`}</span></div>
+              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>{sel.status === "draft" ? (sel.source === "ai" ? "AI-drafted · needs an officer's approval" : sel.source === "library" ? "From the library · needs an officer's approval" : "Draft · needs an officer's approval") : `Approved${nameOf(sel.approved_by) ? ` by ${nameOf(sel.approved_by)}` : ""} · ${tpDate(sel.approved_at)}`}</span></div>
             <div style={{ border: `1px solid ${sel.status === "draft" ? `${FIRE.amberText}59` : FIRE.lineNoir}`, borderRadius: 14, background: FIRE.cardNoir, padding: "18px 20px", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 5, flexWrap: "wrap" }}>
                 <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{sel.title}</div>
-                {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={sel.source === "ai" ? "Draft · AI" : "Draft"} tone="warn" />}
+                {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={sel.source === "ai" ? "Draft · AI" : sel.source === "library" ? "Draft · library" : "Draft"} tone="warn" />}
                 {canWrite && !editing && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
                     <button style={FS.btn} disabled={!!busy} onClick={() => { setEditing(true); setAttachOpen(false); }}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>
@@ -23951,7 +23982,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${sel.source === "ai" ? "drafted with AI" : "written"}${nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${sel.source === "ai" ? "drafted with AI" : sel.source === "library" ? "added from the library" : "written"}${nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
               {attachOpen && canWrite && (
                 <div style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Attach to session</span>
@@ -24097,9 +24128,12 @@ function TrainingOfficersCard({ S, members, meId, notify, onChanged }) {
 /* The Training page: the mock's Schedule | Training Plans toggle over the two views. The schedule stays mounted while
    Plans is shown (its month, open panels and edit modes survive a round trip); Plans mounts on first open. */
 function Training(props) {
-  const [view, setView] = useState("schedule");
+  const [view, setView] = useState(props.initialView === "library" ? "library" : "schedule");
   const [plansSeen, setPlansSeen] = useState(false);
-  const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); }} style={{ marginBottom: 12 }} />;
+  // Training Library slice 1 (L0/L1): the third tab — the real shared catalog. Mounted on first open, like Plans; the nav
+  // "Training Library" lands here directly (initialView).
+  const [librarySeen, setLibrarySeen] = useState(props.initialView === "library");
+  const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"], ["library", "Library"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); if (v === "library") setLibrarySeen(true); }} style={{ marginBottom: 12 }} />;
   // Slice 2: the Schedule's "Draft a plan →" and "Manage in Training Plans →" flip to the Training Plans tab (and, for the
   // latter, land on its Training categories card).
   const goPlans = (anchor) => { setView("plans"); setPlansSeen(true); if (anchor) setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80); };
@@ -24112,7 +24146,9 @@ function Training(props) {
   const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
     <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} schedulePrefill={schedPrefill} onScheduledReturn={() => goPlans()} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} /></div>}
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} reloadNonce={props.libAddedNonce} /></div>}
+    {librarySeen && props.lib && <div style={view === "library" ? undefined : { display: "none" }}><Library S={props.S} library={props.lib.items} openPacket={props.openPacket} viewToggle={toggle}
+      usage={props.lib.usage} pulled={props.lib.pulled} loaded={props.lib.loaded} err={props.lib.err} reload={props.lib.reload} /></div>}
   </>);
 }
 
@@ -26833,31 +26869,16 @@ function RequestForm({ S, requests, setRequests, extra, embedded }) {   // extra
 }
 
 /* ---------------- Admin ---------------- */
-function Admin({ S, library, setLibrary, feedback }) {
-  const [title, setTitle] = useState(""); const [track, setTrack] = useState("Fire"); const [time, setTime] = useState("60 min"); const [objective, setObjective] = useState(""); const [done, setDone] = useState(false);
-  function publish() {
-    if (!title.trim()) return;
-    const np = { id: `new-${Date.now()}`, code: `${track.slice(0, 4).toUpperCase()}-${Math.floor(100 + Math.random() * 800)}`, track, title, level: "All levels", time,
-      objective: objective || "Objective to be finalized.", equipment: ["To be specified"], instructorGuide: "Draft — review before release.",
-      steps: [{ t: "Briefing", d: "Introduce the objective.", m: 10 }], scenario: "Scenario to be added.", discussion: ["Discussion question pending."],
-      safety: ["Review against local protocols before use."], evaluation: ["Evaluation criteria pending."], debrief: ["Debrief question pending."], updated: "Just now" };
-    setLibrary([np, ...library]); setTitle(""); setObjective(""); setDone(true); setTimeout(() => setDone(false), 2500);
-  }
+/* The old "Publish a packet" form here only prepended to in-memory React state — nothing was saved and a "published"
+   packet vanished on reload. It is retired (Training Library slice 1): the library is now the real library_drills
+   catalog, and publishing becomes the Project Admin curator queue in slice 2. The field-signal list below is unchanged. */
+function Admin({ S, feedback }) {
   return (
-    <PageShell band kicker="CONTENT ADMIN" title="Publish a packet" sub="Platform admins add monthly materials. New packets appear in the library immediately.">
+    <PageShell band kicker="CONTENT ADMIN" title="Library & field signal" sub="The Training Library is now a real, shared catalog. Curating it (publishing shared and AI-drafted drills) arrives with the curator queue.">
       <NoirSkin>
-      <div style={{ ...S.formCard, ...FS.cardNoir, padding: "16px 18px", gap: 12 }}>
-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Packet title</span><input style={FS.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Tanker Shuttle Operations" /></label>
-        <div style={S.twoColForm}>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Track</span><select style={FS.input} value={track} onChange={(e) => setTrack(e.target.value)}>{Object.keys(TRACKS).map((k) => <option key={k}>{k}</option>)}</select></label>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Estimated time</span><input style={FS.input} value={time} onChange={(e) => setTime(e.target.value)} /></label>
-        </div>
-        <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Objective</span><textarea style={{ ...FS.input, minHeight: 66, resize: "vertical" }} value={objective} onChange={(e) => setObjective(e.target.value)} /></label>
-        {/* An empty title used to do nothing at all on tap (publish() returns early) — no message, no change.
-            The button now says why it can't run instead of looking broken. */}
-        <button style={{ ...FS.btnPrimary, opacity: title.trim() ? 1 : 0.55, cursor: title.trim() ? "pointer" : "not-allowed" }} onClick={publish} disabled={!title.trim()}><Plus size={16} /> Publish to library</button>
-        {!title.trim() && <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: -4 }}>Add a packet title to publish.</div>}
-        {done && <div style={{ ...S.successBox, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, color: FIRE.greenText }}><CheckCircle2 size={16} /> Published. Check the Training Library.</div>}
+      <div style={{ ...S.formCard, ...FS.cardNoir, padding: "14px 16px", gap: 6 }}>
+        <CardHead icon={FileText} title="Publishing" />
+        <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>The six original packets now live in the shared library every department reads. Adding and curating drills (department shares, the monthly AI drop) is the next library slice — this form used to save nothing, so it has been removed rather than left to mislead.</div>
       </div>
 
       <div style={{ marginTop: 16 }}>

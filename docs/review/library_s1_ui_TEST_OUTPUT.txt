@@ -1,0 +1,31 @@
+PASS map: objective / time / updated / code / track 
+PASS map: run_of_show → steps, minutes parsed from '— N min' (none when absent) 
+PASS map: materials → equipment; packet-only keys carried; evaluation kept 
+PASS map: unknown track falls back safely; evaluation falls back to objectives 
+PASS catalog read lists explicit columns — never * and never origin_department_id id, code, title, track, level, duration_min, audience, content, origin, credit_name, published_at
+PASS usage via the counts-only RPC; pulled ids from drill_plans.library_id 
+PASS hook state: 2 packets, usage map, pulled set 
+[library] catalog read failed — keeping last-known: { message: 'offline' }
+PASS a failed catalog read keeps the last-known list and flags it (never blank on error) 
+PASS three tabs: Schedule | Training Plans | Library ["Schedule","Training Plans","Library","Schedule","Training Plans","Library"]
+PASS initialView 'library' lands on the Library (the nav 'Training Library' route) 
+PASS Library shows the catalog drills (from the table, not SEED) 
+PASS usage: 'Held 3 times in 2 departments' / 'Held 1 time in 1 department' 
+PASS a drill already in this department's plans reads 'In your plans' 
+PASS tapping a card opens its packet (by catalog id) 
+PASS default view is still the Schedule; the Library mounts on first open 
+PASS switching to the Library tab shows it 
+PASS Packet: no Add button for a non-manager; usage shown 
+PASS Packet: a training manager sees 'Add to my plans' + the draft note 
+PASS Packet: Add calls onAdd once 
+PASS Packet: once pulled it reads 'In your plans' (no second Add) 
+PASS Packet: empty sections are skipped (no blank cards) 
+PASS Training Plans labels the pulled drill 'Draft · from the library' 
+PASS only src/App.jsx changed (runtime) vs origin/main ["src/App.jsx"]
+PASS the hard-coded SEED catalog and useState(SEED) are gone 
+PASS the in-memory Content Admin publish is gone 
+PASS nav 'library' renders Training on its Library tab (one library) 
+PASS the pull is the RPC only — no direct library_drills / drill_plans write 
+PASS library_drills is never read with select("*") 
+PASS locked-token count unchanged vs origin/main 132 vs 132
+PASS Notify crew held back 
