@@ -24319,6 +24319,12 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [rCount, setRCount] = useState("26");               // N occurrences (the end condition)
   // AI training-plan drafter (Card 2) + ai_text viewer
   const [noLenOpen, setNoLenOpen] = useState(false);   // the "finished drills with no length" notice: tucked by default; the count stays in its header
+  // One-tap length fix (Oct 27): each listed drill gets a minutes box + Save -> correct_training_session (duration_min only,
+  // no roster change, a fixed reason so nothing is typed). Logged like any correction; the drill leaves the list once saved.
+  const [noLenDraft, setNoLenDraft] = useState({});      // sessionId -> the minutes typed
+  const [noLenErr, setNoLenErr] = useState({});          // sessionId -> { title, text } — inline, per row
+  const [noLenBusy, setNoLenBusy] = useState(null);      // sessionId being saved
+  const [noLenDone, setNoLenDone] = useState(() => new Set());   // saved this visit — off the list before the reload lands
   const { openSessionPlans, openPlan, setViewPlan, mounts } = usePlanViewer(S, notify, dept);
   async function toggleAttend(s, mid) {
     if (s.done) return;   // officer lock (UI also hides the control once done)
@@ -24724,6 +24730,27 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     loadSessions(); loadPlans(); loadAudit();
   }
 
+  /* The no-length card's Save: the same logged correction as Correct…, length only. N is whole minutes 1–1440 (the
+     duration_range CHECK / finalize / correct all agree); anything else is nudged inline and never sent. */
+  const NOLEN_REASON = "Session length recorded after the drill.";
+  async function saveNoLen(x) {
+    const raw = String(noLenDraft[x.id] ?? "").trim();
+    const n = Number(raw);
+    if (!/^\d+$/.test(raw) || n < 1 || n > 1440) {
+      setNoLenErr((m) => ({ ...m, [x.id]: { title: "Check the length", text: "Enter whole minutes, 1–1440." } }));
+      return;
+    }
+    setNoLenBusy(x.id); setNoLenErr((m) => { const c = { ...m }; delete c[x.id]; return c; });
+    const { error } = await supabase.rpc("correct_training_session", { p_session_id: x.id, p_changes: { duration_min: n }, p_add: [], p_remove: [], p_reason: NOLEN_REASON });
+    setNoLenBusy(null);
+    if (error) { setNoLenErr((m) => ({ ...m, [x.id]: s6Err(error) })); return; }
+    setNoLenDone((d) => new Set(d).add(x.id));
+    setNoLenDraft((m) => { const c = { ...m }; delete c[x.id]; return c; });
+    setSessions((ss) => ss.map((y) => (y.id === x.id ? { ...y, durationMin: n } : y)));
+    notify({ kind: "success", title: "Length saved", text: `“${x.title}” — ${n} min. Everyone marked present now gets the hours; it's on the session's log.` });
+    loadSessions(); loadAudit();
+  }
+
   async function attachPlan(s, file) {
     if (!file) return;
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
@@ -25073,7 +25100,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
           but sat in the members-only branch — members saw an instruction they can't act on, officers never saw it. */}
           {(() => {
             const noLen = (sessions || []).filter((x) => x.done && x.durationMin == null
-              && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0);
+              && x.audience !== "board" && !x.isOffsite && (x.attendance || []).length > 0 && !noLenDone.has(x.id));
             if (!noLen.length) return null;
             // Tucked by default (the reports Action Center pattern: CardHead button + chevron); the count stays in the header,
             // the amber accent stays, and it keeps rendering until every listed drill has a length.
@@ -25085,13 +25112,21 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                   style={{ marginBottom: noLenOpen ? 8 : 0, cursor: "pointer" }} />
                 {noLenOpen && (<>
                   <div style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.5 }}>
-                    Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. Set its length with Correct to fix that (it's logged) — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
+                    Nobody marked present at {noLen.length === 1 ? "it" : "these"} is getting training hours. {canManage ? "Enter each drill's length and Save — it's logged on the session" : "A training officer can set the length"} — the hours appear everywhere at once, recorded but not credited toward ISO/LOSAP.
                   </div>
-                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                    {noLen.slice(0, 5).map((x) => canManage
-                      ? <button key={x.id} style={{ ...Sbtn, padding: "5px 9px", fontSize: 12 }} onClick={() => { setEditSessionMode(true); openCorrect(x); }}><Pencil size={13} color={LbtnIcon} /> Set length · {`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</button>
-                      : <span key={x.id}>{`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</span>)}
-                    {noLen.length > 5 ? <span>…and {noLen.length - 5} more</span> : null}
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {noLen.slice(0, 5).map((x) => canManage ? (
+                      <div key={x.id} data-testid="nolen-row" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                        <span style={{ flex: "1 1 200px", minWidth: 0, color: FIRE.textSecondary }}>{`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</span>
+                        <input type="number" inputMode="numeric" min="1" max="1440" step="5" placeholder="min" aria-label={`Length in minutes — ${x.title}`}
+                          style={{ ...Linput, width: 84, padding: "5px 8px", fontSize: 12.5 }} value={noLenDraft[x.id] ?? ""}
+                          onChange={(e) => { const v = e.target.value; setNoLenDraft((m) => ({ ...m, [x.id]: v })); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveNoLen(x); }} />
+                        <button style={{ ...Sbtn, padding: "5px 10px", fontSize: 12, opacity: noLenBusy === x.id ? 0.7 : 1 }} disabled={noLenBusy === x.id} onClick={() => saveNoLen(x)}><CheckCircle2 size={13} color={LbtnIcon} /> Save</button>
+                        {noLenErr[x.id] && <span role="alert" style={{ flexBasis: "100%", fontSize: 11.5, color: FIRE.redText }}><b>{noLenErr[x.id].title}.</b> {noLenErr[x.id].text}</span>}
+                      </div>
+                    ) : <span key={x.id}>{`${x.title} · ${fmtSess(x)} · ${(x.attendance || []).length} present`}</span>)}
+                    {noLen.length > 5 ? <span>…and {noLen.length - 5} more — they appear here as you save these.</span> : null}
                   </div>
                 </>)}
               </div>

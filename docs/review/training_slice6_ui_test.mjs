@@ -233,17 +233,15 @@ for (const [code, msg, re] of [
     && z.title === "Finalize with an empty roll?" && /0 present · 2 were on station during the drill/.test(String(z.body)), JSON.stringify(z));
   unmount(); }
 
-// 5 — the no-length notice routes through Correct
+// 5 — the no-length notice routes length fixes through a logged correction. Since the Oct 27 one-tap fix
+//     (claude/B4C_NoLengthCard_OneTapFix_BuildOrder.md) it's inline — a minutes box + Save on the card — instead of a detour
+//     into Correct…; the invariant this section guards is unchanged: correct_training_session, duration_min only.
 { const { unmount } = await mount(["Department Admin"], false, "m-ada", [...SESS(), sess("sn", "Pump drill", { d: dDone, done: true, durationMin: null, attendance: ["m-1"] })]);
   await click(btn(host, /1 finished drill with no length recorded/)); await tick();
-  const sl = btn(host, /^Set length · Pump drill/);
-  ok("the no-length notice lists the drill as \"Set length · …\" (an officer)", !!sl);
-  await click(sl); await tick(); await tick();
-  const panel = row("sn")?.querySelector('[data-testid="correct-panel"]');
-  ok("…which opens Correct on that drill, length blank", !!panel && panel.querySelector('input[type="number"]').value === "");
-  await setVal(panel.querySelector('input[type="number"]'), "60", win.HTMLInputElement);
-  await setVal(panel.querySelector('[data-testid="correct-reason"]'), "Length was never recorded at close", win.HTMLTextAreaElement);
-  await click(btn(panel, /Save correction/)); await tick(); await tick();
+  const nr = [...host.querySelectorAll('[data-testid="nolen-row"]')].find((x) => /Pump drill/.test(x.textContent));
+  ok("the no-length notice lists the drill with an inline minutes box + Save (an officer)", !!nr?.querySelector('input[type="number"]') && !!btn(nr, "Save"));
+  await setVal(nr.querySelector('input[type="number"]'), "60", win.HTMLInputElement);
+  await click(btn(nr, "Save")); await tick(); await tick();
   const c = rpcs("correct_training_session");
   ok("…and saves as a logged correction: p_changes = { duration_min: 60 } only", c.length === 1 && JSON.stringify(c[0].args.p_changes) === '{"duration_min":60}' && c[0].args.p_session_id === "sn", JSON.stringify(c));
   unmount(); }
