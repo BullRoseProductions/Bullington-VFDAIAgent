@@ -1,0 +1,23 @@
+PASS the card lists the 2 finished, attended, no-length drills (not the timed one, not the board meeting) 2 finished drills with no length recorded
+PASS expanded: each drill is a row — title · date · N present + a minutes box + Save 
+PASS the old "Set length · …" detour into Correct is gone 
+PASS empty -> refused inline, before any RPC 
+PASS 0 -> refused inline, before any RPC 
+PASS 1441 -> refused inline, before any RPC 
+PASS a fraction -> refused inline, before any RPC 
+PASS Save -> ONE correct_training_session: duration_min only, empty roster deltas, the fixed reason (nothing typed) {"p_session_id":"sN1","p_changes":{"duration_min":60},"p_add":[],"p_remove":[],"p_reason":"Session length recorded after the drill."}
+PASS the fixed drill leaves the list; the other stays; the header recounts 
+PASS …with a success note, and no direct table write 
+PASS an RPC refusal shows inline on that row, in the RPC's words; the drill stays listed 
+PASS Department Admin: card shown · inputs yes {"card":true,"inputs":true}
+PASS training officer (plain Member): card shown · inputs yes {"card":true,"inputs":true}
+PASS Officer, NOT a training officer: card shown · inputs no (read-only list) {"card":true,"inputs":false}
+PASS Board Member: card shown · inputs no (read-only list) {"card":true,"inputs":false}
+PASS Project Admin: card shown · inputs no (read-only list) {"card":true,"inputs":false}
+PASS Member: card not shown · inputs no {"card":false,"inputs":false}
+PASS only src/App.jsx changed (runtime) vs origin/main ["src/App.jsx"]
+PASS no new RPC — the only call is the existing correct_training_session 
+PASS no new direct duration_min update 1 vs 1
+PASS no new station_presence write 
+PASS locked-token count unchanged vs origin/main 132 vs 132
+PASS Notify crew held back 
