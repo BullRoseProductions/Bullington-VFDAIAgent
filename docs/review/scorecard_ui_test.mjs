@@ -77,7 +77,8 @@ ok("ready + due: a 'Renewals due · 1' strip, and NO Outstanding section", h1.in
 ok("the renewals strip names the item and its date", /Driver&#x27;s license[\s\S]*Renew by/.test(section(h1, "Renewals due", "Required qualifications")));
 ok("certs are shown and marked as not counting", h1.includes("Certifications · 2") && h1.includes("don&#x27;t count toward the readiness verdict") && h1.includes("IS-100"));
 ok("activity tiles: Station hours / Trainings / Drives — no calls tile", h1.includes("Station hours") && h1.includes("Trainings") && h1.includes(">Drives<") && !/calls/i.test(h1));
-ok("station hours are labelled as logged shifts, not ISO-credited", /not ISO-credited/.test(h1));
+// Re-baselined in WS-4d (F-3 / F3-b): station_hours IS the credited figure now, and the label says so.
+ok("station hours are labelled as CREDITED (location-confirmed + officer-attested), not 'logged shifts'", /credited station hours \(location-confirmed \+ officer-attested\), last 12 months/.test(h1) && !/not ISO-credited/.test(h1));
 const h2 = html(not_ready);
 const outSec = section(h2, "Outstanding · 2", "Required qualifications");
 ok("not ready: Outstanding lists the two unmet items, not the met one", outSec.includes("Engine 1 driver") && outSec.includes("Expired") && !outSec.includes("SOGs"));
@@ -103,7 +104,7 @@ ok("packet: not ready member lists the outstanding items", r2[2] === "Not ready"
 ok("packet: no table row is muted (the print shell would stamp '(inactive)')", b.filter((x) => x.type === "table").every((t) => t.rows.every((r) => !r.muted)));
 ok("packet: an audience-0 document reads 'Not applicable', not 0 of 0", b.find((x) => x.type === "table" && x.head[0] === "Document").rows[1].cells[2] === "Not applicable");
 ok("packet: the standard is listed with each kind", b.find((x) => x.type === "list").items.join(" / ") === "Engine 1 driver (qualification) / Driver's license (credential) / SOGs (acknowledgment)");
-ok("packet: no calls, and the hours caveat is printed", !JSON.stringify(b).match(/calls/i) && JSON.stringify(b).includes("not ISO-credited"));
+ok("packet: no calls, and the hours line names credited hours (WS-4d)", !JSON.stringify(b).match(/calls/i) && JSON.stringify(b).includes("credited station hours (location-confirmed + officer-attested), last 12 months") && !JSON.stringify(b).includes("not ISO-credited"));
 const bNS = rdPacketBlocks({ ...pk, standard_set: false, requirements: [], members: [not_set], readiness: { counted: 1, ready: 0, not_ready: 0, not_set: 1 } });
 ok("packet with no standard: says so, prints no Ready / Not ready counts, member reads 'Standard not set'", JSON.stringify(bNS).includes("Readiness standard not set.") && !JSON.stringify(bNS).includes("**Ready:**")
   && bNS.find((x) => x.type === "table" && x.head.includes("Readiness")).rows[0].cells[2] === "Standard not set");

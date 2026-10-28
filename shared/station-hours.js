@@ -28,6 +28,7 @@
 
    Input rows are dept_station_shifts output, which already excludes incident, off-site and open shifts
    at the SQL layer — this function must not re-filter, or the two layers would each hold half a rule. */
+import { shiftSpan } from "./shift-span.js";   // WS-4d: the one "voided" rule (WS-4a's helper)
 export function rollupStationHours(shifts) {
   const byMember = {};
   for (const s of shifts || []) {
@@ -51,7 +52,10 @@ export function rollupStationHours(shifts) {
     else m.standby += hrs;                                       // standby is the only other surfaced kind
     if (s.verified) m.vTrue += 1;
     if (attested && !s.verified) m.oTrue += 1;                   // counted once, in one state only
-    m.n += 1;
+    // WS-4d (V-a): a VOIDED shift (out = in — void_auto_closed_shift's zero-length record) stays listed ("Voided") and
+    // stays a check-in below, but is not a SHIFT. dept_iso_hours_by_month counts the same way server-side.
+    // A real sub-minute check-out (out > in) still counts (WS-4a G-2: a true record).
+    if (shiftSpan(s.checked_in_at, s.checked_out_at) !== "voided") m.n += 1;
     // VERIFIED % DENOMINATOR — a deliberate choice, and it stays "of CHECK-INS".
     // Attendance-derived rows involve no check-in at all, so counting them would silently
     // change what the metric measures: from "how often did people verify at the station when
