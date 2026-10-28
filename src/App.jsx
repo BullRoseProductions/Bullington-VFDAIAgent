@@ -1762,7 +1762,6 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
 }
 const NAV = [
   { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard, roles: ROLES },
-  { key: "library", label: "Training Library", Icon: FileText, roles: ROLES },
   { key: "training", label: "Training", Icon: GraduationCap, roles: ROLES },
   { key: "roster", label: "Roster", Icon: Users, roles: ROLES },
   { key: "onboarding", label: "New-Member Onboarding", Icon: UserPlus, roles: LEADERSHIP },   // Board/DA/Officer sign items; DA/PA edit the list; a member reaches their own read-only view from the dashboard card
@@ -1800,10 +1799,14 @@ const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
 // EXCLUDED ON PURPOSE: dashboard (initial screen + the redirect target — disabling it would loop),
 // settings (support/legal/your-person, and where these toggles are configured), admin + adddept
 // (Project-Admin oversight, not department modules).
-const TOGGLEABLE_MODULES = ["library", "training", "roster", "onboarding", "apparatus", "qualifications", "expirations", "readiness", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
-// "packet" has no NAV entry — it's the Training Library's detail screen (reachable from the dashboard),
-// so it follows library's toggle. The sidebar already treats it as library's child for the active state.
-const SCREEN_PARENT = { packet: "library" };
+const TOGGLEABLE_MODULES = ["training", "roster", "onboarding", "apparatus", "qualifications", "expirations", "readiness", "equipment", "myequipment", "stationhours", "duties", "recruit", "funding", "visibility", "minutes", "reports", "study", "qanda", "documents", "resources"];
+// Screens with no NAV entry of their own, and the NAV item that owns them. Each follows its parent's module toggle
+// (moduleEnabled), its parent lights up in the sidebar while it's open, and the assistant may open it wherever the
+// parent is reachable. "library" is the Training page's Library tab as a standalone screen — the sidebar entry is gone
+// (folded into Training, always on wherever Training is) but deep links, go("library") and packet-back still land
+// there. "packet" is a library drill's detail screen, opened from the Library tab. A leftover "library" in a
+// department's disabled_modules is simply ignored: it is no longer a toggle.
+const SCREEN_PARENT = { library: "training", packet: "training" };
 // Visibility only. Disabling a module hides it; it does NOT restrict the underlying data, which stays
 // governed by RLS. Never treat a toggle as a permission.
 const moduleEnabled = (key, disabled) => {
@@ -3109,7 +3112,7 @@ export default function App() {
         </div>
         <nav style={S.nav}>
           {visibleNav.map((n) => {
-            const active = screen === n.key || (screen === "packet" && n.key === "library");
+            const active = screen === n.key || SCREEN_PARENT[screen] === n.key;   // library / packet light up Training
             return (
               <button key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
                 <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
@@ -3171,8 +3174,8 @@ export default function App() {
           <ErrorBoundary key={screen}>
           {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
-          {/* ONE library (L0/L1): the nav "Training Library" opens Training on its Library tab — the same view as the tab.
-              keyed by screen so switching between the two nav entries lands on the right tab. */}
+          {/* ONE library (L0/L1): the "library" screen (no sidebar entry since the fold — deep links, go("library"), packet-back) opens Training on its Library tab — the same view as the tab.
+              keyed by screen so moving between Training and the library alias lands on the right tab. */}
           {(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"} S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)}
             lib={lib} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} />}
           {screen === "study" && <StudySession S={S} />}
@@ -4682,7 +4685,6 @@ function OfflineNotice({ onRetry, what }) {
 
 /* ---------------- Quick access (home page doorways) ---------------- */
 const QUICK = {
-  library: { accent: "#1F4E79", blurb: "Ready-to-run packets for Fire, EMS, Leadership & Operations." },
   training: { accent: "#1F4E79", blurb: "A recurring training plan + calendar that flags what's coming and overdue." },
   ai:      { accent: "#54506B", blurb: "Describe your crew — get a full drill plan in seconds." },
   documents: { accent: "#1F4E79", blurb: "Upload your SOPs and guidelines, or draft new ones with AI." },
@@ -4964,7 +4966,7 @@ function AskB4C({ role, go, dept, onClose, onHide, gen, msgs, setMsgs, text, set
     window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
   // The server's open_screen allowlist is wider than any one person's nav; only go where this person could tap.
-  const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === k && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));
+  const canOpen = (k) => k === "notifications" || NAV.some((n) => n.key === (SCREEN_PARENT[k] || k) && hasAny(role, n.roles) && moduleEnabled(k, dept?.disabled_modules));   // "library" → Training's nav entry
   async function ask(q) {
     const question = String(q || "").trim();
     if (!question || busy) return;
@@ -24541,8 +24543,8 @@ function TrainingOfficersCard({ S, members, meId, notify, onChanged }) {
 function Training(props) {
   const [view, setView] = useState(props.initialView === "library" ? "library" : "schedule");
   const [plansSeen, setPlansSeen] = useState(false);
-  // Training Library slice 1 (L0/L1): the third tab — the real shared catalog. Mounted on first open, like Plans; the nav
-  // "Training Library" lands here directly (initialView).
+  // Training Library slice 1 (L0/L1): the third tab — the real shared catalog. Mounted on first open, like Plans; the
+  // "library" screen (deep links, go("library"), packet-back) lands here directly (initialView).
   const [librarySeen, setLibrarySeen] = useState(props.initialView === "library");
   const toggle = <NoirSeg options={[["schedule", "Schedule"], ["plans", "Training Plans"], ["library", "Library"]]} value={view} onChange={(v) => { setView(v); if (v === "plans") setPlansSeen(true); if (v === "library") setLibrarySeen(true); }} style={{ marginBottom: 12 }} />;
   // Slice 2: the Schedule's "Draft a plan →" and "Manage in Training Plans →" flip to the Training Plans tab (and, for the
@@ -24945,7 +24947,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     if (!wp) return false;
     setWithPlan(null);
     const { error } = sessionId ? await supabase.rpc("attach_drill_plan_to_session", { p_plan_id: wp.id, p_session_id: sessionId }) : { error: new Error("no session id") };
-    if (error) notify({ kind: "error", title: "Scheduled; the plan couldn't be attached", text: `Scheduled; the plan couldn't be attached — attach it from the Library.${extra}`, details: error.message });
+    if (error) notify({ kind: "error", title: "Scheduled; the plan couldn't be attached", text: `Scheduled; the plan couldn't be attached — attach it from Training Plans.${extra}`, details: error.message });
     else notify({ kind: "success", title, text: `Scheduled with “${wp.title}” attached.${extra}` });
     return true;
   }
@@ -27284,7 +27286,7 @@ function RequestForm({ S, requests, setRequests, extra, embedded }) {   // extra
    catalog, and publishing becomes the Project Admin curator queue in slice 2. The field-signal list below is unchanged. */
 function Admin({ S, feedback }) {
   return (
-    <PageShell band kicker="CONTENT ADMIN" title="Library & field signal" sub="The Training Library is now a real, shared catalog. Curating it (publishing shared and AI-drafted drills) arrives with the curator queue.">
+    <PageShell band kicker="CONTENT ADMIN" title="Library & field signal" sub="The drill library (Training → Library tab) is now a real, shared catalog. Curating it (publishing shared and AI-drafted drills) arrives with the curator queue.">
       <NoirSkin>
       <div style={{ ...S.formCard, ...FS.cardNoir, padding: "14px 16px", gap: 6 }}>
         <CardHead icon={FileText} title="Publishing" />

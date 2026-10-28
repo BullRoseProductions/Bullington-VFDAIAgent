@@ -7,7 +7,8 @@
 //   2. a single schedule: the same training_sessions insert (+ .select("id")), then attach_drill_plan_to_session on the new
 //      id, a confirmation toast, and back to the Library
 //   3. a series: one bulk insert; the plan is attached to the earliest-dated new session ONLY
-//   4. a failed attach keeps the session (no delete) and says "attach it from the Library"; ✕ on the chip = a plain schedule
+//   4. a failed attach keeps the session (no delete) and says "attach it from Training Plans" (was "…from the Library" until
+//      the library fold — "Library" is now the drill-catalog tab; plans are attached from Training Plans); ✕ on the chip = a plain schedule
 //   5. Start blank -> the plan editor, empty -> set_drill_plan(p_id null, p_source 'manual') -> a draft, no "Manual" tag
 //   6. "Describe your goals (focus & notes)" sits right under Topic
 //   7. the role matrix: Start blank / Schedule with this plan for DA + training officer only
@@ -186,7 +187,7 @@ const sessInserts = () => globalThis.__sb.writes.filter((w) => w.table === "trai
   await click(btn(form(), /^Add to /)); await tick(); await tick();
   ok("failed attach: the session was inserted and nothing deletes it", sessInserts().length === 1 && attaches().length === 1 && !globalThis.__sb.writes.some((w) => w.op === "delete"));
   const e = globalThis.__notes.find((n) => n.kind === "error");
-  ok("failed attach: the toast says \"Scheduled; the plan couldn't be attached — attach it from the Library\"", !!e && /Scheduled; the plan couldn't be attached — attach it from the Library/.test(e.text) && !globalThis.__notes.some((n) => n.kind === "success"), JSON.stringify(globalThis.__notes));
+  ok("failed attach: the toast says \"Scheduled; the plan couldn't be attached — attach it from Training Plans\"", !!e && /Scheduled; the plan couldn't be attached — attach it from Training Plans/.test(e.text) && !globalThis.__notes.some((n) => n.kind === "success"), JSON.stringify(globalThis.__notes));
   ok("failed attach: still back on the Library (where it can be attached)", onPlans());
   unmount(); }
 
