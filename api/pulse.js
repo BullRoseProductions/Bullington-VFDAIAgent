@@ -14,7 +14,7 @@
  * ENV
  *   PULSE_ENABLED               must be truthy or this returns immediately. Defaults OFF, so
  *                               deploying the endpoint is not the same as switching it on.
- *   CRON_SECRET                 same secret the digest uses.
+ *   CRON_SECRET                 same secret the digest uses; Authorization: Bearer header only (?secret= is refused).
  *   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
  *
  * QUERY
@@ -25,6 +25,7 @@
  *                               and no fake compliance rows are needed.
  */
 import { createClient } from "@supabase/supabase-js";
+import { requireCron } from "./_cron.js";
 // The WRITER only. sendPush stays unimported — this slice must remain incapable of sending.
 // insertNotifications already owns the upsert + read-back dance (ignoreDuplicates returns no
 // representation, so "what was actually new" has to be read back by created_at); duplicating
@@ -188,15 +189,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: "Missing CRON_SECRET" });   // fail closed
-  }
-  const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const provided = bearer || req.query?.secret || "";
-  if (provided !== secret) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  if (!requireCron(req, res)) return;   // Bearer header only, constant-time (api/_cron.js, L-1)
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
