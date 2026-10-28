@@ -6,9 +6,8 @@
 //
 // The model renders scenes well but garbles small/factual text and adds stray lettering even on "no text"
 // prompts — so B4C layers all real text (headline, crest, details) itself, on top of the returned image.
-import { createClient } from "@supabase/supabase-js";
 import { cors } from "./_cors.js";
-import { requireUser } from "./_auth.js";
+import { requireMember, chargeAiCall } from "./_auth.js";
 
 const QUALITIES = ["medium", "high"];                       // medium is the default: ~1/4 the cost, near-identical for social
 const SIZES = ["1024x1536", "1024x1024", "1536x1024"];       // portrait poster is the default
@@ -19,7 +18,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-  if (!await requireUser(req, res)) return;   // 401 already sent — the handler must not run
+  const ctx = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 (was a 503) / 503 already sent
+  if (!ctx) return;
   const key = process.env.IMAGE_API_KEY;
   if (!key) {
     return res.status(501).json({ error: "AI image generation isn't set up yet. Add IMAGE_API_KEY in Vercel to enable it." });
@@ -34,16 +34,9 @@ export default async function handler(req, res) {
   /* THE CEILING, CHECKED AS THE CALLER — before a cent is spent. The RPC is department-scoped (my_department_id()
      from the caller's own JWT), atomic, and anon-revoked; this function holds no service-role key for it. Anything
      other than a clear "allowed" — a denial, an RPC error, a missing config — FAILS SAFE: OpenAI is not called. */
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey) {
-    return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" });
-  }
-  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || "").trim())?.[1];
-  const asUser = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  });
+  // WS-2: the per-member DAILY cap (20) first, then the department's MONTHLY ceiling — both as the caller (ctx.sb).
+  if (!await chargeAiCall(ctx, "image", res)) return;   // 429 / 503 already sent — OpenAI is not called
+  const asUser = ctx.sb;
   let usage;
   try {
     const { data, error } = await asUser.rpc("record_image_generation", { p_tier: quality });
@@ -66,7 +59,9 @@ export default async function handler(req, res) {
     });
     const data = await r.json();
     if (!r.ok) {
-      return res.status(r.status).json({ error: data?.error?.message || "Image provider error" });
+      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
+      console.error("api/image: OpenAI error", r.status, data?.error?.type, data?.error?.message);
+      return res.status(502).json({ error: "The image service couldn't make that just now — please try again." });
     }
     const b64 = data?.data?.[0]?.b64_json;
     if (!b64) return res.status(502).json({ error: "No image was returned." });

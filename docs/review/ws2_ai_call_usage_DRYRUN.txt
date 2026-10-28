@@ -1,0 +1,68 @@
+pins: 4/4 mock bodies md5-equal to the live pins (all live bodies, no stubs) 
+migration: applied. state row: {"fn":"record_ai_call anon=false auth=true definer=true","rls":true,"rows":0,"table":true,"fn_md5":"bc12991cbd6fd2c1efc6794affbb5e27","fn_count":5,"policies":0,"table_acl":"{postgres=arwdDxt/postgres,service_role=arwdDxt/postgres}","auth_select":false,"total_policies":0,"verified_presence":2}
+re-run: refused -> PREFLIGHT: ai_call_usage / record_ai_call already exist — WS-2 looks applied. Refusing.
+RETEST:
+PASS  O1 ai_call_usage: RLS on, no policies, no anon/authenticated access; PK (member_id, day, route)
+PASS  O2 record_ai_call: definer, search_path=public, authenticated-only
+PASS  O3 the four pinned functions are byte-identical
+— Alpha (mock)
+   PASS  T1 under cap: claude allowed (used 1 then 2, ceiling 150)
+   PASS  T2 over the member cap: concepts at 30 → refused (scope member), count stays 30
+   PASS  T3 department backstop: claude at 1,500 for the department → M refused (scope department) at 2 of 150
+   PASS  T4 no member row / Inactive member → "could not match your login" (403 at the API)
+   PASS  T5 an unknown route raises
+   PASS  T6 ceilings: concepts 30 · assistant 60 · image 20 (claude 150, T1)
+   PASS  T7 anon can't execute record_ai_call
+   PASS  T8 ai_call_usage unreadable by authenticated
+   PASS  T9 station_presence byte-identical; verified 2 unchanged; monthly ceilings untouched
+— Bravo (mock)
+   PASS  T1 under cap: claude allowed (used 1 then 2, ceiling 150)
+   PASS  T2 over the member cap: concepts at 30 → refused (scope member), count stays 30
+   PASS  T3 department backstop: claude at 1,500 for the department → M refused (scope department) at 2 of 150
+   PASS  T4 no member row / Inactive member → "could not match your login" (403 at the API)
+   PASS  T5 an unknown route raises
+   PASS  T6 ceilings: concepts 30 · assistant 60 · image 20 (claude 150, T1)
+   PASS  T7 anon can't execute record_ai_call
+   PASS  T8 ai_call_usage unreadable by authenticated
+   PASS  T9 station_presence byte-identical; verified 2 unchanged; monthly ceilings untouched
+21 passed, 0 failed, 0 skipped
+backstop at 1,499: two calls → true then false (expect true then false, scope department)
+drift "my_member_id() drifted": refused -> PREFLIGHT: public.my_member_id() drifted from its pinned body. Refusing.
+drift "record_assistant_turn() drifted": refused -> PREFLIGHT: public.record_assistant_turn() drifted from its pinned body. Refusing.
+drift "ai_call_usage already exists": refused -> PREFLIGHT: ai_call_usage / record_ai_call already exist — WS-2 looks applied. Refusing.
+mutations:
+   M1 table readable by authenticated: migration REFUSED -> Post-condition failed: anon/authenticated hold SELECT on ai_call_usage. Rolling back.
+   M2 anon can execute: migration REFUSED -> Post-condition failed: record_ai_call is not definer + search_path=public + authenticated-only. Rolling back.
+   M3 no member check:
+      FAIL  T4 non-member: null value in column "member_id" of relation "ai_call_usage" violates not-null constraint null value in column "member_id" of relation "ai_call_usage" violates not-null constraint
+      FAIL  T4 non-member: null value in column "member_id" of relation "ai_call_usage" violates not-null constraint null value in column "member_id" of relation "ai_call_usage" violates not-null constraint
+      19 passed, 2 failed, 0 skipped
+   M4 the member cap never refuses:
+      FAIL  T2 over cap: {"used": 31, "allowed": true, "ceiling": 30}
+      FAIL  T2 over cap: {"used": 31, "allowed": true, "ceiling": 30}
+      19 passed, 2 failed, 0 skipped
+   M5 claude cap 1500 not 150:
+      FAIL  T1 under cap: {"used": 1, "allowed": true, "ceiling": 1500} / {"used": 2, "allowed": true, "ceiling": 1500}
+      FAIL  T1 under cap: {"used": 1, "allowed": true, "ceiling": 1500} / {"used": 2, "allowed": true, "ceiling": 1500}
+      19 passed, 2 failed, 0 skipped
+   M6 no department backstop:
+      FAIL  T3 backstop: {"used": 3, "allowed": true, "ceiling": 150}
+      FAIL  T3 backstop: {"used": 3, "allowed": true, "ceiling": 150}
+      19 passed, 2 failed, 0 skipped
+   M7 any route accepted:
+      FAIL  T5 unknown route: new row for relation "ai_call_usage" violates check constraint "ai_call_usage_route_check"
+      FAIL  T5 unknown route: new row for relation "ai_call_usage" violates check constraint "ai_call_usage_route_check"
+      19 passed, 2 failed, 0 skipped
+   M8 a policy that opens the table: migration REFUSED -> Post-condition failed: ai_call_usage has 1 policies (expected none). Rolling back.
+post-apply drift (RETEST alone must catch):
+   D1 authenticated granted SELECT later:
+      FAIL  O1 ai_call_usage RLS / policies / grants / PK not as intended
+      FAIL  T8 authenticated read the table
+      18 passed, 3 failed, 0 skipped
+   D2 anon granted EXECUTE later:
+      FAIL  O2 record_ai_call privileges / definer / search_path
+      FAIL  T7 anon: We could not match your login to a member record.
+      18 passed, 3 failed, 0 skipped
+   D3 record_assistant_turn replaced later:
+      FAIL  O3 a pinned function changed
+      20 passed, 1 failed, 0 skipped
