@@ -1,0 +1,15 @@
+PASS V-a: a voided shift is not a shift — totals.shifts 2 (real + sub-minute), not 3 2
+PASS V-a: …but it IS still a check-in (verified-% denominator 3) 3
+PASS V-a: hours are untouched by the voided row (credited identical with or without it) 
+PASS G-2 kept: a 20-second shift still counts as a shift 
+PASS V-a through mergeStationHours (the Station Hours screen / Chief's Report / Agenda): shifts 1 1
+PASS email: stationMetrics byte-identical with or without the voided row (credited / standby / training / unverified) {"eWith":{"credited":2,"standby":2,"training":0,"unverified":0,"verifiedPct":100,"members":[{"member_id":"m1","credited":2,"standby":2,"training":0,"unverified"
+PASS PIN: station-hours.js takes 'voided' from ./shift-span.js (no local copy of the rule) 
+PASS F3-b: the scorecard says credited station hours (screen footnote + PDF paragraph) 
+PASS F3-b: the old 'closed station shifts as logged … not ISO-credited' wording is gone 
+PASS the migration is byte-for-byte what the generator makes from the live bodies (not hand-edited) 931daf4181f3645b934fd2cafbc6519c
+PASS the RETEST carries six post-apply md5s and the live grants (no placeholders left) 
+PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 132
+PASS Notify crew held back 
+PASS runtime files changed vs origin/main = shared/station-hours.js + src/App.jsx (labels) ["shared/station-hours.js","src/App.jsx"]
+PASS no station_presence line added on the client 

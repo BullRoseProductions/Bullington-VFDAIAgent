@@ -1,0 +1,49 @@
+WS-4d — every change to the six replaced functions, as exact substitutions on the live bodies (docs/review/ws4d_hours_build.mjs).
+Nothing else in any body changes; signatures, return types, volatility, SECURITY DEFINER, search_path and grants are kept (CREATE OR REPLACE).
+
+==== public.readiness_verdict(uuid,uuid)
+---- live md5 e72e20424e274308e62dd2ad170b8c7f
+- 'station_hours', coalesce((select round(sum(extract(epoch from (sp.checked_out_at - sp.checked_in_at)) / 3600.0)::numeric, 1)
+                                   from public.station_presence sp
+                                  where sp.member_id = p_member and sp.department_id = p_dept and sp.checked_out_at is not null
+                                    and not coalesce(sp.auto_closed, false) and sp.checked_in_at >= now() - interval '12 months'), 0),
++ 'station_hours', coalesce((select round(h.iso_total_hours, 1)
+                                   from public.dept_iso_hours_for(p_dept, now() - interval '12 months', now()) h
+                                  where h.member_id = p_member), 0),
++ -- WS-4d F-3 (2026-10-28): activity.station_hours = the member's CREDITED hours (dept_iso_hours_for, last 12 months) — was every closed shift.
+
+==== public.dept_iso_hours_for(uuid,timestamp with time zone,timestamp with time zone)
+---- live md5 91ceb031497e2e70d64f07540f7bd0a9
+- select sp.member_id as mid, (sp.kind = 'training') as is_training,
++ select sp.member_id as mid, (sp.kind = 'training' and not coalesce((select t.is_meeting from public.training_sessions t where t.id = sp.session_id), false)) as is_training,
+- select att.member_id as mid, true as is_training,
++ select att.member_id as mid, not coalesce((select t.is_meeting from public.training_sessions t where t.id = att.session_id), false) as is_training,
++ -- WS-4d D-2 (2026-10-28): a business meeting's time (is_meeting) credits STANDBY, not training — decided at read time; totals unchanged.
+
+==== public.dept_iso_hours_by_station(timestamp with time zone,timestamp with time zone)
+---- live md5 5a895ed77425f86287ac9b9afa1dbf5e
+- (sp.kind = 'training')                    as is_training,
++ (sp.kind = 'training' and not coalesce((select t.is_meeting from public.training_sessions t where t.id = sp.session_id), false)) as is_training,
+- true                                      as is_training,
++ not coalesce((select t.is_meeting from public.training_sessions t where t.id = att.session_id), false) as is_training,
++ -- WS-4d D-2 (2026-10-28): a business meeting's time (is_meeting) credits STANDBY, not training — the same rule as dept_iso_hours_for.
+
+==== public.dept_station_shifts(timestamp with time zone,timestamp with time zone)
+---- live md5 894bbaa8f37ca95da454dd075aab1d41
+- sp.kind, sp.verified, sp.auto_closed,
++ case when sp.kind = 'training' and coalesce((select t.is_meeting from public.training_sessions t where t.id = sp.session_id), false) then 'standby'::text else sp.kind end as kind, sp.verified, sp.auto_closed,
+- 'training'::text                             as kind,
++ (case when coalesce((select t.is_meeting from public.training_sessions t where t.id = att.session_id), false) then 'standby' else 'training' end)::text as kind,
++ -- WS-4d D-2 (2026-10-28): a business meeting's row reads kind 'standby' (observed and attested) — the same rule as dept_iso_hours_for.
+
+==== public.my_station_shifts(timestamp with time zone,timestamp with time zone)
+---- live md5 ee7077f84cb3dc7a93ffcab651fcc5c9
+- sp.kind, sp.verified,
++ case when sp.kind = 'training' and coalesce((select t.is_meeting from public.training_sessions t where t.id = sp.session_id), false) then 'standby'::text else sp.kind end as kind, sp.verified,
++ -- WS-4d D-2 (2026-10-28): a business meeting's row reads kind 'standby' — the same rule as dept_iso_hours_for.
+
+==== public.dept_iso_hours_by_month(timestamp with time zone[],timestamp with time zone[])
+---- live md5 c9cef038539fd39d310ea51d962cce60
+- (select count(*) from public.dept_station_shifts(p_starts[i], p_ends[i]))::integer
++ (select count(*) filter (where s.checked_out_at > s.checked_in_at) from public.dept_station_shifts(p_starts[i], p_ends[i]) s)::integer
++ -- WS-4d V-a (2026-10-28): a VOIDED shift (out = in) is listed but not counted as a shift; its hours were already 0.

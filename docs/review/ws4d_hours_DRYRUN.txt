@@ -1,0 +1,57 @@
+pins: 13/13 mock bodies md5-equal to the live pins (all live bodies) 
+migration: applied (its in-transaction proof passed). state row: {"new_md5":{"isoFor":"705c9a9b5532d28824f5e50e74d6059f","shifts":"dc8db411f6c43d7b8adcb76c247d0e48","byMonth":"61e720592773ed61a2b68ec481292db4","verdict":"181776ca615f0e9c21b12806916c61e4","myShifts":"7832e4dc35632c397599301e1ff4a3c9","byStation":"998d10b2c6e2b8da399fca16a52aec28"},"fn_count":17,"voided_rows":1,"ws4d_marked":6,"total_policies":0,"meetings_flagged":0,"verified_presence":8,"attested_training_md5":"aff25333771cd38c1f473bcde5e1e96e"}
+proof, re-checked from outside: 3 member credited rows (12 months); totals byte-identical: true; split identical (no meeting): true
+F-3 on a member with unverified + auto-closed + voided + sub-minute shifts and an observed drill: scorecard 5.5 h (every closed shift) → 1.5 h (credited)
+re-run: refused -> PREFLIGHT: readiness_verdict already carries the WS-4d change — the slice looks applied. Refusing.
+RETEST constants — post-apply md5: {"isoFor":"705c9a9b5532d28824f5e50e74d6059f","shifts":"dc8db411f6c43d7b8adcb76c247d0e48","byMonth":"61e720592773ed61a2b68ec481292db4","verdict":"181776ca615f0e9c21b12806916c61e4","myShifts":"7832e4dc35632c397599301e1ff4a3c9","byStation":"998d10b2c6e2b8da399fca16a52aec28"}
+RETEST constants — live grants|definer|config: {"verdict":"{postgres=X/postgres,service_role=X/postgres}|true|{search_path=public}","isoFor":"{postgres=X/postgres,service_role=X/postgres}|true|{search_path=public}","byStation":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}|true|{search_path=public}","shifts":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}|true|{search_path=public}","myShifts":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}|true|{search_path=public}","byMonth":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}|false|{search_path=public}"}
+RETEST:
+PASS  O1 the six replaced functions carry WS-4d and match the dry run's md5s
+FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+— Alpha (mock)
+   (leader = a REAL Department Admin)
+   PASS  T1 credited: meeting F 1.5 h standby (attested cap) · G 1.0 h standby (observed) · drill H 1.5 h training; totals = training + standby
+   PASS  T2 by station: the meeting's 2.5 h are standby, the drill's 1.5 h training
+   PASS  T3 lists: meeting rows read standby (attested F, observed G; G's own list too), the drill reads training
+   PASS  T4 voided: listed (V has 2 rows) but the month counts 4 shifts = the rows with out > in
+   PASS  T5 scorecard == credited 12-month hours for all 7 counted members (fixtures included)
+   PASS  T6 station_presence byte-identical outside the fixtures; verified 8 unchanged
+— Bravo (mock)
+   (leader = a REAL Department Admin)
+   PASS  T1 credited: meeting F 1.5 h standby (attested cap) · G 1.0 h standby (observed) · drill H 1.5 h training; totals = training + standby
+   PASS  T2 by station: the meeting's 2.5 h are standby, the drill's 1.5 h training
+   PASS  T3 lists: meeting rows read standby (attested F, observed G; G's own list too), the drill reads training
+   PASS  T4 voided: listed (V has 2 rows) but the month counts 4 shifts = the rows with out > in
+   PASS  T5 scorecard == credited 12-month hours for all 6 counted members (fixtures included)
+   PASS  T6 station_presence byte-identical outside the fixtures; verified 8 unchanged
+13 passed, 1 failed, 0 skipped
+with a flagged meeting: applied; totals byte-identical true; split moved for 2 member(s): 2: training 1.50→0.00, standby 10.00→11.50 · 3: training 1.50→0.00, standby 0.01→1.51
+drift "attested_training drifted": refused -> PREFLIGHT: public.attested_training(uuid,timestamp with time zone,timestamp with time zone) drifted from its pinned body. Re-read it before applying. Refusing.
+drift "dept_station_shifts drifted": refused -> PREFLIGHT: public.dept_station_shifts(timestamp with time zone,timestamp with time zone) drifted from its pinned body. Re-read it before applying. Refusing.
+drift "is_meeting column missing": refused -> PREFLIGHT: training_sessions.is_meeting:boolean not found with that type. Refusing.
+mutations:
+   M1 by_station still counts meetings as training:
+      FAIL  O1 replaced function(s) not as built: byStation
+      FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+      10 passed, 4 failed, 0 skipped
+   M2 the credited rule DROPS meeting time (a total change): migration REFUSED -> Post-condition failed: 3 member/window credited totals changed. Rolling back.
+   M3 the month still counts voided shifts:
+      FAIL  O1 replaced function(s) not as built: byMonth
+      FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+      10 passed, 4 failed, 0 skipped
+   M4 the scorecard reads 6 months, not 12: migration REFUSED -> Post-condition failed: 1 scorecards disagree with the credited hours. Rolling back.
+   M5 a grant changes on the way through: migration REFUSED -> Post-condition failed: a replaced function's grants / definer / search_path / volatility / result type changed. Rolling back.
+   M6 attested_training touched: migration REFUSED -> Post-condition failed: public.attested_training(uuid,timestamp with time zone,timestamp with time zone) changed (it must not be touched). Rolling back.
+   M7 my_station_shifts keeps 'training' for meetings:
+      FAIL  O1 replaced function(s) not as built: myShifts
+      FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+      10 passed, 4 failed, 0 skipped
+post-apply drift (RETEST alone must catch):
+   D1 by_station reverted to the live body later:
+      FAIL  O1 replaced function(s) not as built: byStation
+      FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+      10 passed, 4 failed, 0 skipped
+   D2 attested_training changed later:
+      FAIL  O2 privileges changed or attested_training touched: isoFor verdict
+      FAIL  T2 by station: meeting training 0.00 · drill training 0 · meeting standby 1.00
+      9 passed, 5 failed, 0 skipped

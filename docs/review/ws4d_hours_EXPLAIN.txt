@@ -1,0 +1,31 @@
+WS-4d F3-a — READ-ONLY EXPLAIN (ANALYZE, BUFFERS), live 2026-10-28: dept_iso_hours_for once per counted member of Indian Harbor (path A).
+
+Nested Loop Anti Join  (cost=1.21..25.35 rows=1 width=48) (actual time=135.091..232.411 rows=37 loops=1)
+  Buffers: shared hit=6081
+  ->  Hash Join  (cost=1.06..7.05 rows=13 width=32) (actual time=1.471..1.631 rows=37 loops=1)
+        Hash Cond: (m.department_id = d.id)
+        Buffers: shared hit=5
+        ->  Seq Scan on members m  (cost=0.00..5.72 rows=53 width=32) (actual time=1.430..1.547 rows=104 loops=1)
+              Filter: ((status = ANY ('{Active,Probationary}'::text[])) AND (NOT COALESCE((access && '{"Project Admin"}'::text[]), false)))
+              Rows Removed by Filter: 11
+              Buffers: shared hit=4
+        ->  Hash  (cost=1.05..1.05 rows=1 width=16) (actual time=0.023..0.024 rows=1 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+              Buffers: shared hit=1
+              ->  Seq Scan on departments d  (cost=0.00..1.05 rows=1 width=16) (actual time=0.012..0.014 rows=1 loops=1)
+                    Filter: (name = 'Indian Harbor Volunteer Fire Department'::text)
+                    Rows Removed by Filter: 4
+                    Buffers: shared hit=1
+  ->  Index Only Scan using member_separation_pkey on member_separation s  (cost=0.15..0.42 rows=1 width=16) (actual time=0.034..0.034 rows=0 loops=37)
+        Index Cond: (member_id = m.id)
+        Heap Fetches: 0
+        Buffers: shared hit=37
+  SubPlan 1
+    ->  Function Scan on dept_iso_hours_for h  (cost=0.26..12.76 rows=5 width=32) (actual time=6.200..6.201 rows=1 loops=37)
+          Filter: (member_id = m.id)
+          Rows Removed by Filter: 31
+          Buffers: shared hit=6039
+Planning:
+  Buffers: shared hit=348
+Planning Time: 33.370 ms
+Execution Time: 232.550 ms

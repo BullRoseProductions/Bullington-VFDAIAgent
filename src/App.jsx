@@ -21774,14 +21774,14 @@ function RdScorecard({ sc, self }) {
 
     <QualSection icon={Activity} label="Activity · last 12 months" color={FIRE.textSecondary} />
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 6 }}>
-      {[[probNum(act.station_hours), "Station hours"], [Number(act.trainings) || 0, "Trainings"], [Number(act.drives) || 0, "Drives"]].map(([n, l]) => (
+      {[[probNum(act.station_hours), "Credited station hours"], [Number(act.trainings) || 0, "Trainings"], [Number(act.drives) || 0, "Drives"]].map(([n, l]) => (
         <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 10px", textAlign: "center" }}>
           <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 22, lineHeight: 1, color: FIRE.textPrimary, ...FS.num }}>{n}</div>
           <div style={{ fontSize: 10.5, color: FIRE.textMuted, marginTop: 5 }}>{l}</div>
         </div>
       ))}
     </div>
-    <div style={{ fontSize: 10.5, color: FIRE.textMuted, margin: "0 2px 18px" }}>For information only — activity never changes the verdict. Station hours are closed station shifts as logged (auto-closed shifts left out), not ISO-credited hours; trainings are training nights attended; drives are supervised drives logged.</div>
+    <div style={{ fontSize: 10.5, color: FIRE.textMuted, margin: "0 2px 18px" }}>For information only — activity never changes the verdict. Station hours are credited station hours (location-confirmed + officer-attested), last 12 months — the same figure as Station Hours and the ISO report; trainings are training nights attended; drives are supervised drives logged.</div>
   </>);
 }
 /* The printable ISO / audit packet, as print blocks (printDocument: web print sheet, native PDF). Pure — built only
@@ -21811,10 +21811,10 @@ function rdPacketBlocks(pk) {
   } : { type: "p", text: "No active or probationary members." });
   blocks.push({ type: "h2", text: "Activity — last 12 months" });
   blocks.push(members.length ? {
-    type: "table", head: ["Member", "Station hours", "Trainings", "Drives"],
+    type: "table", head: ["Member", "Credited station hrs", "Trainings", "Drives"],
     rows: members.map((m) => ({ cells: [m.name || "", probNum(m.activity?.station_hours), String(Number(m.activity?.trainings) || 0), String(Number(m.activity?.drives) || 0)] })),
   } : { type: "p", text: "No members to show." });
-  blocks.push({ type: "p", text: "Information only — activity does not change readiness. Station hours are closed station shifts as logged (auto-closed shifts excluded), not ISO-credited hours. Trainings are training nights attended; drives are supervised drives logged." });
+  blocks.push({ type: "p", text: "Information only — activity does not change readiness. Station hours are credited station hours (location-confirmed + officer-attested), last 12 months — the same figure as the Station Hours and ISO reports. Trainings are training nights attended; drives are supervised drives logged." });
   const quals = Array.isArray(pk?.qualifications) ? pk.qualifications : [];
   blocks.push({ type: "h2", text: "Qualifications" });
   blocks.push(quals.length ? { type: "table", head: ["Qualification", "Qualified", "In progress", "Not started"], rows: quals.map((q) => ({ cells: [q.name || "", String(q.qualified ?? 0), String(q.in_progress ?? 0), String(q.not_started ?? 0)] })) }
