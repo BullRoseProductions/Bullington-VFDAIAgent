@@ -62,7 +62,9 @@ const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)",
   tok(src) === 132 && tok(readFileSync(join(root, "api/digest.js"), "utf8")) === 32 && tok(readFileSync(join(root, "api/assistant.js"), "utf8")) === 14, String(tok(src)));
 ok("Notify crew held back", !execSync("git ls-files api", { cwd: root }).toString().includes("notify-session") && !src.includes("NotifyCrewModal"));
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
-ok("runtime files changed vs origin/main = shared/station-hours.js + src/App.jsx (labels)", JSON.stringify(changed) === JSON.stringify(["shared/station-hours.js", "src/App.jsx"]), JSON.stringify(changed));
-const added = execSync("git diff origin/main -- src api shared", { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+// PINNED to WS-4d's reviewed range (d552eb6 = main before it .. e9b4df8; released in industrial-noir-41): "vs origin/main"
+// goes red once the slice is on main.
+const changed = execSync("git diff --name-only d552eb6 e9b4df8 -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("WS-4d (d552eb6..e9b4df8) runtime files = shared/station-hours.js + src/App.jsx (labels)", JSON.stringify(changed) === JSON.stringify(["shared/station-hours.js", "src/App.jsx"]), JSON.stringify(changed));
+const added = execSync("git diff d552eb6 e9b4df8 -- src api shared", { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
 ok("no station_presence line added on the client", !added.some((l) => l.includes("station_presence")));
