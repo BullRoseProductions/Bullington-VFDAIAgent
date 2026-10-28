@@ -282,7 +282,10 @@ export default async function handler(req, res) {
         body: JSON.stringify({ model: MODEL, max_tokens: 1200, system, tools: TOOLS, messages, ...(round === MAX_TOOL_ROUNDS ? { tool_choice: { type: "none" } } : {}) }),
       });
       const data = await r.json();
-      if (!r.ok) return res.status(502).json({ error: "Ask B4C couldn't answer just now — please try again." });
+      if (!r.ok) {   // WS-2 (L-5): generic to the caller (as before); the provider's detail to the server log only
+        console.error("api/assistant: Anthropic error", r.status, data?.error?.type, data?.error?.message);
+        return res.status(502).json({ error: "Ask B4C couldn't answer just now — please try again." });
+      }
       const blocks = data.content || [];
       text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
       const calls = blocks.filter((b) => b.type === "tool_use");

@@ -68,7 +68,7 @@ index adbad26..c4d4e4c 100644
 +  return usage;
 +}
 diff --git a/api/assistant.js b/api/assistant.js
-index 79e624d..bef570c 100644
+index 79e624d..11a9bf0 100644
 --- a/api/assistant.js
 +++ b/api/assistant.js
 @@ -15,9 +15,8 @@
@@ -122,6 +122,18 @@ index 79e624d..bef570c 100644
    const [{ data: me }, { data: dept }, { data: celeb }] = await Promise.all([
      sb.from("members").select("name, access, joined").eq("id", memberId).maybeSingle(),
      sb.from("departments").select("name").eq("id", deptId).maybeSingle(),
+@@ -284,7 +282,10 @@ export default async function handler(req, res) {
+         body: JSON.stringify({ model: MODEL, max_tokens: 1200, system, tools: TOOLS, messages, ...(round === MAX_TOOL_ROUNDS ? { tool_choice: { type: "none" } } : {}) }),
+       });
+       const data = await r.json();
+-      if (!r.ok) return res.status(502).json({ error: "Ask B4C couldn't answer just now — please try again." });
++      if (!r.ok) {   // WS-2 (L-5): generic to the caller (as before); the provider's detail to the server log only
++        console.error("api/assistant: Anthropic error", r.status, data?.error?.type, data?.error?.message);
++        return res.status(502).json({ error: "Ask B4C couldn't answer just now — please try again." });
++      }
+       const blocks = data.content || [];
+       text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+       const calls = blocks.filter((b) => b.type === "tool_use");
 diff --git a/api/claude.js b/api/claude.js
 index 9cb2ac0..ff14880 100644
 --- a/api/claude.js
@@ -243,7 +255,7 @@ index ccbaaf1..ec927b0 100644
      const text = (data.content || []).map((c) => (c.type === "text" ? c.text : "")).join("").trim();
      const concepts = parseConcepts(text, count);
 diff --git a/api/image.js b/api/image.js
-index 4a97928..245657b 100644
+index 4a97928..6bb37fe 100644
 --- a/api/image.js
 +++ b/api/image.js
 @@ -6,9 +6,8 @@
@@ -287,3 +299,14 @@ index 4a97928..245657b 100644
    let usage;
    try {
      const { data, error } = await asUser.rpc("record_image_generation", { p_tier: quality });
+@@ -66,7 +59,9 @@ export default async function handler(req, res) {
+     });
+     const data = await r.json();
+     if (!r.ok) {
+-      return res.status(r.status).json({ error: data?.error?.message || "Image provider error" });
++      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
++      console.error("api/image: OpenAI error", r.status, data?.error?.type, data?.error?.message);
++      return res.status(502).json({ error: "The image service couldn't make that just now — please try again." });
+     }
+     const b64 = data?.data?.[0]?.b64_json;
+     if (!b64) return res.status(502).json({ error: "No image was returned." });

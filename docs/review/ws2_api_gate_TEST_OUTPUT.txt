@@ -41,9 +41,13 @@ api/claude: Anthropic error 400 invalid_request_error SECRET-PROVIDER-DETAIL org
 PASS claude: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"The AI service couldn't answer just now — please try again."}
 api/concepts: Anthropic error 400 invalid_request_error SECRET-PROVIDER-DETAIL org_abc123
 PASS concepts: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"The AI service couldn't answer just now — please try again."}
+api/assistant: Anthropic error 400 invalid_request_error SECRET-PROVIDER-DETAIL org_abc123
+PASS assistant: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"Ask B4C couldn't answer just now — please try again."}
+api/image: OpenAI error 400 invalid_request_error SECRET-PROVIDER-DETAIL org_abc123
+PASS image: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"The image service couldn't make that just now — please try again."}
 PASS no service-role key in _auth.js or the four AI routes 
 PASS all four routes gate with requireMember + charge with chargeAiCall; none still calls requireUser itself 
-PASS claude/concepts no longer forward the provider's data.error.message 
+PASS none of the four routes forwards the provider's data.error.message 
 PASS assistant/image no longer build their own Supabase client (requireMember's as-caller client) 
 PASS runtime files changed vs origin/main = the five api files (no client change) ["api/_auth.js","api/assistant.js","api/claude.js","api/concepts.js","api/image.js"]
 PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 14

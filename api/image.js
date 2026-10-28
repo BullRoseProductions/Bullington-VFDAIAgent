@@ -59,7 +59,9 @@ export default async function handler(req, res) {
     });
     const data = await r.json();
     if (!r.ok) {
-      return res.status(r.status).json({ error: data?.error?.message || "Image provider error" });
+      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
+      console.error("api/image: OpenAI error", r.status, data?.error?.type, data?.error?.message);
+      return res.status(502).json({ error: "The image service couldn't make that just now — please try again." });
     }
     const b64 = data?.data?.[0]?.b64_json;
     if (!b64) return res.status(502).json({ error: "No image was returned." });

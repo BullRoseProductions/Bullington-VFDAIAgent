@@ -129,9 +129,10 @@ for (const [label, body] of CAP_CASES) {
   ok("claude: exactly at the limits (310,000 / 120,000) passes", r.code === 200); }
 
 // ---------------------------------------------------------------- 3. no provider error echo
-for (const route of ["claude", "concepts"]) {
+// L-5, all four routes (extended after review: image forwarded OpenAI's raw message; assistant was already generic).
+for (const route of ["claude", "concepts", "assistant", "image"]) {
   world({ providerFails: true }); const r = await call(route);
-  ok(`${route}: a provider error → 502 with a generic message; the raw provider message is never sent`, r.code === 502 && !JSON.stringify(r.body).includes("SECRET-PROVIDER-DETAIL"), `${r.code} ${JSON.stringify(r.body)}`);
+  ok(`${route}: a provider error → 502 with a generic message; the raw provider message is never sent`, r.code === 502 && typeof r.body?.error === "string" && !JSON.stringify(r.body).includes("SECRET-PROVIDER-DETAIL"), `${r.code} ${JSON.stringify(r.body)}`);
 }
 
 // ---------------------------------------------------------------- 4. source fences
@@ -139,7 +140,7 @@ const src = Object.fromEntries(["_auth", "claude", "concepts", "assistant", "ima
 ok("no service-role key in _auth.js or the four AI routes", Object.values(src).every((s) => !/SERVICE_ROLE|service_role/i.test(s)));
 ok("all four routes gate with requireMember + charge with chargeAiCall; none still calls requireUser itself",
   ["claude", "concepts", "assistant", "image"].every((f) => src[f].includes('import { requireMember, chargeAiCall } from "./_auth.js";') && /await requireMember\(req, res\)/.test(src[f]) && /chargeAiCall\((ctx|member), "/.test(src[f]) && !/requireUser\(/.test(src[f])));
-ok("claude/concepts no longer forward the provider's data.error.message", !/error:\s*data\?\.error\?\.message/.test(src.claude) && !/error:\s*data\?\.error\?\.message/.test(src.concepts));
+ok("none of the four routes forwards the provider's data.error.message", ["claude", "concepts", "assistant", "image"].every((f) => !/error:\s*data\?\.error\?\.message/.test(src[f])));
 ok("assistant/image no longer build their own Supabase client (requireMember's as-caller client)", !src.assistant.includes("createClient(") && !src.image.includes("createClient("));
 const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
 ok("runtime files changed vs origin/main = the five api files (no client change)", JSON.stringify(changed) === JSON.stringify(["api/_auth.js", "api/assistant.js", "api/claude.js", "api/concepts.js", "api/image.js"]), JSON.stringify(changed));
