@@ -1,9 +1,11 @@
 // Vercel serverless function — email digest: detect what needs attention, compose, send.
 //
 // Runs weekly from Vercel Cron (see vercel.json), which calls this path with
-// `Authorization: Bearer ${CRON_SECRET}` — the same gate a browser satisfies with ?secret=.
+// `Authorization: Bearer ${CRON_SECRET}`. A manual run sends the same header (curl -H); ?secret= is
+// refused (api/_cron.js, security review L-1).
 // A real run mails each department's own Department Admins. Adding ?to= makes it a TEST SEND:
-// one address, never the real admins, and it renders even when nothing is flagged.
+// one address, never the real admins, and it renders even when nothing is flagged. That address must
+// be on the test allow-list (DIGEST_TEST_TO) — the secret alone no longer mails a digest anywhere.
 // Adding ?dry=1 makes it a DRY RUN: everything is read, grouped, measured and RENDERED, but the two
 // outbound effects — the email and the push/notification write — are skipped, and the composed
 // { subject, html } comes back in the JSON instead. Without it there is no way to see what a REAL
@@ -11,7 +13,9 @@
 // The two compose: ?dry=1 alone previews the real broadcast; ?to=x&dry=1 previews the test render.
 //
 // Env (Vercel → Settings → Environment Variables):
-//   CRON_SECRET               — request gate (Bearer header from Cron, or ?secret= in a browser)
+//   CRON_SECRET               — request gate (Bearer header only — from Cron, or curl for a manual run)
+//   DIGEST_TEST_TO            — optional, comma-separated: the only addresses ?to= may name. Unset → just
+//                               DEFAULT_TO. Anything else is refused, never silently swapped for the default
 //   RESEND_API_KEY            — sending
 //   SUPABASE_URL              — server-side project URL (NOT the VITE_-prefixed one; those are
 //                               build-time inlined into the browser bundle and are absent here)
@@ -31,8 +35,10 @@ import { validExpYM } from "../shared/expiry.js";
 import { apparatusCounts } from "../shared/apparatus-status.js";
 import { deptAttendance } from "../shared/attendance.js";
 import { isListedMember, isCountedMember } from "../shared/members.js";
+import { requireCron } from "./_cron.js";
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
+const TEST_TO = (process.env.DIGEST_TEST_TO || DEFAULT_TO).split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
 const FROM = "B4C <notifications@b4thecall.com>";
 // Gmail strips data: URIs, so the logo MUST be an absolute https URL to a public asset.
 // public/b4c-email-logo.png ships with the app and is served at the site root.
@@ -565,15 +571,7 @@ async function sendEmail(key, recipients, subject, html) {
 }
 
 export default async function handler(req, res) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: "Missing CRON_SECRET" });   // fail closed — no secret configured, no sends
-  }
-  const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const provided = bearer || req.query?.secret || "";
-  if (provided !== secret) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  if (!requireCron(req, res)) return;
   const resendKey = process.env.RESEND_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -590,10 +588,15 @@ export default async function handler(req, res) {
   // so the layout and the "—" fallbacks can be eyeballed on a quiet week. Without ?to= (how Cron will call
   // it) SEND_WHEN_NOTHING_FLAGGED governs, so a real broadcast still stays silent when there's nothing to say.
   const isTestSend = !!req.query?.to;
+  // Refused, not replaced with DEFAULT_TO: someone who asked for a test send to X and got one at the default
+  // would believe X received it. Checked before any read, so a refused call opens no service-role client.
+  if (isTestSend && !TEST_TO.includes(String(req.query.to).trim().toLowerCase())) {
+    return res.status(400).json({ error: "?to= is not on the test allow-list (DIGEST_TEST_TO)", note: "Nothing was read or sent." });
+  }
   // Explicit allow-list rather than !!req.query.dry, so ?dry=0 does NOT silently enable a dry run —
   // the failure mode of a truthy "0" here is someone believing they previewed when they broadcast.
   const isDry = ["1", "true", "yes", "on"].includes(String(req.query?.dry ?? "").toLowerCase());
-  const to = req.query?.to || DEFAULT_TO;
+  const to = isTestSend ? String(req.query.to).trim() : DEFAULT_TO;
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });   // no session server-side → no authFetch refresh wrapper
   const today = startOfToday();
   const week = digestWeekWindow(new Date());   // the week that just ended, [Mon 00:00, Mon 00:00) Central
