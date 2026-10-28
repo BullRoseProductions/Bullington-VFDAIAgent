@@ -165,10 +165,11 @@ ok("Ask B4C may open the library alias wherever Training is reachable", src.incl
 ok("the alias + packet-back are kept", src.includes('(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"}') && src.includes('back={() => setScreen("library")}'));
 const inStrings = src.split("\n").filter((l) => /["'`][^"'`]*Training Library[^"'`]*["'`]/.test(l));
 ok("no string literal in src says 'Training Library' (only comments still name the feature)", inStrings.length === 0, JSON.stringify(inStrings.map((l) => l.trim().slice(0, 90))));
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-46): base 291013e .. reviewed 9edb751 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} 9edb751`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 // + training_slice5_ui_test.mjs: its pinned toast text follows the copy fix ("attach it from Training Plans") — test-only
 const okFile = (p) => ["src/App.jsx", "docs/review/library_fold_test.mjs", "docs/review/training_slice5_ui_test.mjs", "claude/B4C_LibraryFold_Draft.md"].includes(p);
-ok(`only src/App.jsx (+ tests / notes) changed vs ${BASE} — no api / shared / sql / vercel.json`, changed.every(okFile), JSON.stringify(changed.filter((p) => !okFile(p))));
+ok(`only src/App.jsx (+ tests / notes) changed in the reviewed range ${BASE}..9edb751 — no api / shared / sql / vercel.json`, changed.every(okFile), JSON.stringify(changed.filter((p) => !okFile(p))));
 ok("verified untouched: App.jsx 132 (108 raw)", (src.match(new RegExp("verifie" + "d", "gi")) || []).length === 132 && (src.match(new RegExp("verifie" + "d", "g")) || []).length === 108);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
 await act(async () => rootR.unmount());
