@@ -132,6 +132,7 @@ const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)",
   tok(readFileSync(join(root, "src/App.jsx"), "utf8")) === 132 && tok(src.digest) === 32 && tok(readFileSync(join(root, "api/assistant.js"), "utf8")) === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-44): base 8f9474a .. reviewed f837541 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} f837541`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const allowed = (p) => ["api/_cron.js", "api/digest.js", "api/pulse.js", "docs/review/l1_cron_secret_test.mjs"].includes(p) || /^claude\/B4C_L1_/.test(p);
-ok(`only _cron.js + digest.js + pulse.js + this test + the L-1 notes changed vs ${BASE} — no client, no DB, no vercel.json`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
+ok(`only _cron.js + digest.js + pulse.js + this test + the L-1 notes changed in the reviewed range ${BASE}..f837541 — no client, no DB, no vercel.json`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
