@@ -71,7 +71,9 @@ const { Training, createRoot, act, React } = await import(pathToFileURL(out).hre
 
 // ---- fixtures: one session of each type, all this month and upcoming
 const now = new Date(), Y = now.getFullYear(), M = now.getMonth();
-const day = Math.min(28, now.getDate() + 1 > 28 ? now.getDate() : now.getDate() + 1);
+// Tomorrow — or today on the month's last day. (Was min(28, …), which from the 29th put "upcoming" on the 28th, i.e. in the
+// past; fixed 2026-10-28 alongside fe_b_ui_test's same-shaped clamp.)
+const day = now.getDate() < new Date(Y, M + 1, 0).getDate() ? now.getDate() + 1 : now.getDate();
 const sess = (id, title, extra = {}) => ({ id, title, y: Y, m: M, d: day, done: false, plans: [], attendance: [], signinOpen: false, audience: "everyone", planId: null, ...extra });
 const UPLOAD = (sid, n) => ({ id: `${sid}-pl${n}`, title: `${sid} file ${n}.pdf`, storage_path: `d-1/plans/${sid}-${n}.pdf`, ai_text: null, source: "upload", session_id: sid, kind: "file" });
 const AGENDA = (sid) => ({ id: `${sid}-ag`, title: "October board agenda", storage_path: null, ai_text: "## Agenda\n- Call to order", source: "ai", session_id: sid, kind: "ai" });

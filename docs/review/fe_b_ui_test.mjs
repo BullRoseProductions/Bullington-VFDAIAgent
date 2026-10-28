@@ -72,7 +72,9 @@ const { EventsCalendar, needCoverage, createRoot, act, React } = await import(pa
 
 // ---- data (this month, so the calendar opens on it) ----
 const now = new Date(); const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-const fut = Math.min(now.getDate() + 2, 27), pastD = Math.max(now.getDate() - 2, 1);
+// The OPEN event is TODAY (open by the D1 window — today's event takes sign-ups). It used to be min(today + 2, 27), which
+// from the 26th on put the "future" event in the past — closed, no assign list — and the test crashed (fixed 2026-10-28).
+const fut = now.getDate(), pastD = Math.max(now.getDate() - 2, 1);
 const pastIso = now.getDate() > 2 ? `${ym}-${String(pastD).padStart(2, "0")}` : null;   // a past day this month (skipped on the 1st/2nd)
 const MEMBERS = [{ id: "m1", name: "Ada Lane", status: "Active", access: ["Member"] }, { id: "m2", name: "Ben Cho", status: "Probationary", access: ["Member"] },
   { id: "m3", name: "Cy Dee", status: "Active", access: ["Officer"] }, { id: "m4", name: "Old Timer", status: "Inactive", access: ["Member"] }];

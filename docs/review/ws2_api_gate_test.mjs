@@ -142,8 +142,10 @@ ok("all four routes gate with requireMember + charge with chargeAiCall; none sti
   ["claude", "concepts", "assistant", "image"].every((f) => src[f].includes('import { requireMember, chargeAiCall } from "./_auth.js";') && /await requireMember\(req, res\)/.test(src[f]) && /chargeAiCall\((ctx|member), "/.test(src[f]) && !/requireUser\(/.test(src[f])));
 ok("none of the four routes forwards the provider's data.error.message", ["claude", "concepts", "assistant", "image"].every((f) => !/error:\s*data\?\.error\?\.message/.test(src[f])));
 ok("assistant/image no longer build their own Supabase client (requireMember's as-caller client)", !src.assistant.includes("createClient(") && !src.image.includes("createClient("));
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
-ok("runtime files changed vs origin/main = the five api files (no client change)", JSON.stringify(changed) === JSON.stringify(["api/_auth.js", "api/assistant.js", "api/claude.js", "api/concepts.js", "api/image.js"]), JSON.stringify(changed));
+// PINNED to WS-2's reviewed range (f854a82 = main before it .. 5729d97; released in industrial-noir-40): "vs origin/main"
+// goes red once the slice is on main.
+const changed = execSync("git diff --name-only f854a82 5729d97 -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("WS-2 (f854a82..5729d97) runtime files = the five api files (no client change)", JSON.stringify(changed) === JSON.stringify(["api/_auth.js", "api/assistant.js", "api/claude.js", "api/concepts.js", "api/image.js"]), JSON.stringify(changed));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)",
   tok(readFileSync(join(root, "src/App.jsx"), "utf8")) === 132 && tok(readFileSync(join(root, "api/digest.js"), "utf8")) === 32 && tok(src.assistant) === 14, String(tok(src.assistant)));
