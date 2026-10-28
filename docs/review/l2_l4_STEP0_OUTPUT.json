@@ -1,0 +1,359 @@
+[
+  {
+    "ord": 1,
+    "what": "L2-1 departments policy",
+    "name": "DA can update own department",
+    "verdict": "UPDATE · PERMISSIVE [authenticated]",
+    "detail": "USING ((id = my_department_id()) AND is_dept_admin()) | CHECK ((id = my_department_id()) AND is_dept_admin())"
+  },
+  {
+    "ord": 1,
+    "what": "L2-1 departments policy",
+    "name": "signed in can read departments",
+    "verdict": "SELECT · PERMISSIVE [authenticated]",
+    "detail": "USING true | CHECK —"
+  },
+  {
+    "ord": 2,
+    "what": "L2-2 departments grant",
+    "name": "anon",
+    "verdict": "",
+    "detail": "rows: 5 · RLS on: true"
+  },
+  {
+    "ord": 2,
+    "what": "L2-2 departments grant",
+    "name": "authenticated",
+    "verdict": "S,I,U,D",
+    "detail": "rows: 5 · RLS on: true"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "auto_close_stale_shifts()",
+    "verdict": "DEFINER · writes: false · authenticated exec: false · md5 4418eb9b",
+    "detail": "lesce(d.geofence_backstop_hours, 36), d.max_shift_hours) else d.max_shift_hours end), auto_closed = true from public.departments d where d.id = sp.department_id and sp.checked_out_at is null and d.max_shift_hours is not null and now() - sp.checked_in_at > make_interval(hours => case when sp.source "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "confirm_on_station(p_shift_id uuid, p_lat double precision, p_l",
+    "verdict": "DEFINER · writes: false · authenticated exec: false · md5 92c9ea1a",
+    "detail": "; end if; if v_slat is null or v_slng is null then select d.station_lat, d.station_lng, d.station_radius_m into v_slat, v_slng, v_srad from departments d where d.id = v_row.department_id; end if; if v_slat is null or v_slng is null then return false; -- nothing pinned to measure against end if; v_ok := public.is_at_"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "dept_open_long_shifts()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 4d73011f",
+    "detail": ") / 3600.0)::numeric, 2), sp.verified from public.station_presence sp join public.members m on m.id = sp.member_id join public.departments d on d.id = sp.department_id where sp.department_id = v_dept and sp.checked_out_at is null -- still open: nobody has stopped this clock and sp.source = '"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "dept_probation_board()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 a2e7a69a",
+    "detail": " if; -- the department's probation program is off -> no board (nothing is deleted; on again = back) if not coalesce((select d.probation_enabled from public.departments d where d.id = v_dept), false) then return; end if; return query select x.id, x.name, (d->>'started_on')::date, (d->>'day_n')::int, (d->'gate'->>'configured')::boolean, (d->>'clear"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "dept_readiness_packet()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 4203318d",
+    "detail": " into v_ack from public.dept_read_sign_compliance() c; return jsonb_build_object( 'generated_at', now(), 'department', (select d.name from public.departments d where d.id = v_dept), 'requirements', v_reqs, 'standard_set', jsonb_array_length(v_reqs) > 0, 'members', v_members, 'readiness', jsonb_build_object( 'counted', jsonb_array_le"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "geofence_arrive(p_lat double precision, p_lng double precision,",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 5c64feec",
+    "detail": " a member record.'; end if; select geofence_enabled, station_lat, station_lng, station_radius_m into v_enabled, v_lat, v_lng, v_radius from public.departments where id = v_dept; if not coalesce(v_enabled, false) then raise exception 'Automatic arrival is not switched on for your department.'; end if; -- the device's clock is not ours to trust "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "geofence_depart(p_at timestamp with time zone, p_station_id uui",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 4df10528",
+    "detail": " then greatest(coalesce(geofence_backstop_hours, 36), max_shift_hours) else max_shift_hours end into v_cap from public.departments where id = v_row.department_id; v_limit := v_row.checked_in_at + make_interval(hours => coalesce(v_cap, 10)); /* ZERO-LENGTH / BACKWARDS GUARD — applies to BOTH branches, and this is the on"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "is_at_station(p_dept uuid, p_lat double precision, p_lng double",
+    "verdict": "DEFINER · writes: false · authenticated exec: false · md5 b1e0667d",
+    "detail": "uble precision; v_lng double precision; v_radius integer; begin select station_lat, station_lng, station_radius_m into v_lat, v_lng, v_radius from public.departments where id = p_dept; return public.is_at_point(v_lat, v_lng, v_radius, p_lat, p_lng, p_accuracy); end; "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "member_check_in(p_session_id uuid, p_token text, p_lat double p",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 8151098e",
+    "detail": "nt( v_session.location_lat, v_session.location_lng, coalesce(v_session.location_radius_m, (SELECT station_radius_m FROM public.departments WHERE id = v_dept), 400), p_lat, p_lng, p_accuracy); ELSE -- Off-site, but nobody has captured where. NEVER fall back to the station: -- they are not there. N"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "my_department_id()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 87f54665",
+    "detail": " select coalesce( -- 1) the saved active station, ONLY if it's still one of the caller's departments ( select mad.department_id from public.member_active_department mad where mad.email = lower(auth.email()) and exists ( select 1 from public.members m "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "my_department_rollup()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 7f9723c9",
+    "detail": "title` — confirmed against the live schema, not assumed. nx.nd as my_next_event_date, nx.nt as my_next_event_title, nx.nk as my_next_event_type from departments d -- The caller's own member row AT THIS DEPARTMENT. Phase 1b's unique index on -- (lower(email), department_id) guarantees at most one, so this cannot fan out; -- the limit 1 is belt and"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "my_departments()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 78b6fdcc",
+    "detail": " select distinct d.id, d.name, d.station from members m join departments d on d.id = m.department_id where m.email is not null and btrim(m.email) <> '' and lower(m.email) = lower(auth.email()) and m.status in ('Active','Probationary') order by d.name;"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "open_shift_nudge_candidates(p_k numeric, p_min_sample integer, ",
+    "verdict": "DEFINER · writes: false · authenticated exec: false · md5 cbe68555",
+    "detail": "= p_min_sample then 'learned' else 'dept_default' end from public.station_presence sp join public.members m on m.id = sp.member_id join public.departments d on d.id = sp.department_id left join b on b.member_id = sp.member_id cross join lateral ( select case when b.sample_count >= p_min_sample the"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_add_member(p_department_id uuid, p_name text, p_email text, ",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 f18cb51f",
+    "detail": "text; v_id uuid; begin -- PA-only gate if not is_project_admin() then raise exception 'Not authorized'; end if; if not exists (select 1 from departments d where d.id = p_department_id) then raise exception 'Department not found'; end if; if v_name = '' then raise exception 'Give the member a name.'; end if; -- Same rule, same regex,"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_add_station(p_department_id uuid, p_name text, p_label text,",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 26c9aa37",
+    "detail": "ent has to exist. Without this the FK would still catch it, but -- with a constraint-violation message no operator can act on. if not exists (select 1 from departments d where d.id = p_department_id) then raise exception 'Department not found'; end if; -- Blank falls back rather than refusing: the PA is mid-onboarding and a -- nameless station is recover"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_create_department(p_name text, p_station text, p_city text, ",
+    "verdict": "DEFINER · writes: true · authenticated exec: true · md5 3f387db3",
+    "detail": "ists (select 1 from members where lower(email) = v_email) then raise exception 'A member with the email % already exists', v_email; end if; insert into departments (name, station, city) values (v_name, nullif(btrim(coalesce(p_station, '')), ''), nullif(btrim(coalesce(p_city, '')), '')) returning id into v_dept_id; -- NEW: the depart"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_department_radar()",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 eb835b33",
+    "detail": " case when d.accent_color is not null and d.accent_color <> '#1F4E79' then null else 'Custom accent color' end ], null) as profile_missing from departments d ) select b.department_id, b.department_name, b.station, b.city, b.admin_name, b.admin_email, case when b.last_activity is null then 'RED' when current_date - b.last_activity::date "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_get_disabled_modules(p_department_id uuid)",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 3fcca34d",
+    "detail": "_modules text[]; begin if not is_project_admin() then raise exception 'Not authorized'; end if; select coalesce(disabled_modules, '{}') into v_modules from departments where id = p_department_id; if not found then raise exception 'Department not found'; end if; return v_modules; end; "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_get_geofence_enabled(p_department_id uuid)",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 440bd6c2",
+    "detail": "_on boolean; begin -- PA-only gate if not is_project_admin() then raise exception 'Not authorized'; end if; select geofence_enabled into v_on from departments where id = p_department_id; if not found then raise exception 'Department not found'; end if; -- coalesce so a NULL row value reads as OFF rather than returning NULL to the -- client, wh"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_set_disabled_modules(p_department_id uuid, p_modules text[])",
+    "verdict": "DEFINER · writes: true · authenticated exec: true · md5 34638388",
+    "detail": " begin if not is_project_admin() then raise exception 'Not authorized'; end if; update departments set disabled_modules = coalesce(p_modules, '{}') where id = p_department_id; if not found then raise exception 'Department not found'; end if; end; "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "pa_set_geofence_enabled(p_department_id uuid, p_enabled boolean",
+    "verdict": "DEFINER · writes: true · authenticated exec: true · md5 0318afe6",
+    "detail": " begin -- PA-only gate if not is_project_admin() then raise exception 'Not authorized'; end if; update departments set geofence_enabled = coalesce(p_enabled, false) where id = p_department_id; if not found then raise exception 'Department not found'; end if; end; "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "seed_national_resources(p_department_id uuid)",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 d22eff1e",
+    "detail": "ull, null, 'https://www.ffbha.org/', null, false, 5), ('Line-of-duty & family', 'National Fallen Firefighters Foundation', 'Support for families and departments after a line-of-duty death.', null, null, 'https://www.firehero.org/', null, false, 6), ('Physical health', 'Firefighter Cancer Support Network', 'Guidance and support on firefighte"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "set_aftercall_enabled(p_enabled boolean)",
+    "verdict": "DEFINER · writes: true · authenticated exec: true · md5 557ac530",
+    "detail": "- coalesce: a null from the client means \"off\", never \"leave it as it was\" — -- a toggle that silently no-ops is worse than one that refuses. update public.departments set aftercall_enabled = coalesce(p_enabled, false) where id = v_dept returning aftercall_enabled into v_val; if not found then raise exception 'Department not found'; end if; ret"
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "set_probation_enabled(p_enabled boolean)",
+    "verdict": "DEFINER · writes: true · authenticated exec: true · md5 7989e962",
+    "detail": "x.status in ('Active', 'Probationary')) then raise exception 'Only a Department Admin can turn the probation program on or off.'; end if; update public.departments set probation_enabled = p_enabled where id = v_dept returning probation_enabled into v_on; if not found then raise exception 'We could not find your department.'; end if; return v_on; end; "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "set_session_location(p_session_id uuid, p_lat double precision,",
+    "verdict": "DEFINER · writes: false · authenticated exec: true · md5 e52cf833",
+    "detail": "ore the radius explicitly so the record is self-describing later v_radius := coalesce(p_radius_m, (select station_radius_m from public.departments where id = v_dept), 400); update public.training_sessions set location_lat = p_lat, location_lng = p_lng, location_radius_m = v_radius, "
+  },
+  {
+    "ord": 3,
+    "what": "L2-3 fn reads departments",
+    "name": "tg_departments_probation_enabled_guard()",
+    "verdict": "INVOKER · writes: false · authenticated exec: false · md5 77886627",
+    "detail": " -- B4C:probation — probation_enabled changes only through set_probation_enabled (or the SQL editor), never a direct -- client UPDATE (departments takes direct UPDATEs for its other settings). begin if new.probation_enabled is distinct from old.probation_enabled and current_user in ('anon', 'authenticated') then raise exception 'Only a De"
+  },
+  {
+    "ord": 6,
+    "what": "L2-6 multi-department",
+    "name": "emails by department count",
+    "verdict": "1 dept(s): 108 email(s)",
+    "detail": "member_active_department rows: 1"
+  },
+  {
+    "ord": 7,
+    "what": "L4-1 gate helper",
+    "name": "is_department_admin()",
+    "verdict": "md5 99570e1790f233594464da32436c8ca7 · DEFINER · STABLE · dept-scoped: false · acl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+    "detail": "CREATE OR REPLACE FUNCTION public.is_department_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Department Admin','Project Admin']::text[]\n  );\n$function$\n"
+  },
+  {
+    "ord": 7,
+    "what": "L4-1 gate helper",
+    "name": "is_dept_admin()",
+    "verdict": "md5 c692e44f62923d2bf4c1a39a21a87bf7 · DEFINER · STABLE · dept-scoped: true · acl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+    "detail": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n"
+  },
+  {
+    "ord": 7,
+    "what": "L4-1 gate helper",
+    "name": "is_leadership()",
+    "verdict": "md5 cc5861c24398fbf58147fee6f60cf410 · DEFINER · STABLE · dept-scoped: false · acl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+    "detail": "CREATE OR REPLACE FUNCTION public.is_leadership()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n"
+  },
+  {
+    "ord": 7,
+    "what": "L4-1 gate helper",
+    "name": "my_department_id()",
+    "verdict": "md5 87f546659c3804a943b48e419e017f18 · DEFINER · VOLATILE · dept-scoped: false · acl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+    "detail": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n"
+  },
+  {
+    "ord": 7,
+    "what": "L4-1 gate helper",
+    "name": "my_member_id()",
+    "verdict": "md5 3f66369c8af7bc07ec59831af6536fee · DEFINER · VOLATILE · dept-scoped: true · acl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+    "detail": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n"
+  },
+  {
+    "ord": 8,
+    "what": "L4-2 policy uses helper",
+    "name": "announcements · read announcements for my audience",
+    "verdict": "SELECT · calls: is_department_admin · ANDs dept: true",
+    "detail": "USING ((department_id = my_department_id()) AND ((audience = 'everyone'::text) OR is_leader()) AND ((expires_on IS NULL) OR (expires_on >= ((now() AT TIME ZONE 'America/Chicago'::text))::date) OR is_department_admin() OR (author_id = my_member_id()))) | CHECK —"
+  },
+  {
+    "ord": 8,
+    "what": "L4-2 policy uses helper",
+    "name": "training_session_audit · leadership reads training_session_aud",
+    "verdict": "SELECT · calls: is_leadership · ANDs dept: true",
+    "detail": "USING ((department_id = my_department_id()) AND is_leadership()) | CHECK —"
+  },
+  {
+    "ord": 8,
+    "what": "L4-2 policy uses helper",
+    "name": "training_session_requests · managers read training_session_req",
+    "verdict": "SELECT · calls: is_leadership · ANDs dept: true",
+    "detail": "USING ((department_id = my_department_id()) AND (is_leadership() OR is_training_manager())) | CHECK —"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "approve_offsite(p_shift_id uuid, p_checked_in_at timestamp with",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 f512274e",
+    "detail": " declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.station_presence; v_in timestamptz; v_out timestamptz; begin if not public.is_leadership() then raise exception 'Not authorized'; end if; select * into v_row from public.station_presence where id = p_shift_id and department_id = v_dept for update; if not found then raise exception 'That shift was not found"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_iso_hours(p_from timestamp with time zone, p_to timestamp ",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 306fa11b",
+    "detail": " begin if not public.is_leadership() then raise exception 'Not authorized'; end if; return query select * from public.dept_iso_hours_for(public.my_department_id(), p_from, p_to); end; "
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_iso_hours_by_station(p_from timestamp with time zone, p_to",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 998d10b2",
+    "detail": "e same rule as dept_iso_hours_for. declare v_dept uuid := public.my_department_id(); begin -- Same gate and same argument validation as dept_iso_hours, deliberately -- worded identically so the two cannot drift apart. if not public.is_leadership() then raise exception 'Not authorized'; end if; if p_from is null or p_to is null then raise exception 'A start and end date are both required.'; end if; if p_from >= p_to then raise exception 'The start of the period m"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_on_station_now()",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 405f7814",
+    "detail": " declare v_dept uuid := public.my_department_id(); begin if not public.is_leadership() then raise exception 'Not authorized'; end if; return query select x.member_id, x.member_name, x.checked_in_at, x.kind, x.verified from ( select distinct on (m.id) m.id as member_id, m.name as member_nam"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_on_station_now_all()",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 7e209af9",
+    "detail": " declare v_dept uuid := public.my_department_id(); begin if not public.is_leadership() then raise exception 'Not authorized'; end if; return query select x.member_id, x.member_name, x.checked_in_at, x.kind, x.verified, x.station_id, st.name::text from ( select distinct on (m.id) "
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_open_long_shifts()",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 4d73011f",
+    "detail": " declare v_dept uuid := public.my_department_id(); begin -- ADMIN ONLY. Deliberately not is_leadership(): see the header. if not public.is_dept_admin() then raise exception 'Not authorized'; end if; return query select sp.id, m.id, m.name, sp.kind, sp.source, sp.checked_in"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_shifts_needing_review()",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 ef4c467d",
+    "detail": " declare v_dept uuid := public.my_department_id(); begin if not public.is_leadership() then raise exception 'Not authorized'; end if; return query select sp.id, m.id, m.name, sp.kind, case when sp.auto_closed and sp.kind = 'offsite' and sp.approved_at is null then 'both' when"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "dept_station_shifts(p_from timestamp with time zone, p_to times",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 dc8db411",
+    "detail": " -- WS-4d D-2 (2026-10-28): a business meeting's row reads kind 'standby' (observed and attested) — the same rule as dept_iso_hours_for. declare v_dept uuid := public.my_department_id(); begin if not public.is_leadership() then raise exception 'Not authorized'; end if; return query -- A. OBSERVED — unchanged except for the two new columns. A real punch is -- never \"attested\": it was measured, and the distinction is the whole point. selec"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "reject_offsite(p_shift_id uuid)",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 829b077c",
+    "detail": " declare v_dept uuid := public.my_department_id(); v_me uuid := public.my_member_id(); v_row public.station_presence; begin if not public.is_leadership() then raise exception 'Not authorized'; end if; select * into v_row from public.station_presence where id = p_shift_id and department_id = v_dept for update; if not found then raise exception 'That shift was not found"
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "resolve_auto_closed_shift(p_shift_id uuid, p_checked_out_at tim",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 121138a5",
+    "detail": " declare v_dept uuid := public.my_department_id(); v_row public.station_presence; begin if not public.is_dept_admin() then -- was is_leadership() raise exception 'Not authorized'; end if; if p_checked_out_at is null then raise exception 'Enter the time the member actually left.'; end if; select * into v_row from public.station_presence where id = p_shift_id "
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "session_change_signatures(p_request_id uuid)",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 b125bced",
+    "detail": "tures, on demand (\"View signatures\"). Same read gate as the table. declare v_dept uuid := public.my_department_id(); r public.training_session_requests%rowtype; begin if v_dept is null or not (coalesce(public.is_leadership(), false) or coalesce(public.is_training_manager(), false)) then raise exception 'Only department leadership or a training manager can view these signatures.' using errcode = '42501'; end if; select * into r from public."
+  },
+  {
+    "ord": 9,
+    "what": "L4-3 fn uses helper",
+    "name": "void_auto_closed_shift(p_shift_id uuid)",
+    "verdict": "DEFINER · calls: is_leadership · body compares dept: true · md5 72631e6c",
+    "detail": " declare v_dept uuid := public.my_department_id(); v_row public.station_presence; begin if not public.is_dept_admin() then -- was is_leadership() raise exception 'Not authorized'; end if; select * into v_row from public.station_presence where id = p_shift_id and department_id = v_dept for update; if not found then raise exception 'That shift was not found "
+  }
+]

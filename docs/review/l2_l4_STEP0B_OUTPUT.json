@@ -1,0 +1,67 @@
+[
+  {
+    "name": "approve_offsite",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where id = p_shift_id and department_id = v_dept"
+  },
+  {
+    "name": "dept_iso_hours",
+    "real_call": "true",
+    "dept_lines": "if not public.is_leadership() then raise exception 'Not authorized'; end if; ⏎ return query select * from public.dept_iso_hours_for(public.my_department_id(), p_from, p_to);"
+  },
+  {
+    "name": "dept_iso_hours_by_station",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where sp.department_id   = v_dept ⏎ from public.attested_training(v_dept, p_from, p_to) att"
+  },
+  {
+    "name": "dept_on_station_now",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where sp.department_id = v_dept"
+  },
+  {
+    "name": "dept_on_station_now_all",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where sp.department_id = v_dept"
+  },
+  {
+    "name": "dept_open_long_shifts",
+    "real_call": "false",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ where sp.department_id   = v_dept"
+  },
+  {
+    "name": "dept_shifts_needing_review",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where sp.department_id = v_dept"
+  },
+  {
+    "name": "dept_station_shifts",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where sp.department_id = v_dept ⏎ from public.attested_training(v_dept, p_from, p_to) att"
+  },
+  {
+    "name": "member_active_department",
+    "real_call": "rows 1",
+    "dept_lines": "pointing at a dept the email is an Active/Probationary member of: 1"
+  },
+  {
+    "name": "reject_offsite",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if not public.is_leadership() then ⏎ where id = p_shift_id and department_id = v_dept"
+  },
+  {
+    "name": "resolve_auto_closed_shift",
+    "real_call": "false",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ where id = p_shift_id and department_id = v_dept"
+  },
+  {
+    "name": "session_change_signatures",
+    "real_call": "true",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ if v_dept is null or not (coalesce(public.is_leadership(), false) or coalesce(public.is_training_manager(), false)) then ⏎ select * into r from public.training_session_requests where id = p_request_id and department_id = v_dept;"
+  },
+  {
+    "name": "void_auto_closed_shift",
+    "real_call": "false",
+    "dept_lines": "v_dept uuid := public.my_department_id(); ⏎ where id = p_shift_id and department_id = v_dept"
+  }
+]

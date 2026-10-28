@@ -84,3 +84,57 @@ So it's safe today, but a footgun for the next author. It's the same class as th
 - **D-3 · Packaging.** Recommend **one Step 0, two migrations** (L-2 DRAFT, then L-4 DRAFT), each with its own
   RETEST and gate. They change different things and have different blast radii, and a separate rollback for each is
   simpler.
+
+---
+
+## Live result — ran 2026-10-28 (read-only, SQL editor)
+`docs/review/l2_l4_STEP0_OUTPUT.json` (51 rows). There was also a follow-up, `sql/l2_l4_STEP0B_CHECK.sql` →
+`_STEP0B_OUTPUT.json` (13 rows), which pulled the department lines out of each helper caller with comments stripped,
+and checked the one active-department row.
+
+### L-2
+- **Policies:** `signed in can read departments`, SELECT `[authenticated]` `USING true`, plus `DA can update own
+  department`, UPDATE `USING/CHECK (id = my_department_id() AND is_dept_admin())`. There's no INSERT or DELETE policy.
+- **Grants:** anon has **none** on `departments`; that was revoked since the audit. authenticated has S/I/U/D, with
+  I and D denied by RLS. RLS is on, and there are 5 rows.
+- **No invoker-rights path needs another department's row:**
+  - 26 functions read `departments`. **25 are SECURITY DEFINER**, so RLS doesn't apply to them, including every
+    `pa_*` RPC and `pa_department_radar`.
+  - The one INVOKER is `tg_departments_probation_enabled_guard()`, a trigger on `departments` that compares
+    NEW and OLD. It only names the table in a comment.
+  - **No view** reads `departments`, and **no other table's policy** does either.
+- **Multi-department:** **108 of 108 emails have member rows in exactly 1 department.**
+  - `member_active_department` holds 1 row, and it points at a department that email is an Active/Probationary
+    member of, i.e. their only one. That makes it inert: `my_department_id()` resolves the same either way.
+
+### L-4
+- **Live bodies:**
+  - `is_department_admin()` is md5 `99570e17…`: access in {DA, PA}, Active/Probationary, **no department**.
+  - `is_leadership()` is md5 `cc5861c2…`: access in {PA, DA, Board Member, Officer}, **no department**.
+  - Both are DEFINER, STABLE, search_path=public, with ACL postgres/authenticated/service_role. **anon cannot
+    EXECUTE them.**
+- **Callers: 3 policies + 9 functions.** The audit counted 1+2 policies and 13 functions; 3 functions have since
+  moved to `is_dept_admin()`.
+  - `is_department_admin()`: 1 policy, `announcements` SELECT. It's ANDed with `department_id = my_department_id()`.
+    No function calls it.
+  - `is_leadership()`, policies: `training_session_audit` SELECT and `training_session_requests` SELECT, both ANDed
+    with `department_id = my_department_id()`.
+  - `is_leadership()`, functions: `approve_offsite`, `reject_offsite`, `dept_iso_hours`, `dept_iso_hours_by_station`,
+    `dept_on_station_now`, `dept_on_station_now_all`, `dept_shifts_needing_review`, `dept_station_shifts`,
+    `session_change_signatures`. Every one scopes its rows to `my_department_id()`, either through `v_dept` or by
+    passing it to `dept_iso_hours_for` / `attested_training`.
+  - `dept_open_long_shifts`, `resolve_auto_closed_shift` and `void_auto_closed_shift` match only in a **comment**
+    ("was is_leadership()"). They gate on `is_dept_admin()`.
+- **Read carefully: every caller scopes the ROWS, none scopes the ROLE.** This is exactly the
+  `is_equipment_manager()` finding of 10-24. Someone who is an Officer in department A and a plain member of B would
+  pass `is_leadership()` while acting in B, and see B's leadership rows.
+  - **Live exposure today: zero**, because all 108 emails are single-department.
+  - So "safe because ANDed" holds only while nobody has two memberships. The in-place dept-scope fix closes it by
+    construction.
+
+### What this means for D-1…D-3
+- **D-1:** own department only is safe. Nothing needs another department's row, and nobody has two.
+- **D-2:** dept-scoping in place changes nothing on live and closes the latent role-anywhere path. Note that
+  `is_department_admin()` admits PA, so after scoping it's the same predicate as `is_dept_admin()` (c692e44f).
+  Re-creating it with that body is the obvious form.
+- **D-3:** two migrations still recommended.

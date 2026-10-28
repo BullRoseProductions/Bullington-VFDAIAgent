@@ -1,6 +1,7 @@
 -- =====================================================================
 -- SECURITY L-2 (scope departments reads) + L-4 (role-anywhere helpers) — STEP 0. READ-ONLY, one result set.
 -- claude/B4C_L2_L4_Step0.md. Nothing here writes; no migration exists yet.
+-- RAN on live 2026-10-28 (SQL editor, read-only) — 51 rows: docs/review/l2_l4_STEP0_OUTPUT.json; follow-up l2_l4_STEP0B_CHECK.sql → _STEP0B_OUTPUT.json.
 -- Run in the Supabase SQL editor with "No limit", then paste or export the result back.
 --   L2-1 every policy on public.departments (all commands), exact live expressions
 --   L2-2 table grants on departments for anon / authenticated
