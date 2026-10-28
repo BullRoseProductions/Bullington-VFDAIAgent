@@ -70,6 +70,7 @@ ok("index.html carries no inline <script> (script-src 'self' cannot break it)", 
 const vcount = (p) => (readFileSync(join(root, p), "utf8").match(/verified/gi) || []).length;
 ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", vcount("src/App.jsx") === 132 && vcount("api/digest.js") === 32 && vcount("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-43): base 9cd3762 .. reviewed e86c105 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} e86c105`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const allowed = (p) => p === "vercel.json" || p === "docs/review/m3_headers_test.mjs" || /^claude\/B4C_M3_/.test(p);
-ok(`only vercel.json + this test + the review record changed vs ${BASE} — no client, no api/, no DB`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
+ok(`only vercel.json + this test + the review record changed in the reviewed range ${BASE}..e86c105 — no client, no api/, no DB`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
