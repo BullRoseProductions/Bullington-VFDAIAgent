@@ -1,0 +1,52 @@
+L-4 · sql/l4_role_helpers_scope_DRAFT.sql — APPLIED on live 2026-10-28 (SQL editor; branch feat/l2-l4-db @ 0a58e98 SQL;
+editor content SHA-256 4e3c8e1d0979… = the reviewed file). Preflight (incl. nobody in >1 department) + in-transaction
+proof passed (no exception): every member email's (is_leadership, is_department_admin, is_announcer) byte-identical
+before/after; all 85 relations identical as a real DA + member per department; bodies exact; every other function + policy
+md5 unchanged; matrices / counts / verified unchanged.
+
+STATE ROW
+{"fn_count":228,"total_policies":181,"verified_presence":967,
+ "is_leadership":{"md5":"17068e495a2dda5fcefe6d2ab51a7826","row":"true|s|{search_path=public}|{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}"},
+ "is_department_admin":{"md5":"b3f1adb16dcde1b5f468045d8efe1855","row":"true|s|{search_path=public}|{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}"},
+ "is_announcer":{"md5":"bc80c488db4d5dd15bf31cb571a74cf1","row":"true|s|{search_path=public}|{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}"},
+ "is_equipment_manager_md5":"a979933dac145e88d58331a04d6c918a"}
+
+RETEST · sql/l4_role_helpers_scope_RETEST.sql (SHA-256 9389ba5cb339…), rolled back (SENTINEL) — the "ERROR" is the report
+(loaded into the editor through the Monaco API and hash-checked: the system clipboard was being overwritten by an
+ unrelated process — see the note at the end)
+PASS S0 the three helpers are the generated department-scoped bodies; attributes + ACL as captured; is_equipment_manager / is_project_admin unchanged
+— B4C Demo Department
+PASS H1 DA at home: leadership / admin / announcer as their role says
+PASS X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+PASS X1 back home: all three true again
+— Granbury Fire Station
+PASS H1 DA at home: leadership / admin / announcer as their role says
+PASS X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+PASS X1 back home: all three true again
+— Indian Harbor Volunteer Fire Department
+PASS H1 DA at home: leadership / admin / announcer as their role says
+PASS H1 officer at home: leadership / admin / announcer as their role says
+PASS H1 member at home: leadership / admin / announcer as their role says
+PASS X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+PASS X1 back home: all three true again
+— Lipan Volunteer Fire Department
+PASS H1 DA at home: leadership / admin / announcer as their role says
+PASS H1 officer at home: leadership / admin / announcer as their role says
+PASS H1 member at home: leadership / admin / announcer as their role says
+PASS X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+PASS X1 back home: all three true again
+— North Hood County Volunteer Fire Department
+PASS H1 DA at home: leadership / admin / announcer as their role says
+PASS H1 officer at home: leadership / admin / announcer as their role says
+PASS H1 member at home: leadership / admin / announcer as their role says
+PASS X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+PASS X1 back home: all three true again
+22 passed, 0 failed, 0 skipped
+
+AFTER THE RETEST (read-only): retest_member_rows 0 · member_active_department rows 1 (unchanged) · members 115 · multi_dept_emails 0
+
+NOTE — clipboard: between pbcopy of the RETEST and the paste, the macOS clipboard held (227 chars) a Supabase-editor error
+"relation "public.departments" does not exist … SELECT id, name FROM public.departments ORDER BY name … line 31 at FOR over
+SELECT rows" — i.e. this RETEST's line 31 run against some database WITHOUT a departments table. It was not run from this
+session (this session never ran the RETEST before the passing run above, and only against ifeptqnlucmvhlvadcpj main/PRODUCTION).
+Nothing was executed from the clipboard; the editor content was hash-checked before every Run.
