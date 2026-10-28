@@ -15,9 +15,8 @@
 //   open_screen     -> nothing read; returns a navigation instruction the client checks against its own nav
 // Phase 1 WRITES NOTHING: no tool inserts, updates or deletes, and none calls a writing RPC. The one write on this path
 // is the cost meter, record_assistant_turn(), before the model is called — the same fail-safe shape as /api/image.
-import { createClient } from "@supabase/supabase-js";
 import { cors } from "./_cors.js";
-import { requireUser } from "./_auth.js";
+import { requireMember, chargeAiCall } from "./_auth.js";
 import { validExpYM } from "../shared/expiry.js";
 
 const MODEL = "claude-sonnet-4-6";
@@ -226,13 +225,10 @@ HARD RULES:
 export default async function handler(req, res) {
   if (cors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const user = await requireUser(req, res);
-  if (!user) return;
+  const member = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 (was a 503) / 503 already sent
+  if (!member) return;
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey) return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" });
 
   // Validate the conversation: text-only turns, user/assistant alternation ending on the user, capped.
   const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
@@ -242,8 +238,11 @@ export default async function handler(req, res) {
   if (!history.length || history[history.length - 1].role !== "user") return res.status(400).json({ error: "Ask a question." });
 
   // Every read below runs AS THE CALLER — RLS + my_member_id()/my_department_id() do the scoping.
-  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || "").trim())?.[1];
-  const sb = createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${jwt}` } } });
+  const sb = member.sb;   // WS-2: requireMember's as-caller client (anon key + the caller's JWT)
+
+  // WS-2: the per-member DAILY cap (60) first — 429 / 503 already sent, the model is not called. Then the department's
+  // MONTHLY ceiling below, unchanged (its 200 { limited } reply stays exactly as it was).
+  if (!await chargeAiCall(member, "assistant", res)) return;
 
   // THE CEILING, before a cent is spent. Anything other than a clear "allowed" fails safe: the model is not called.
   let usage;
@@ -257,8 +256,7 @@ export default async function handler(req, res) {
   }
 
   // Who is asking (own row only).
-  const [{ data: memberId }, { data: deptId }] = await Promise.all([sb.rpc("my_member_id"), sb.rpc("my_department_id")]);
-  if (!memberId || !deptId) return res.status(403).json({ error: "We couldn't match your login to a member record." });
+  const { memberId, deptId } = member;   // resolved (and gated) by requireMember
   const [{ data: me }, { data: dept }, { data: celeb }] = await Promise.all([
     sb.from("members").select("name, access, joined").eq("id", memberId).maybeSingle(),
     sb.from("departments").select("name").eq("id", deptId).maybeSingle(),

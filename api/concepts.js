@@ -4,7 +4,7 @@
 // SCENE-ONLY brief for /api/image (gpt-image-1); B4C adds the headline and crest itself afterwards, so every
 // imagePrompt must end with "No text, no logos." — enforced here even if the model forgets.
 import { cors } from "./_cors.js";
-import { requireUser } from "./_auth.js";
+import { requireMember, chargeAiCall } from "./_auth.js";
 
 const MODEL = "claude-sonnet-4-6";
 const NO_TEXT = "No text, no logos.";
@@ -42,7 +42,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-  if (!await requireUser(req, res)) return;   // 401 already sent — the handler must not run
+  const ctx = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 / 503 already sent
+  if (!ctx) return;
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) {
     return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
@@ -62,6 +63,7 @@ export default async function handler(req, res) {
     tagline: clip(b.tagline, 200) || "(none)",
   });
   const user = [`Purpose: ${purpose || "(not given)"}`, `Occasion: ${occasion || "(not given)"}`, `Details: ${details || "(none)"}`, `Concepts wanted: ${count}`].join("\n");
+  if (!await chargeAiCall(ctx, "concepts", res)) return;   // WS-2: the daily cap (30/member) — 429 / 503 already sent, the model is not called
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -70,7 +72,9 @@ export default async function handler(req, res) {
     });
     const data = await r.json();
     if (!r.ok) {
-      return res.status(r.status).json({ error: data?.error?.message || "Anthropic API error" });
+      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
+      console.error("api/concepts: Anthropic error", r.status, data?.error?.type, data?.error?.message);
+      return res.status(502).json({ error: "The AI service couldn't answer just now — please try again." });
     }
     const text = (data.content || []).map((c) => (c.type === "text" ? c.text : "")).join("").trim();
     const concepts = parseConcepts(text, count);

@@ -1,0 +1,50 @@
+PASS claude: no token → 401, model not called 401
+PASS claude: valid JWT, NO member → 403 "ask your Department Admin"; model and cap never touched 403 Your login isn't linked to an active member of a department — ask your Department Admin.
+PASS claude: membership check errors → 503 fail-safe, model not called 503
+PASS claude: member → 200; record_ai_call charged for 'claude' AS THE CALLER (their JWT); model called once 200 {"text":"hello"}
+PASS claude: over today's cap → 429 with used/ceiling, model not called 429 You've reached today's AI limit — it resets at midnight.
+PASS claude: cap RPC errors (e.g. the function isn't there) → 503 fail-safe, model not called 503
+PASS concepts: no token → 401, model not called 401
+PASS concepts: valid JWT, NO member → 403 "ask your Department Admin"; model and cap never touched 403 Your login isn't linked to an active member of a department — ask your Department Admin.
+PASS concepts: membership check errors → 503 fail-safe, model not called 503
+PASS concepts: member → 200; record_ai_call charged for 'concepts' AS THE CALLER (their JWT); model called once 200 {"concepts":[{"headline":"Join us","mood":"warm","imagePrompt":"A scene. No text
+PASS concepts: over today's cap → 429 with used/ceiling, model not called 429 You've reached today's AI limit — it resets at midnight.
+PASS concepts: cap RPC errors (e.g. the function isn't there) → 503 fail-safe, model not called 503
+PASS assistant: no token → 401, model not called 401
+PASS assistant: valid JWT, NO member → 403 "ask your Department Admin"; model and cap never touched 403 Your login isn't linked to an active member of a department — ask your Department Admin.
+PASS assistant: membership check errors → 503 fail-safe, model not called 503
+PASS assistant: member → 200; record_ai_call charged for 'assistant' AS THE CALLER (their JWT); model called once 200 {"text":"hello","navigate":null,"records":[],"sops":null,"used":1,"ceiling":500}
+PASS assistant: over today's cap → 429 with used/ceiling, model not called 429 You've reached today's AI limit — it resets at midnight.
+PASS assistant: cap RPC errors (e.g. the function isn't there) → 503 fail-safe, model not called 503
+PASS image: no token → 401, model not called 401
+PASS image: valid JWT, NO member → 403 "ask your Department Admin"; model and cap never touched 403 Your login isn't linked to an active member of a department — ask your Department Admin.
+PASS image: membership check errors → 503 fail-safe, model not called 503
+PASS image: member → 200; record_ai_call charged for 'image' AS THE CALLER (their JWT); model called once 200 {"image":"data:image/png;base64,AAAA","quality":"medium","size":"1024x1536","use
+PASS image: over today's cap → 429 with used/ceiling, model not called 429 You've reached today's AI limit — it resets at midnight.
+PASS image: cap RPC errors (e.g. the function isn't there) → 503 fail-safe, model not called 503
+PASS claude: the department backstop refusal reads as the department's limit Your department has reached today's AI limit — it resets at midnight.
+PASS claude 413: system 310,001 chars (string) — refused before the cap is charged; model not called 413 The system prompt is too long (310,001 characters; the limit is 310,000).
+PASS claude 413: system 310,001 chars (text blocks) — refused before the cap is charged; model not called 413 The system prompt is too long (310,001 characters; the limit is 310,000).
+PASS claude 413: system not text — refused before the cap is charged; model not called 413 The system prompt must be text.
+PASS claude 413: user 120,001 chars — refused before the cap is charged; model not called 413 The message is too long (120,001 characters; the limit is 120,000).
+PASS claude 413: user not a string — refused before the cap is charged; model not called 413 The message must be text.
+PASS claude 413: 101 turns — refused before the cap is charged; model not called 413 Too many turns (101; the limit is 100).
+PASS claude 413: a 20,001-char turn — refused before the cap is charged; model not called 413 A turn is too long (20,001 characters; the limit is 20,000).
+PASS claude 413: non-string content — refused before the cap is charged; model not called 413 Each turn must be a user or assistant message with text content.
+PASS claude 413: a 'system' role turn — refused before the cap is charged; model not called 413 Each turn must be a user or assistant message with text content.
+PASS claude 413: ending on the assistant — refused before the cap is charged; model not called 413 The conversation must end with a user message.
+PASS claude 413: 41 turns × 19,999 (> 800,000 total) — refused before the cap is charged; model not called 413 The conversation is too long (819,959 characters; the limit is 800,000).
+PASS claude: a Station Q&A-sized call (300,000-char system) passes 
+PASS claude: a 20-question cert quiz (79 turns) passes — the ruled 40-turn cap would refuse it (see DEVIATION) 200 
+PASS claude: exactly at the limits (310,000 / 120,000) passes 
+api/claude: Anthropic error 400 invalid_request_error SECRET-PROVIDER-DETAIL org_abc123
+PASS claude: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"The AI service couldn't answer just now — please try again."}
+api/concepts: Anthropic error 400 invalid_request_error SECRET-PROVIDER-DETAIL org_abc123
+PASS concepts: a provider error → 502 with a generic message; the raw provider message is never sent 502 {"error":"The AI service couldn't answer just now — please try again."}
+PASS no service-role key in _auth.js or the four AI routes 
+PASS all four routes gate with requireMember + charge with chargeAiCall; none still calls requireUser itself 
+PASS claude/concepts no longer forward the provider's data.error.message 
+PASS assistant/image no longer build their own Supabase client (requireMember's as-caller client) 
+PASS runtime files changed vs origin/main = the five api files (no client change) ["api/_auth.js","api/assistant.js","api/claude.js","api/concepts.js","api/image.js"]
+PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 14
+PASS Notify crew held back 

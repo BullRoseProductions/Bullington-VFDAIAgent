@@ -1,0 +1,289 @@
+diff --git a/api/_auth.js b/api/_auth.js
+index adbad26..c4d4e4c 100644
+--- a/api/_auth.js
++++ b/api/_auth.js
+@@ -57,3 +57,64 @@ export async function requireUser(req, res) {
+     return null;
+   }
+ }
++
++/* WS-2 (H-1) — THE MEMBER GATE for the AI routes. A valid session is not enough: the caller must be an Active or
++   Probationary member of their active department — my_member_id() AND my_department_id() non-null, the same resolution
++   every RLS policy already uses (ruling D-1). Inactive / terminated members lose AI the moment they lose everything else.
++   Runs AS THE CALLER (anon key + their JWT) — no service-role key, here or in any AI route.
++   Returns { user, memberId, deptId, sb } (sb = the as-caller client), or null having ALREADY sent the response:
++   401 (no / bad session, from requireUser) · 403 (not a member) · 503 (couldn't check — fail safe, the model is not called).
++   Call as:  const ctx = await requireMember(req, res); if (!ctx) return; */
++export async function requireMember(req, res) {
++  const user = await requireUser(req, res);
++  if (!user) return null;
++  if (!SUPABASE_URL || !ANON_KEY) {
++    res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" });
++    return null;
++  }
++  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || "").trim())?.[1];
++  const sb = createClient(SUPABASE_URL, ANON_KEY, {
++    auth: { persistSession: false, autoRefreshToken: false },
++    global: { headers: { Authorization: `Bearer ${jwt}` } },
++  });
++  try {
++    const [m, d] = await Promise.all([sb.rpc("my_member_id"), sb.rpc("my_department_id")]);
++    if (m.error || d.error) {
++      res.status(503).json({ error: "Couldn't check your membership just now — please try again." });
++      return null;
++    }
++    if (!m.data || !d.data) {
++      res.status(403).json({ error: "Your login isn't linked to an active member of a department — ask your Department Admin." });
++      return null;
++    }
++    return { user, memberId: m.data, deptId: d.data, sb };
++  } catch {
++    res.status(503).json({ error: "Couldn't check your membership just now — please try again." });
++    return null;
++  }
++}
++
++/* WS-2 — THE DAILY CAP, charged before a cent is spent (record_ai_call, sql/ws2_ai_call_usage). Per member per day
++   (America/Chicago): claude 150 (+ 1,500 per department), concepts 30, assistant 60, image 20 (rulings D-2 / D-3).
++   FAIL SAFE: anything but a clear { allowed: true } — a refusal, an RPC error, a missing function — means the model is
++   NOT called: 429 for a refusal, 503 for anything else. Returns the usage object, or null having ALREADY responded. */
++export async function chargeAiCall(ctx, route, res) {
++  let usage;
++  try {
++    const { data, error } = await ctx.sb.rpc("record_ai_call", { p_route: route });
++    if (error || !data) {
++      res.status(503).json({ error: "Couldn't check today's AI limit — please try again." });
++      return null;
++    }
++    usage = data;
++  } catch {
++    res.status(503).json({ error: "Couldn't check today's AI limit — please try again." });
++    return null;
++  }
++  if (usage.allowed !== true) {
++    const who = usage.scope === "department" ? "Your department has" : "You've";
++    res.status(429).json({ error: `${who} reached today's AI limit — it resets at midnight.`, used: usage.used, ceiling: usage.ceiling });
++    return null;
++  }
++  return usage;
++}
+diff --git a/api/assistant.js b/api/assistant.js
+index 79e624d..bef570c 100644
+--- a/api/assistant.js
++++ b/api/assistant.js
+@@ -15,9 +15,8 @@
+ //   open_screen     -> nothing read; returns a navigation instruction the client checks against its own nav
+ // Phase 1 WRITES NOTHING: no tool inserts, updates or deletes, and none calls a writing RPC. The one write on this path
+ // is the cost meter, record_assistant_turn(), before the model is called — the same fail-safe shape as /api/image.
+-import { createClient } from "@supabase/supabase-js";
+ import { cors } from "./_cors.js";
+-import { requireUser } from "./_auth.js";
++import { requireMember, chargeAiCall } from "./_auth.js";
+ import { validExpYM } from "../shared/expiry.js";
+ 
+ const MODEL = "claude-sonnet-4-6";
+@@ -226,13 +225,10 @@ HARD RULES:
+ export default async function handler(req, res) {
+   if (cors(req, res)) return;
+   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+-  const user = await requireUser(req, res);
+-  if (!user) return;
++  const member = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 (was a 503) / 503 already sent
++  if (!member) return;
+   const key = process.env.ANTHROPIC_API_KEY;
+   if (!key) return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
+-  const supabaseUrl = process.env.SUPABASE_URL;
+-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+-  if (!supabaseUrl || !anonKey) return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" });
+ 
+   // Validate the conversation: text-only turns, user/assistant alternation ending on the user, capped.
+   const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
+@@ -242,8 +238,11 @@ export default async function handler(req, res) {
+   if (!history.length || history[history.length - 1].role !== "user") return res.status(400).json({ error: "Ask a question." });
+ 
+   // Every read below runs AS THE CALLER — RLS + my_member_id()/my_department_id() do the scoping.
+-  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || "").trim())?.[1];
+-  const sb = createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${jwt}` } } });
++  const sb = member.sb;   // WS-2: requireMember's as-caller client (anon key + the caller's JWT)
++
++  // WS-2: the per-member DAILY cap (60) first — 429 / 503 already sent, the model is not called. Then the department's
++  // MONTHLY ceiling below, unchanged (its 200 { limited } reply stays exactly as it was).
++  if (!await chargeAiCall(member, "assistant", res)) return;
+ 
+   // THE CEILING, before a cent is spent. Anything other than a clear "allowed" fails safe: the model is not called.
+   let usage;
+@@ -257,8 +256,7 @@ export default async function handler(req, res) {
+   }
+ 
+   // Who is asking (own row only).
+-  const [{ data: memberId }, { data: deptId }] = await Promise.all([sb.rpc("my_member_id"), sb.rpc("my_department_id")]);
+-  if (!memberId || !deptId) return res.status(403).json({ error: "We couldn't match your login to a member record." });
++  const { memberId, deptId } = member;   // resolved (and gated) by requireMember
+   const [{ data: me }, { data: dept }, { data: celeb }] = await Promise.all([
+     sb.from("members").select("name, access, joined").eq("id", memberId).maybeSingle(),
+     sb.from("departments").select("name").eq("id", deptId).maybeSingle(),
+diff --git a/api/claude.js b/api/claude.js
+index 9cb2ac0..ff14880 100644
+--- a/api/claude.js
++++ b/api/claude.js
+@@ -1,18 +1,60 @@
+ // Vercel serverless function — keeps your Anthropic API key on the server.
+ // Set ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.
+ import { cors } from "./_cors.js";
+-import { requireUser } from "./_auth.js";
++import { requireMember, chargeAiCall } from "./_auth.js";
++
++/* WS-2 (D-6) INPUT CAPS — sized to the real callers, so no legitimate request is refused:
++   · system ≤ 310,000 chars (string, or the total of its text blocks). Station Q&A stuffs every SOP in, capped by the
++     client at 300,000 (Indian Harbor sits right there today, 307,617 of SOP text before the client's cut).
++   · user (single-shot) ≤ 120,000 — the plan import sends a whole pasted plan; Minutes attaches agendas.
++   · messages: each turn ≤ 20,000, roles user/assistant, string content, ending on the user (assistant.js's rules);
++     ≤ 100 turns and ≤ 800,000 chars in total. ⚠ DEVIATION FROM D-6 (40 turns), flagged for review: the cert tutor's
++     20-question quiz sends 4 turns per question (hidden prompt · question · answer · verdict) — 77–79 turns by question
++     20 — so a 40-turn cap would refuse it at about question 10. 800,000 total = the ruled worst case (40 × 20,000), so
++     the per-call cost bound is unchanged; only the turn COUNT is wider.
++   Anything over → 413, BEFORE the daily cap is charged and before the model is called. */
++export const SYSTEM_MAX = 310_000, USER_MAX = 120_000, TURNS_MAX = 100, TURN_MAX = 20_000, MESSAGES_TOTAL_MAX = 800_000;
++
++// → null when the body is acceptable, else the 413 message.
++export function inputProblem({ system, user, messages }) {
++  if (system !== undefined && system !== null) {
++    const len = typeof system === "string" ? system.length
++      : Array.isArray(system) && system.every((b) => b && b.type === "text" && typeof b.text === "string") ? system.reduce((t, b) => t + b.text.length, 0)
++      : -1;
++    if (len < 0) return "The system prompt must be text.";
++    if (len > SYSTEM_MAX) return `The system prompt is too long (${len.toLocaleString("en-US")} characters; the limit is ${SYSTEM_MAX.toLocaleString("en-US")}).`;
++  }
++  if (Array.isArray(messages) && messages.length) {
++    if (messages.length > TURNS_MAX) return `Too many turns (${messages.length}; the limit is ${TURNS_MAX}).`;
++    for (const m of messages) {
++      if (!m || (m.role !== "user" && m.role !== "assistant") || typeof m.content !== "string") return "Each turn must be a user or assistant message with text content.";
++      if (m.content.length > TURN_MAX) return `A turn is too long (${m.content.length.toLocaleString("en-US")} characters; the limit is ${TURN_MAX.toLocaleString("en-US")}).`;
++    }
++    if (messages[messages.length - 1].role !== "user") return "The conversation must end with a user message.";
++    const total = messages.reduce((t, m) => t + m.content.length, 0);
++    if (total > MESSAGES_TOTAL_MAX) return `The conversation is too long (${total.toLocaleString("en-US")} characters; the limit is ${MESSAGES_TOTAL_MAX.toLocaleString("en-US")}).`;
++    return null;
++  }
++  if (typeof user !== "string") return "The message must be text.";
++  if (user.length > USER_MAX) return `The message is too long (${user.length.toLocaleString("en-US")} characters; the limit is ${USER_MAX.toLocaleString("en-US")}).`;
++  return null;
++}
++
+ export default async function handler(req, res) {
+   if (cors(req, res)) return;   // preflight answered; also sets ACAO on the real request
+   if (req.method !== "POST") {
+     return res.status(405).json({ error: "Method not allowed" });
+   }
+-  if (!await requireUser(req, res)) return;   // 401 already sent — the handler must not run
++  const ctx = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 / 503 already sent
++  if (!ctx) return;
+   const key = process.env.ANTHROPIC_API_KEY;
+   if (!key) {
+     return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
+   }
+   const { system, user, messages } = req.body || {};
++  const problem = inputProblem({ system, user, messages });
++  if (problem) return res.status(413).json({ error: problem });
++  if (!await chargeAiCall(ctx, "claude", res)) return;   // WS-2: the daily cap — 429 / 503 already sent, the model is not called
+   try {
+     const r = await fetch("https://api.anthropic.com/v1/messages", {
+       method: "POST",
+@@ -39,7 +81,9 @@ export default async function handler(req, res) {
+     });
+     const data = await r.json();
+     if (!r.ok) {
+-      return res.status(r.status).json({ error: data?.error?.message || "Anthropic API error" });
++      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
++      console.error("api/claude: Anthropic error", r.status, data?.error?.type, data?.error?.message);
++      return res.status(502).json({ error: "The AI service couldn't answer just now — please try again." });
+     }
+     const text = (data.content || [])
+       .map((c) => (c.type === "text" ? c.text : ""))
+diff --git a/api/concepts.js b/api/concepts.js
+index ccbaaf1..ec927b0 100644
+--- a/api/concepts.js
++++ b/api/concepts.js
+@@ -4,7 +4,7 @@
+ // SCENE-ONLY brief for /api/image (gpt-image-1); B4C adds the headline and crest itself afterwards, so every
+ // imagePrompt must end with "No text, no logos." — enforced here even if the model forgets.
+ import { cors } from "./_cors.js";
+-import { requireUser } from "./_auth.js";
++import { requireMember, chargeAiCall } from "./_auth.js";
+ 
+ const MODEL = "claude-sonnet-4-6";
+ const NO_TEXT = "No text, no logos.";
+@@ -42,7 +42,8 @@ export default async function handler(req, res) {
+   if (req.method !== "POST") {
+     return res.status(405).json({ error: "Method not allowed" });
+   }
+-  if (!await requireUser(req, res)) return;   // 401 already sent — the handler must not run
++  const ctx = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 / 503 already sent
++  if (!ctx) return;
+   const key = process.env.ANTHROPIC_API_KEY;
+   if (!key) {
+     return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY" });
+@@ -62,6 +63,7 @@ export default async function handler(req, res) {
+     tagline: clip(b.tagline, 200) || "(none)",
+   });
+   const user = [`Purpose: ${purpose || "(not given)"}`, `Occasion: ${occasion || "(not given)"}`, `Details: ${details || "(none)"}`, `Concepts wanted: ${count}`].join("\n");
++  if (!await chargeAiCall(ctx, "concepts", res)) return;   // WS-2: the daily cap (30/member) — 429 / 503 already sent, the model is not called
+   try {
+     const r = await fetch("https://api.anthropic.com/v1/messages", {
+       method: "POST",
+@@ -70,7 +72,9 @@ export default async function handler(req, res) {
+     });
+     const data = await r.json();
+     if (!r.ok) {
+-      return res.status(r.status).json({ error: data?.error?.message || "Anthropic API error" });
++      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
++      console.error("api/concepts: Anthropic error", r.status, data?.error?.type, data?.error?.message);
++      return res.status(502).json({ error: "The AI service couldn't answer just now — please try again." });
+     }
+     const text = (data.content || []).map((c) => (c.type === "text" ? c.text : "")).join("").trim();
+     const concepts = parseConcepts(text, count);
+diff --git a/api/image.js b/api/image.js
+index 4a97928..245657b 100644
+--- a/api/image.js
++++ b/api/image.js
+@@ -6,9 +6,8 @@
+ //
+ // The model renders scenes well but garbles small/factual text and adds stray lettering even on "no text"
+ // prompts — so B4C layers all real text (headline, crest, details) itself, on top of the returned image.
+-import { createClient } from "@supabase/supabase-js";
+ import { cors } from "./_cors.js";
+-import { requireUser } from "./_auth.js";
++import { requireMember, chargeAiCall } from "./_auth.js";
+ 
+ const QUALITIES = ["medium", "high"];                       // medium is the default: ~1/4 the cost, near-identical for social
+ const SIZES = ["1024x1536", "1024x1024", "1536x1024"];       // portrait poster is the default
+@@ -19,7 +18,8 @@ export default async function handler(req, res) {
+   if (req.method !== "POST") {
+     return res.status(405).json({ error: "Method not allowed" });
+   }
+-  if (!await requireUser(req, res)) return;   // 401 already sent — the handler must not run
++  const ctx = await requireMember(req, res);   // WS-2: a member of the caller's department — 401 / 403 (was a 503) / 503 already sent
++  if (!ctx) return;
+   const key = process.env.IMAGE_API_KEY;
+   if (!key) {
+     return res.status(501).json({ error: "AI image generation isn't set up yet. Add IMAGE_API_KEY in Vercel to enable it." });
+@@ -34,16 +34,9 @@ export default async function handler(req, res) {
+   /* THE CEILING, CHECKED AS THE CALLER — before a cent is spent. The RPC is department-scoped (my_department_id()
+      from the caller's own JWT), atomic, and anon-revoked; this function holds no service-role key for it. Anything
+      other than a clear "allowed" — a denial, an RPC error, a missing config — FAILS SAFE: OpenAI is not called. */
+-  const supabaseUrl = process.env.SUPABASE_URL;
+-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+-  if (!supabaseUrl || !anonKey) {
+-    return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" });
+-  }
+-  const jwt = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || "").trim())?.[1];
+-  const asUser = createClient(supabaseUrl, anonKey, {
+-    auth: { persistSession: false, autoRefreshToken: false },
+-    global: { headers: { Authorization: `Bearer ${jwt}` } },
+-  });
++  // WS-2: the per-member DAILY cap (20) first, then the department's MONTHLY ceiling — both as the caller (ctx.sb).
++  if (!await chargeAiCall(ctx, "image", res)) return;   // 429 / 503 already sent — OpenAI is not called
++  const asUser = ctx.sb;
+   let usage;
+   try {
+     const { data, error } = await asUser.rpc("record_image_generation", { p_tier: quality });

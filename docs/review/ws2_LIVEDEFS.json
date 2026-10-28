@@ -1,0 +1,48 @@
+{
+ "read_at": "2026-10-27",
+ "source": "live ifeptqnlucmvhlvadcpj, read-only",
+ "usage_table_pattern": [
+  {
+   "pk": "PRIMARY KEY (department_id, period_month)",
+   "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "rls": true,
+   "cols": [
+    "department_id:uuid NN",
+    "period_month:date NN",
+    "count:integer NN",
+    "updated_at:timestamp with time zone NN"
+   ],
+   "table": "assistant_usage",
+   "policies": 0,
+   "anon_select": false,
+   "auth_select": false
+  }
+ ],
+ "record_ai_call_exists": false,
+ "defs": {
+  "my_department_id()": {
+   "md5": "87f546659c3804a943b48e419e017f18",
+   "anon_exec": false,
+   "auth_exec": true,
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n"
+  },
+  "my_member_id()": {
+   "md5": "3f66369c8af7bc07ec59831af6536fee",
+   "anon_exec": false,
+   "auth_exec": true,
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n"
+  },
+  "record_assistant_turn()": {
+   "md5": "fc69fdaf65f51072cbdd8c1400e85467",
+   "anon_exec": false,
+   "auth_exec": true,
+   "def": "CREATE OR REPLACE FUNCTION public.record_assistant_turn()\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:assistant_usage — department-scoped monthly ceiling on Ask B4C turns (/api/assistant). Never takes a department argument.\ndeclare\n  SAFETY_CEILING constant integer := 500;              -- assistant turns per department per month — a cost backstop, raise once real usage is known\n  v_dept   uuid := public.my_department_id();\n  v_period date := date_trunc('month', (now() at time zone 'America/Chicago'))::date;\n  v_used   integer;\nbegin\n  if v_dept is null or public.my_member_id() is null then\n    raise exception 'We could not match your login to a member record.';\n  end if;\n  insert into public.assistant_usage as u (department_id, period_month, count, updated_at)\n  values (v_dept, v_period, 1, now())\n  on conflict (department_id, period_month)\n    do update set count = u.count + 1, updated_at = now()\n    where u.count < SAFETY_CEILING\n  returning u.count into v_used;\n  if v_used is null then                               -- the WHERE refused the update: at (or over) the ceiling\n    select count into v_used from public.assistant_usage where department_id = v_dept and period_month = v_period;\n    return jsonb_build_object('allowed', false, 'used', v_used, 'ceiling', SAFETY_CEILING);\n  end if;\n  return jsonb_build_object('allowed', true, 'used', v_used, 'ceiling', SAFETY_CEILING);\nend;\n$function$\n"
+  },
+  "record_image_generation(text)": {
+   "md5": "668c0a92223cd8187264c5f469844d69",
+   "anon_exec": false,
+   "auth_exec": true,
+   "def": "CREATE OR REPLACE FUNCTION public.record_image_generation(p_tier text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n-- B4C:image_gen_usage — department-scoped monthly safety ceiling for /api/image. Never takes a department argument.\ndeclare\n  SAFETY_CEILING constant integer := 500;              -- per department per month — a runaway backstop, not a product cap\n  v_dept   uuid := public.my_department_id();\n  v_period date := date_trunc('month', (now() at time zone 'America/Chicago'))::date;\n  v_used   integer;\nbegin\n  if p_tier is null or p_tier not in ('medium', 'high') then\n    raise exception 'Image quality must be medium or high';\n  end if;\n  if v_dept is null or public.my_member_id() is null then\n    raise exception 'We could not match your login to a member record.';\n  end if;\n  insert into public.image_gen_usage as u (department_id, period_month, count, updated_at)\n  values (v_dept, v_period, 1, now())\n  on conflict (department_id, period_month)\n    do update set count = u.count + 1, updated_at = now()\n    where u.count < SAFETY_CEILING\n  returning u.count into v_used;\n  if v_used is null then                               -- the WHERE refused the update: at (or over) the ceiling\n    select count into v_used from public.image_gen_usage where department_id = v_dept and period_month = v_period;\n    return jsonb_build_object('allowed', false, 'used', v_used, 'ceiling', SAFETY_CEILING, 'tier', p_tier);\n  end if;\n  return jsonb_build_object('allowed', true, 'used', v_used, 'ceiling', SAFETY_CEILING, 'tier', p_tier);\nend;\n$function$\n"
+  }
+ }
+}
