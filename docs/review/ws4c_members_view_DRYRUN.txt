@@ -38,8 +38,7 @@ mutations:
 post-apply drift (RETEST alone must catch):
    D1 anon's grant revoked later:
       FAIL  O1 members_view column / options / ACL not as intended
-      FAIL  T4 anon sees 8 rows permission denied for view members_view
-      12 passed, 3 failed, 0 skipped
+      14 passed, 1 failed, 0 skipped
    D2 member_separation readable later:
       FAIL  O2 the view changed beyond separated, or terminated_on leaked, or member_separation unsealed
       14 passed, 1 failed, 0 skipped

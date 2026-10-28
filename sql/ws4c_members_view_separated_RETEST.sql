@@ -112,15 +112,20 @@ BEGIN
         v_pass := v_pass + 1; rpt := rpt || format('   PASS  T3 as a plain Member: %s rows, separated NULL on every one (masked like status)%s', n_rows, chr(10));
       ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T3 plain Member sees separated on %s of %s rows %s%s', n_nonnull, n_rows, v_err, chr(10)); END IF;
 
-      -- ---- T4 as anon: nothing
-      v_ok := true; v_err := '';
+      -- ---- T4 as anon: nothing. Live, anon has no EXECUTE on my_department_id() / is_leader() (the anon-revoke pattern),
+      -- so the view is DENIED outright — stronger than an empty set, and untouched by this view-only migration. Either
+      -- outcome passes; anything that returns a row fails. (Fixed after the first live run, 2026-10-27: T4 expected an
+      -- empty set because the PGlite mock granted anon default EXECUTE; it also printed a stale row count.)
+      v_ok := true; v_err := ''; n_rows := null;
       PERFORM set_config('request.jwt.claims', '', true);
       BEGIN EXECUTE 'SET LOCAL ROLE anon';
         SELECT count(*) INTO n_rows FROM public.members_view;
         EXECUTE 'RESET ROLE';
       EXCEPTION WHEN OTHERS THEN EXECUTE 'RESET ROLE'; v_ok := false; v_err := SQLERRM; END;
       IF v_ok AND n_rows = 0 THEN v_pass := v_pass + 1; rpt := rpt || '   PASS  T4 as anon: members_view returns nothing' || chr(10);
-      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T4 anon sees %s rows %s%s', n_rows, v_err, chr(10)); END IF;
+      ELSIF NOT v_ok AND v_err LIKE 'permission denied%' THEN v_pass := v_pass + 1; rpt := rpt || format('   PASS  T4 as anon: members_view denied outright (%s)%s', v_err, chr(10));
+      ELSIF v_ok THEN v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T4 anon got %s rows from members_view%s', n_rows, chr(10));
+      ELSE v_fail := v_fail + 1; rpt := rpt || format('   FAIL  T4 anon read failed for another reason: %s%s', v_err, chr(10)); END IF;
 
       -- ---- T5 B-4 headcount over the view = the server's packet headcount
       v_ok := true; v_err := ''; v_packet := null;
