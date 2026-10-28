@@ -1,0 +1,48 @@
+L-2 · sql/l2_departments_scope_DRAFT.sql — APPLIED on live 2026-10-28 (SQL editor; branch feat/l2-l4-db @ 0a58e98;
+editor content SHA-256 89809e10e0a9… = the reviewed file). Preflight + in-transaction proof passed (no exception).
+
+STATE ROW
+{"fn_count":228,"total_policies":181,"verified_presence":967,"departments_select":"SELECT {authenticated} USING (id = my_department_id())","departments_update_md5":"2f6bfaa802936dbce6fa83f7871a4a1a"}
+(verified_presence 967 vs 966 at capture: one new legitimate check-in in between; the migration's in-transaction
+ verified check compares before/after inside the same transaction.)
+
+RETEST · sql/l2_departments_scope_RETEST.sql (SHA-256 3b7bfc64a2e5…), rolled back (SENTINEL) — the "ERROR" is the report
+PASS O1 SELECT policy = (id = my_department_id()) TO authenticated; UPDATE policy = its pin
+PASS O2 a signed-in stranger reads 0 of 5 departments; anon refused / 0
+— B4C Demo Department
+PASS T1 DA reads exactly 1 department: their own
+PASS T2 DA: the app's own-department read returns their row
+PASS T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+SKIP no real member in this department
+PASS T4 with USING (true) put back (rolled back) the DA reads all 5 — the policy is what scopes it
+— Granbury Fire Station
+PASS T1 DA reads exactly 1 department: their own
+PASS T2 DA: the app's own-department read returns their row
+PASS T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+SKIP no real member in this department
+PASS T4 with USING (true) put back (rolled back) the DA reads all 5 — the policy is what scopes it
+— Indian Harbor Volunteer Fire Department
+PASS T1 DA reads exactly 1 department: their own
+PASS T2 DA: the app's own-department read returns their row
+PASS T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+PASS T1 member reads exactly 1 department: their own
+PASS T2 member: the app's own-department read returns their row
+PASS T3 member: no-op UPDATE of own department touches 0 row(s), as before
+PASS T4 with USING (true) put back (rolled back) the DA reads all 5 — the policy is what scopes it
+— Lipan Volunteer Fire Department
+PASS T1 DA reads exactly 1 department: their own
+PASS T2 DA: the app's own-department read returns their row
+PASS T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+PASS T1 member reads exactly 1 department: their own
+PASS T2 member: the app's own-department read returns their row
+PASS T3 member: no-op UPDATE of own department touches 0 row(s), as before
+PASS T4 with USING (true) put back (rolled back) the DA reads all 5 — the policy is what scopes it
+— North Hood County Volunteer Fire Department
+PASS T1 DA reads exactly 1 department: their own
+PASS T2 DA: the app's own-department read returns their row
+PASS T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+PASS T1 member reads exactly 1 department: their own
+PASS T2 member: the app's own-department read returns their row
+PASS T3 member: no-op UPDATE of own department touches 0 row(s), as before
+PASS T4 with USING (true) put back (rolled back) the DA reads all 5 — the policy is what scopes it
+31 passed, 0 failed, 2 skipped
