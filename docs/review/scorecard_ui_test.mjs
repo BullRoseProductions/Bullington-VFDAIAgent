@@ -15,7 +15,8 @@ const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", nam
 // ---- a browser just big enough for App.jsx's module scope to load under node ----
 const noop = () => {};
 const el = () => ({ style: {}, setAttribute: noop, appendChild: noop, addEventListener: noop, removeEventListener: noop, classList: { add: noop, remove: noop }, sheet: { insertRule: noop } });
-globalThis.window = { location: { origin: "https://app.test", href: "https://app.test/", search: "", hash: "", pathname: "/" }, addEventListener: noop, removeEventListener: noop, dispatchEvent: noop,
+// atob/btoa: jspdf 4's node build binds window.atob/btoa at import (2.x shipped npm polyfills); Node has both natively (M-7)
+globalThis.window = { atob: globalThis.atob, btoa: globalThis.btoa, location: { origin: "https://app.test", href: "https://app.test/", search: "", hash: "", pathname: "/" }, addEventListener: noop, removeEventListener: noop, dispatchEvent: noop,
   matchMedia: () => ({ matches: false, addEventListener: noop, removeEventListener: noop, addListener: noop }), navigator: { userAgent: "node" }, innerWidth: 1200, innerHeight: 800, setTimeout, clearTimeout };
 globalThis.document = { addEventListener: noop, removeEventListener: noop, createElement: el, createTextNode: () => ({}), head: el(), body: el(), documentElement: el(), visibilityState: "visible", querySelector: () => null, getElementById: () => null };
 globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop }; globalThis.sessionStorage = globalThis.localStorage;
