@@ -1,7 +1,9 @@
 // Client-side department report PDF — original red-banner design.
 // Generates a downloadable PDF from the department's live data.
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+// jspdf-autotable 5: the side-effect import only patches a GLOBAL window.jsPDF, which a bundled ESM import never
+// creates — doc.autoTable would be undefined. The functional form is the supported API (it still sets doc.lastAutoTable).
+import { autoTable } from "jspdf-autotable";
 import { saveOrShare } from "./share";
 
 /* WHY NOT doc.save(). jsPDF's save() builds an <a download> and clicks it, which is a
@@ -209,7 +211,7 @@ export function buildReportDoc(data) {
   }
   function table(head, body, opts = {}) {
     ensure(40);
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [head],
       body,
@@ -480,7 +482,7 @@ export function buildCapitalPlanDoc(data) {
   }
   function table(head, body, opts = {}) {
     ensure(40);
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [head],
       body,
@@ -682,7 +684,7 @@ export function buildApparatusCheckDoc(data) {
   }
   function table(head, body, opts = {}) {
     ensure(40);
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [head],
       body,
@@ -851,7 +853,7 @@ export function buildFleetCheckDoc(data) {
   }
   function table(head, body, opts = {}) {
     ensure(40);
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [head],
       body,
@@ -1091,7 +1093,7 @@ export function buildStationHoursDoc(data) {
   }
   function table(head, body, opts = {}) {
     ensure(40);
-    doc.autoTable({
+    autoTable(doc, {
       startY: y, head: [head], body, margin: { left: M, right: M },
       styles: { font: "helvetica", fontSize: 8.6, textColor: SLATE, cellPadding: 4.5, lineColor: LINE, lineWidth: 0.3, valign: "middle" },
       headStyles: { fillColor: SLATE, textColor: 255, fontStyle: "bold", fontSize: 8.4 },

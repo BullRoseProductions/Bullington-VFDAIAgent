@@ -1,5 +1,7 @@
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+// jspdf-autotable 5: the side-effect import only patches a GLOBAL window.jsPDF, which a bundled ESM import never
+// creates — doc.autoTable would be undefined. The functional form is the supported API (it still sets doc.lastAutoTable).
+import { autoTable } from "jspdf-autotable";
 
 /* THE PRINT SHELL, AS A PDF — the native half of printDocument.
 
@@ -182,7 +184,7 @@ export function buildPrintPdf({ title, deptName, meta, printedOn, logo, monogram
       continue;
     }
     if (b.type === "table") {
-      doc.autoTable({
+      autoTable(doc, {
         startY: y,
         margin: { left: M, right: M, top: M, bottom: M + 14 },
         head: [(b.head || []).map((h) => String(h).toUpperCase())],   // th { text-transform: uppercase }
