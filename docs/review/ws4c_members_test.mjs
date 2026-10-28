@@ -171,13 +171,14 @@ ok("E-1 gated (member): the dispatcher keeps OFF on the Plain (tick) card + chec
   src.includes("function OnboardingCard(props) { return probationOn(props.dept) ? <OnboardingCardPath {...props} /> : <OnboardingCardPlain {...props} />; }")
   && src.includes("function MyOnboarding(props) { return probationOn(props.dept) ? <MyOnboardingPath {...props} /> : <MyOnboardingPlain {...props} />; }"));
 ok("B-4: the onboarding overview population drops separated members (= dept_probation_board's)", src.includes('const probMembers = candidates.filter((m) => m.status === "Probationary" && m.separated !== true);'));
-const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const untracked = execSync("git ls-files --others --exclude-standard -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const all = [...new Set([...changed, ...untracked])].sort();
-ok("runtime files changed vs origin/main = App.jsx, digest.js, shared/attendance.js (comment) + the new shared/members.js", JSON.stringify(all) === JSON.stringify(["api/digest.js", "shared/attendance.js", "shared/members.js", "src/App.jsx"]), JSON.stringify(all));
+// The DELTA fences are PINNED to WS-4c's reviewed range (2129fff = main before it .. e17da13 = the last code commit;
+// released in industrial-noir-39): "vs origin/main" goes red once the slice is on main.
+const BASE = "2129fff", REL = "e17da13";
+const all = execSync(`git diff --name-only ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
+ok("WS-4c (2129fff..e17da13) runtime files = App.jsx, digest.js, shared/attendance.js (comment) + the new shared/members.js", JSON.stringify(all) === JSON.stringify(["api/digest.js", "shared/attendance.js", "shared/members.js", "src/App.jsx"]), JSON.stringify(all));
 const tok = (s) => (s.match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14)", tok(src) === 132 && tok(dig) === 32 && tok(readFileSync(join(root, "api/assistant.js"), "utf8")) === 14, `${tok(src)} · ${tok(dig)}`);
-const added = execSync("git diff origin/main -- src api shared", { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+const added = execSync(`git diff ${BASE} ${REL} -- src api shared`, { cwd: root }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
 ok("no station_presence line added", !added.some((l) => l.includes("station_presence")));
 ok("Notify crew held back", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
