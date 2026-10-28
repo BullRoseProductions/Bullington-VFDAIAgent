@@ -68,4 +68,20 @@
   ok  a stray GRANT to PUBLIC → Post-condition failed: anon (or PUBLIC) still holds an ACL entry on a public relation. Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
   ok  the global PUBLIC function default left out → Post-condition failed: the default privileges are not as intended. Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
   ok  a write to station_presence → Post-condition failed: verified presence changed (2 -> 1). Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
+-- rollback round trip (apply → rollback must restore the exact pre-apply catalog; then re-apply must pass preflight)
+  ok  rollback before apply refused: PREFLIGHT: anon already holds grants on public relations — not the WS-5 applied state (rolled back already?). Refusing.
+  ok  storage rollback ran; post-conditions held
+   storage state: {"policy":"equipment photos upload da or manager INSERT {public}","storage_policies":3}
+  ok  part-1 rollback ran; every in-transaction post-condition held
+   state: {"fn_count":5,"total_policies":58,"anon_acl_entries":390,"verified_presence":2,"default_acl_postgres":{"public:S":"{anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres}","public:f":"{anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}","public:r":"{anon=arwdDxt/postgres,authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres}"},"public_role_policies":19}
+  ok  catalog after apply → rollback = before apply (anon map, every policy incl. storage, both matrices, every default ACL, every public function ACL) 
+  ok  second rollback refused: PREFLIGHT: anon already holds grants on public relations — not the WS-5 applied state (rolled back already?). Refusing.
+  ok  re-apply after rollback: preflight pins match again, migration ran
+  ok  RETEST after re-apply: 11 passed, 0 failed, 1 skipped
+  ok  mutated rollback, a forgotten re-GRANT → Post-condition failed: anon's grants are not the captured set. Rolling back.  [rolled back: still the applied state, 0 anon entries]
+  ok  mutated rollback, a re-GRANT wider than captured → Post-condition failed: anon's grants are not the captured set. Rolling back.  [rolled back: still the applied state, 0 anon entries]
+  ok  mutated rollback, a policy left TO authenticated → Post-condition failed: policy "dept reads ai_outputs" on ai_outputs is not back to its original definition. Rolling back.  [rolled back: still the applied state, 0 anon entries]
+  ok  mutated rollback, a policy rolled back with a new predicate → Post-condition failed: a real member's or DA's row counts changed: 00000000-0000-0000-0000-00000000000a|DA|ai_outputs 2->3; 000000  [rolled back: still the applied state, 0 anon entries]
+  ok  mutated rollback, the anon table default not restored → Post-condition failed: postgres's public default for r is not the captured set. Rolling back.  [rolled back: still the applied state, 0 anon entries]
+  ok  mutated rollback, the global PUBLIC function default not restored → Post-condition failed: a global postgres default is left (the capture had none). Rolling back.  [rolled back: still the applied state, 0 anon entries]
 ALL EXPECTED

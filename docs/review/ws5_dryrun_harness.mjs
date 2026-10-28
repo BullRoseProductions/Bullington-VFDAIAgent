@@ -9,7 +9,9 @@
 // The two privilege-MATRIX md5s span all 93 live objects and cannot reproduce in a mock; the harness substitutes the
 // mock's own matrix md5 for those two pins (labelled below). Every other pin is the live value, unchanged.
 // Runs: pins -> migration -> state row -> re-run (must refuse) -> RETEST -> drift refusals -> mutations (in-transaction
-// proof must roll back) -> post-apply drift (RETEST must catch) -> storage (S-1) the same way.
+// proof must roll back) -> post-apply drift (RETEST must catch) -> storage (S-1) the same way -> ROLLBACK round trip
+// (apply → rollback = the exact pre-apply catalog; re-apply passes preflight; mutated rollbacks caught). For the rollback the
+// captured postgres/public default ACLs are also swapped for the mock's own (same labelled reason as the matrix pins).
 import { readFileSync } from "fs";
 import { createRequire } from "module";
 import { join } from "path";
@@ -22,6 +24,8 @@ const MIG0 = readFileSync(join(root, "sql/ws5_public_rls_DRAFT.sql"), "utf8");
 const RET0 = readFileSync(join(root, "sql/ws5_public_rls_RETEST.sql"), "utf8");
 const SMIG = readFileSync(join(root, "sql/ws5_storage_policy_DRAFT.sql"), "utf8");
 const SRET = readFileSync(join(root, "sql/ws5_storage_policy_RETEST.sql"), "utf8");
+const RB0 = readFileSync(join(root, "sql/ws5_public_rls_ROLLBACK.sql"), "utf8");
+const SRB = readFileSync(join(root, "sql/ws5_storage_policy_ROLLBACK.sql"), "utf8");
 const SEQ = "training_session_audit_seq_seq";
 const RELS = Object.keys(L.anon_acl).filter((k) => k !== SEQ);
 const A = "00000000-0000-0000-0000-00000000000a", B = "00000000-0000-0000-0000-00000000000b", C = "00000000-0000-0000-0000-00000000000c";
@@ -206,6 +210,54 @@ for (const [label, from, to, want] of [
   const still = (await one(db, `SELECT count(*) n FROM pg_policies WHERE roles = '{public}' AND schemaname = 'public'`)).n;
   const anon = (await one(db, `SELECT count(*) n FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = 'anon'::regrole`)).n;
   expect(want.test(msg) && Number(still) === 19 && Number(anon) > 0, `${label} → ${msg.slice(0, 150)}  [rolled back: ${still} {public} policies, ${anon} anon entries remain]`);
+  await db.close();
+}
+// ------------------------------------------------------------ 5. ROLLBACK round trip (insurance scripts)
+log("\n-- rollback round trip (apply → rollback must restore the exact pre-apply catalog; then re-apply must pass preflight)");
+const DEF_LIVE = JSON.stringify(Object.fromEntries(["r", "S", "f"].map((t) => [t, L.default_acl.find((d) => d.role === "postgres" && d.ns === "public" && d.type === t).acl])));
+const snapSql = `SELECT jsonb_build_object(
+  'anon', (SELECT jsonb_object_agg(x.rel, x.privs) FROM (SELECT c.relname rel, string_agg(a.privilege_type, ',' ORDER BY a.privilege_type) privs FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+            WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = 'anon'::regrole GROUP BY 1) x),
+  'pol', (SELECT jsonb_object_agg(schemaname || '.' || tablename || '.' || policyname, md5(cmd || '|' || permissive || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, ''))) FROM pg_policies),
+  'auth', (${matrixSql("authenticated")}), 'svc', (${matrixSql("service_role")}),
+  'dacl', (SELECT jsonb_object_agg(defaclrole::regrole::text || ':' || defaclnamespace::text || ':' || defaclobjtype::text, (SELECT string_agg(x::text, ',' ORDER BY x::text) FROM unnest(defaclacl) x)) FROM pg_default_acl),
+  'fnacl', (SELECT md5(string_agg(oid::text || coalesce(proacl::text, ''), ',' ORDER BY oid)) FROM pg_proc WHERE pronamespace = 'public'::regnamespace)) s`;
+async function rbFor(db) {   // the matrix pins (as for the migration) + the captured default ACLs → the mock's own (labelled)
+  const def = JSON.stringify(Object.fromEntries((await db.query(`SELECT defaclobjtype::text t, defaclacl::text a FROM pg_default_acl WHERE defaclrole = 'postgres'::regrole AND defaclnamespace = 'public'::regnamespace`)).rows.map((r) => [r.t, r.a])));
+  const loc = await localize(db, RB0);
+  if (loc.sql.split(DEF_LIVE).length !== 2) throw new Error("rollback: captured defaults literal not found once");
+  return loc.sql.split(DEF_LIVE).join(def);
+}
+{ const db = await fresh();
+  const MIG = (await localize(db, MIG0)).sql, RET = (await localize(db, RET0)).sql, RB = await rbFor(db);
+  const pre = (await one(db, snapSql)).s;
+  try { await db.exec(RB); expect(false, "rollback on an UN-applied database did NOT refuse"); } catch (e) { expect(/not the WS-5 applied state|anon already holds/.test(first(e)), "rollback before apply refused: " + first(e)); }
+  await db.exec(MIG); await db.exec(SMIG);
+  try { await db.exec(SRB); expect(true, "storage rollback ran; post-conditions held"); } catch (e) { expect(false, "storage rollback raised: " + first(e)); }
+  log("   storage state: " + JSON.stringify((await db.query(SRB.slice(SRB.lastIndexOf("SELECT jsonb_build_object(")))).rows[0].state));
+  try { await db.exec(RB); expect(true, "part-1 rollback ran; every in-transaction post-condition held"); } catch (e) { expect(false, "part-1 rollback raised: " + first(e)); }
+  log("   state: " + JSON.stringify((await db.query(RB.slice(RB.lastIndexOf("SELECT jsonb_build_object(")))).rows[0].state));
+  const post = (await one(db, snapSql)).s;
+  const keys = Object.keys(pre).filter((k) => JSON.stringify(pre[k]) !== JSON.stringify(post[k]));
+  expect(keys.length === 0, `catalog after apply → rollback = before apply (anon map, every policy incl. storage, both matrices, every default ACL, every public function ACL) ${keys.length ? "DIFF: " + keys.join(",") + " " + JSON.stringify(keys.map((k) => [pre[k], post[k]])).slice(0, 600) : ""}`);
+  try { await db.exec(RB); expect(false, "second rollback did NOT refuse"); } catch (e) { expect(/anon already holds/.test(first(e)), "second rollback refused: " + first(e)); }
+  try { await db.exec(MIG); expect(true, "re-apply after rollback: preflight pins match again, migration ran"); } catch (e) { expect(false, "re-apply raised: " + first(e)); }
+  const r = await runRetest(db, RET); expect(/ 0 failed/.test(tail(r)), "RETEST after re-apply: " + tail(r));
+  await db.close(); }
+for (const [label, from, to, want] of [
+  ["a forgotten re-GRANT", `  GRANT DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLE public."certs" TO anon;\n`, "", /not the captured set/],
+  ["a re-GRANT wider than captured", `  GRANT REFERENCES, SELECT, TRIGGER, TRUNCATE ON TABLE public."equipment_issues" TO anon;`, `  GRANT ALL ON TABLE public."equipment_issues" TO anon;`, /not the captured set/],
+  ["a policy left TO authenticated", `  ALTER POLICY "dept reads ai_outputs" ON public."ai_outputs" TO public;\n`, "", /not back to its original definition/],
+  ["a policy rolled back with a new predicate", `  ALTER POLICY "dept reads ai_outputs" ON public."ai_outputs" TO public;`, `  ALTER POLICY "dept reads ai_outputs" ON public."ai_outputs" TO public USING (true);`, /row counts changed|not back to its original/],
+  ["the anon table default not restored", `  ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO anon;\n`, "", /public default for r is not the captured set/],
+  ["the global PUBLIC function default not restored", `  ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT EXECUTE ON FUNCTIONS TO PUBLIC;\n`, "", /global postgres default is left/],
+]) {
+  const db = await fresh(); const MIG = (await localize(db, MIG0)).sql, RB = await rbFor(db);
+  await db.exec(MIG);
+  const parts = RB.split(from); if (parts.length !== 2) { expect(false, `${label}: mutation anchor found ${parts.length - 1}×`); await db.close(); continue; }
+  let msg = "ran"; try { await db.exec(parts.join(to)); } catch (e) { msg = first(e); }
+  const anon = (await one(db, `SELECT count(*) n FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = 'anon'::regrole`)).n;
+  expect(want.test(msg) && Number(anon) === 0, `mutated rollback, ${label} → ${msg.slice(0, 130)}  [rolled back: still the applied state, ${anon} anon entries]`);
   await db.close();
 }
 log(`\n${unexpected === 0 ? "ALL EXPECTED" : unexpected + " UNEXPECTED"}`);
