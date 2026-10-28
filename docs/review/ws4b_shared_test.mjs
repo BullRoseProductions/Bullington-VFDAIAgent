@@ -231,8 +231,10 @@ const fnBody = (s, head) => { const i = s.indexOf(head); if (i < 0) return ""; c
 ok("PIN App: imports rigStatus + checkOverdue from ../shared/apparatus-status.js", src.includes('import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";'));
 ok("PIN App: imports the attendance rule from ../shared/attendance.js", /import \{ isRestrictedEvent, isOptionalEvent, countsTowardRate, expectedAfterJoin, memberAttendance, drillsScheduled,\s*deptAttendance as deptAttendanceShared \} from "\.\.\/shared\/attendance\.js";/.test(src));
 ok("PIN App: imports maintStatus (as maintRule) + startOfToday from ../shared/maint-due.js", src.includes('import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";'));
-ok("PIN App: no local copy of the attendance rule (deptAttendance is the countsInStats wrapper; no memberAttendance / joinCutoff / countsTowardRate body)",
-  src.includes("const deptAttendance = (members, sessions, year, range) => deptAttendanceShared(members, sessions, year, range, countsInStats);")
+// Re-baselined in WS-4c: the wrapper now passes shared/members.js's isCountedMember (the planned swap — 4b passed
+// countsInStats). The 4b fence is unchanged in substance: one thin wrapper, no local copy of the rule.
+ok("PIN App: no local copy of the attendance rule (deptAttendance is the one-predicate wrapper; no memberAttendance / joinCutoff / countsTowardRate body)",
+  /const deptAttendance = \(members, sessions, year, range\) => deptAttendanceShared\(members, sessions, year, range, (countsInStats|isCountedMember)\);/.test(src)
   && !/function deptAttendance\(/.test(src) && !/const memberAttendance = \(/.test(src) && !/const joinCutoff = \(/.test(src) && !/const countsTowardRate = \(/.test(src) && !/const isOptionalEvent = \(/.test(src));
 const hook = fnBody(src, "function useApparatusReadiness(");
 ok("PIN useApparatusReadiness: buckets from rigStatus; no local Pass test", hook.includes("rigStatus(r, { now })") && !hook.includes('r.status === "Pass"') && !hook.includes('r.status !== "Pass"'));
@@ -260,7 +262,9 @@ ok("A-2: app, email and daily push all drop a RETIRED rig's maintenance tasks",
   && dig.includes("detectMaintenanceFrom((data || []).filter((r) => !r.apparatus?.deleted_at), today)") && pulse.includes("if (r.apparatus?.deleted_at) continue;"));
 const { maintStatus: maintRule, startOfToday } = await imp("shared/maint-due.js");
 const lbl = (row) => { const s = maintRule(row, startOfToday()); return !s ? "Current" : s.kind === "maint_overdue" ? "Overdue" : "Due soon"; };
-const dIso = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
+// LOCAL calendar date, n days ago. (Was toISOString(): a UTC date, so after ~7 pm Central "31 days ago" read as 30 and this
+// check went red every evening — fixed in WS-4c. The rule reads the date prefix, so the fixture must be a local date.)
+const dIso = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 ok("F-2: never done reads Overdue (was 'Due soon'); 10 of 30 days → Current; 20 of 30 → Due soon (14-day window); 31 → Overdue",
   lbl({ department_id: "d", cadence: "Monthly", last_done_at: null }) === "Overdue" && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(10) }) === "Current"
   && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(20) }) === "Due soon" && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(31) }) === "Overdue");

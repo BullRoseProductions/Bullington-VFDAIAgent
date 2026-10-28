@@ -30,6 +30,7 @@ import { validExpYM } from "../shared/expiry.js";
 // WS-4b: "ready" and the attendance % are the app's own definitions, imported — not copied.
 import { apparatusCounts } from "../shared/apparatus-status.js";
 import { deptAttendance } from "../shared/attendance.js";
+import { isListedMember, isCountedMember } from "../shared/members.js";
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
 const FROM = "B4C <notifications@b4thecall.com>";
@@ -59,7 +60,7 @@ const SEND_WHEN_NOTHING_FLAGGED = false;
 const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";
 // Who gets ops notifications (gear, maintenance) — mirrors CANMANAGE_OPS_ROLES in App.jsx:88:
 // Department Admin + Officer. Board Member is governance-only and is deliberately NOT buzzed
-// about a pump test; Project Admin is excluded by countsInStats anyway.
+// about a pump test; Project Admin is excluded by isListedMember anyway.
 const OPS_LEADER_ROLES = ["Department Admin", "Officer"];
 
 // Notification copy. Addressed to the RECIPIENT: a cert row goes to the member who holds it,
@@ -73,15 +74,10 @@ function notifTextFor(it) {
   return { title: "Maintenance due", body: `${it.apparatus} · ${it.task} — ${it.state}.` };
 }
 
-/* STATS_EXCLUDED_IDS — MUST stay in sync with App.jsx:1152. These three accounts (owner, test, demo)
-   plus anyone holding Project Admin are excluded from every denominator on screen. If the digest
-   counted them, its percentages would silently disagree with the dashboard the chief is looking at. */
-const STATS_EXCLUDED_IDS = new Set([
-  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
-  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
-  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
-]);
-const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !(Array.isArray(m.access) && m.access.includes("Project Admin"));
+/* WHO IS A MEMBER, AND WHO COUNTS — shared/members.js (WS-4c). The owner/test/demo id list and countsInStats used to be
+   copied here ("MUST stay in sync with App.jsx"); both now come from the one file the app imports.
+     isListedMember  — owner/test/demo + Project Admin out: recipients, the duty/hours people lists (what countsInStats was)
+     isCountedMember — the headcount: + Active/Probationary, not separated — the attendance % (B → C-1) */
 
 /* ---------------- Station Duties week window ----------------
    The digest reports the WEEK THAT JUST ENDED: [Monday 00:00, next Monday 00:00) in local time.
@@ -142,7 +138,7 @@ function digestWeekWindow(now, tz = DIGEST_TZ) {
                 uses: the uuid is authoritative, the snapshotted text is the fallback and the only
                 attribution a visitor or a whole crew can have).
 
-   countsInStats is applied to BOTH the people list and the total, so the list always sums to the
+   isListedMember is applied to BOTH the people list and the total, so the list always sums to the
    total — consistent with every other figure in this digest. A credit whose member is excluded is
    dropped entirely rather than folded into an "other" bucket, which would make the sum lie.
    `rowsRead` is reported separately so an excluded-heavy week is diagnosable rather than mysterious. */
@@ -308,7 +304,7 @@ export function trainingCompliancePct(sessions, attendance, countedMembers, year
       countsAttendance: s.counts_toward_attendance !== false, isMeeting: !!s.is_meeting, attendance: [...(attendedBy.get(s.id) || [])] };
   };
   const toMember = (m) => ({ id: m.id, name: m.name, access: m.access, status: m.status, joined: m.joined, joinedOn: joinedOn.get(m.id) || null });
-  // countedMembers is already filtered by countsInStats (the app's population, until WS-4c) — so `counted` is everyone here.
+  // countedMembers is already the headcount (isCountedMember — WS-4c) — so `counted` is everyone here.
   return deptAttendance(countedMembers.map(toMember), sessions.filter((s) => s.date).map(toSession), year, null).avg;
 }
 
@@ -354,7 +350,7 @@ function shiftHours(s) {
    denominator to take a percentage of, and dash() renders null as "—". A 0% would assert that a member
    who verifies fine never does.
 
-   countsInStats is applied to BOTH sides, as before — the digest's figures are department statistics
+   isListedMember is applied to BOTH sides, as before — the digest's figures are department statistics
    and must not move because a test account clocked in.
 
    Sums are raw and rounded once at the end, matching h1() in the app; rounding per member would drift
@@ -549,7 +545,7 @@ function deptAdminEmails(members, deptId) {
   for (const m of members) {
     if (m.department_id !== deptId) continue;
     if (m.status !== "Active") continue;                              // inactive admins don't get mail
-    if (!countsInStats(m)) continue;                                  // owner/test/demo + Project Admin
+    if (!isListedMember(m)) continue;                                 // owner/test/demo + Project Admin
     if (!Array.isArray(m.access) || !m.access.includes("Department Admin")) continue;
     const e = String(m.email || "").trim().toLowerCase();
     if (e) out.add(e);
@@ -640,7 +636,7 @@ export default async function handler(req, res) {
   // summary degrades to "—" and the digest still goes out; it never blocks the items that need attention.
   // station_presence is read DIRECTLY: the service-role key already bypasses RLS, so no RPC is needed —
   // the app's RPCs exist only because a browser client has to be walled off by my_department_id().
-  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], joins: [], error: null };
+  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], joins: [], separatedIds: new Set(), error: null };
   try {
     const rs = await Promise.all([
       sb.from("members").select("id, department_id, access, email, status, joined"),
@@ -668,7 +664,11 @@ export default async function handler(req, res) {
     // cutoff needs (never birthday). Read on its own and TOLERANT: a failure here falls back to the `joined` year
     // (Jan 1 cutoff), it does not blank every tile the way a failed core read must.
     const jr = await sb.from("member_private").select("member_id, department_id, joined_date").not("joined_date", "is", null);
-    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, joins: jr.error ? [] : (jr.data || []), error: null };
+    // SEPARATION (WS-4c, B-4): the server's rule — a member_separation row exists. member_id ONLY (never terminated_on). Tolerant
+    // like the join dates: a failed read means nobody is known separated (the old behaviour), not a blank email.
+    const sr = await sb.from("member_separation").select("member_id");
+    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, joins: jr.error ? [] : (jr.data || []),
+           separatedIds: new Set(sr.error ? [] : (sr.data || []).map((r) => r.member_id)), error: null };
   } catch (e) {
     mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
   }
@@ -698,7 +698,7 @@ export default async function handler(req, res) {
   // D4d: a department can now earn a send on duty activity ALONE. byDept is built from FLAGGED items,
   // so such a department would never enter the send loop and the gate below could never fire for the
   // case it exists to serve. Seed generously here on RAW rows and let the gate decide precisely — it
-  // judges on credits, which are countsInStats-filtered, so a week whose only activity was the test
+  // judges on credits, which are isListedMember-filtered, so a week whose only activity was the test
   // account gets bucketed here and then correctly skipped there. Bucketing is cheap; the gate is the
   // single decision point.
   for (const r of [...du.dutyLog, ...du.stationLog]) if (r.department_id) bucket(r.department_id);
@@ -745,9 +745,12 @@ export default async function handler(req, res) {
     const n = counts.certs + counts.gear + counts.maintenance;
     const name = nameById.get(deptId) || "Unknown department";
 
-    // Per-department metrics. countsInStats mirrors App.jsx so these percentages match the dashboard.
-    const counted = mi.members.filter((m) => m.department_id === deptId && countsInStats(m));
-    const countedIds = new Set(counted.map((m) => m.id));
+    // Per-department metrics — shared/members.js, so these match the dashboard. The duty / hours / notification people
+    // stay the LISTED members (unchanged: credited hours and who gets pinged are not WS-4c's to move); the attendance %
+    // is over the HEADCOUNT — Active/Probationary, not separated (B-1..B-4, C-1), exactly the app's denominator.
+    const listed = mi.members.filter((m) => m.department_id === deptId && isListedMember(m));
+    const countedIds = new Set(listed.map((m) => m.id));
+    const counted = listed.filter((m) => isCountedMember({ ...m, separated: mi.separatedIds.has(m.id) }));
     const dutiesWeek = rollupDuties(
       du.dutyLog.filter((r) => r.department_id === deptId),
       du.stationLog.filter((r) => r.department_id === deptId),
@@ -756,7 +759,7 @@ export default async function handler(req, res) {
     // THE SEND GATE. Two independent reasons to write: something needs attention, or somebody did
     // work worth naming. Duty activity is deliberately NOT folded into `n` — n means "problem items"
     // and feeds `total` in the response, so a productive week must not read as a problem week.
-    // Computed on CREDITS (countsInStats-applied), so a week whose only activity was the test account
+    // Computed on CREDITS (isListedMember-applied), so a week whose only activity was the test account
     // does not manufacture a send.
     const hasDutyActivity = dutiesWeek.total > 0;
     if (n === 0 && !hasDutyActivity && !SEND_WHEN_NOTHING_FLAGGED && !isTestSend) continue;
@@ -787,7 +790,7 @@ export default async function handler(req, res) {
     if (PUSH_ENABLED && !isTestSend && !isDry) {
       try {
         const leaderIds = mi.members
-          .filter((m) => m.department_id === deptId && m.status === "Active" && countsInStats(m)
+          .filter((m) => m.department_id === deptId && m.status === "Active" && isListedMember(m)
             && Array.isArray(m.access) && m.access.some((r) => OPS_LEADER_ROLES.includes(r)))
           .map((m) => m.id);
         const items = [...groups.certs, ...groups.gear, ...groups.maint].map((it) => ({ ...it, ...notifTextFor(it) }));

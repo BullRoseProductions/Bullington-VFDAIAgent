@@ -17,7 +17,8 @@ import { mergeStationHours, rollupStationHours } from "../shared/station-hours.j
 import { todayISOIn } from "../shared/zoned-time.js";
 import { shiftSpan, shiftHoursText } from "../shared/shift-span.js";   // WS-4a G: "Voided" / "< 1 min" on every shift row
 import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";   // WS-4b A: one "ready" for every screen + the email
-import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";   // WS-4b F-2: the email's maintenance rule
+import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";
+import { isListedMember, isCountedMember, headcount } from "../shared/members.js";   // WS-4c B: one headcount for every screen + the email   // WS-4b F-2: the email's maintenance rule
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -2422,6 +2423,9 @@ export default function App() {
             joinedOn: joinById.get(m.id) || null,
             participation: m.participation,
             mentorId: m.mentor_id,
+            // WS-4c B-4: members_view.separated (true / false for leaders; NULL = masked for a plain member, like status).
+            // Before the DB slice applies the column is absent → undefined → never "separated" (the old behaviour).
+            separated: m.separated ?? null,
             certs: enrichCerts(certsByMember.get(m.id) || [], typeMap),
             notes: [],
           }))
@@ -3230,17 +3234,14 @@ const dashboardGreeting = (me) => {
 /* ---------------- Dashboard ---------------- */
 // Shared dept attendance calc — per-member eligible/attended/pct (audience-aware) + department average, for one year.
 // Single source for RosterReports (Chief's Report), AttendanceReport (Yearly report), and the Dept Admin dashboard — no drift.
-/* Accounts excluded from ALL department stats/counts (owner + test) — NOT from identity:
-   they still log in and resolve via members.find(meId), so keep them in the full members array. */
-const STATS_EXCLUDED_IDS = new Set([
-  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
-  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
-  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com) — has Board Member but NO Project Admin, so the by-role clause never caught it; exclude by id
-]);
-const countsInStats = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // owner/test by id + any Project Admin by role (robust across depts/ids)
-// Same two accounts must never be a selectable assignee (mentor/duty/action-item/owner pickers).
-// Distinct predicate from countsInStats (assignable vs. counted) though it shares the id set today.
-const isAssignable = (m) => !STATS_EXCLUDED_IDS.has(m.id) && !hasAny(m.access, ['Project Admin']);   // never a selectable assignee (owner/test by id + any Project Admin by role)
+/* WHO IS A MEMBER, AND WHO COUNTS — shared/members.js (WS-4c), imported by the weekly email too. The owner/test/demo id
+   list lives there now (it was here AND in api/digest.js). Excluded from stats, NOT from identity: those accounts still log
+   in and resolve via members.find(meId), so the full members array keeps them.
+     isListedMember  — lists, names, the roster table, assignees (what countsInStats was; Inactive stays listed)
+     isCountedMember — the headcount and every denominator: Active/Probationary, not separated (B-1..B-4)
+     headcount()     — counted, with Inactive alongside ("+ N inactive"), never inside */
+// Owner/test/demo + any Project Admin must never be a selectable assignee (mentor/duty/action-item/owner pickers).
+const isAssignable = isListedMember;
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
 /* JOIN-DATE CUTOFF — joinCutoff / expectedAfterJoin now live in shared/attendance.js (WS-4b), so the weekly
    email applies the same cutoff (it had none: a September joiner read as absent for every January drill). */
@@ -3248,9 +3249,9 @@ const assignableMembers = (ms) => (ms || []).filter(isAssignable);
    sql/membership_window). Its message carries no date (a termination date is Department-Admin-only); match the prefix. */
 const isMembershipWindowErr = (e) => /^MEMBERSHIP_WINDOW:/.test(String(e?.message || ""));
 // WS-4b: the rule lives in shared/attendance.js (the weekly email imports it too). This wrapper only supplies WHO is
-// counted — countsInStats, unchanged until WS-4c's shared/members.js. Returns { rows, avg (null = "—"), doneThisYear
+// counted — isCountedMember (WS-4c, C-1: Active/Probationary, not separated). Returns { rows, avg (null = "—"), doneThisYear
 // (the attendance denominator, meetings in), drillsHeld (no meetings), needsRoll }.
-const deptAttendance = (members, sessions, year, range) => deptAttendanceShared(members, sessions, year, range, countsInStats);
+const deptAttendance = (members, sessions, year, range) => deptAttendanceShared(members, sessions, year, range, isCountedMember);
 const pctOrDash = (p) => (p == null ? "—" : `${p}%`);   // C-3: an attendance % nobody was rated for reads "—", never 0%
 // BOARD-EVENT accountability track: board members' attendance at audience='board' sessions
 // (board meetings). Board has a formal duty to attend, so this is the ONE governance stat we
@@ -3262,7 +3263,7 @@ function boardAttendance(members, sessions, year, range) {
     ? (s) => { const iso = toISODate(sessDate(s)); return (!range.from || iso >= range.from) && (!range.to || iso <= range.to); }
     : (s) => s.y === year;
   const doneBoard = (sessions || []).filter((s) => s.done && inScope(s) && (s.attendance || []).length > 0 && s.audience === "board");   // board EVENTS with a roll taken
-  const board = (members || []).filter((m) => countsInStats(m) && isBoard(m.access) && m.status === "Active");   // accountable group: Board Members only (PA/owner/test excluded)
+  const board = (members || []).filter((m) => isCountedMember(m) && isBoard(m.access) && m.status === "Active");   // WS-4c: + not separated   // accountable group: Board Members only (PA/owner/test excluded)
   const rows = board.map((m) => {
     const eligible = doneBoard.filter((s) => expectedAfterJoin(m, s));   // only board events on/after their join date
     const attended = eligible.filter((s) => (s.attendance || []).includes(m.id)).length;
@@ -3689,7 +3690,7 @@ function Announcements({ role, members, meId, notify, style }) {
   const parseMD = (iso) => { if (!iso) return null; const [y, m, d] = String(iso).split("-").map(Number); return (m >= 1 && m <= 12 && d >= 1) ? { y, m, d } : null; };   // parse YYYY-MM-DD without timezone drift; null-safe
   const monthDay = (m, d) => new Date(2000, m - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric" });   // local construction → "January 30"
   const byId = new Map((members || []).map((m) => [m.id, m]));
-  const celebs = (celebrations || []).map((c) => ({ ...c, member: byId.get(c.member_id) })).filter((c) => c.member && countsInStats(c.member));   // known dept member; owner/test excluded
+  const celebs = (celebrations || []).map((c) => ({ ...c, member: byId.get(c.member_id) })).filter((c) => c.member && isListedMember(c.member));   // known dept member; owner/test excluded
   const birthdays = celebs.map((c) => ({ id: c.member_id, name: c.member.name, md: parseMD(c.birthday) })).filter((x) => x.md && x.md.m === curMonth).sort((a, b) => a.md.d - b.md.d);   // this month, by day
   const anniversaries = celebs.map((c) => { const md = parseMD(c.joined_date); return md ? { id: c.member_id, name: c.member.name, md, years: curYear - md.y } : null; }).filter((x) => x && x.md.m === curMonth && x.years >= 1).sort((a, b) => a.md.d - b.md.d);   // this month, real anniversaries (>=1 yr)
   return (
@@ -4131,7 +4132,7 @@ const dailyQuote = (d = new Date()) => {
 function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept }) {
   const me = members.find((m) => m.id === meId) || null;
   // Health numbers (attendance, board attendance, certs, duties, headcount) are derived inside DeptHealthCharts.
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
+  const cm = members.filter(isListedMember);   // real people (owner/test/PA excluded) — every listed member's cert flags, as before
   const todayISO = toISODate(new Date());
   const nextEvent = (sessions || []).filter((s) => !s.done && !s.cancelled && toISODate(sessDate(s)) >= todayISO).sort(sessSort)[0] || null;
   const nextReg = useSessionRegistrations(nextEvent ? [nextEvent.id] : [], notify);   // REGISTER — leaders' heads-up on the next session (plans, not attendance)
@@ -4287,7 +4288,7 @@ function computeInsights({ sessions, members, openItems, openFailures, todayISO 
      later administrative step. */
   const pastAttended = (sessions || []).filter((s) => (s.attendance || []).length > 0 && toISODate(sessDate(s)) <= todayISO);   // past, roll-taken, finalized or not
   const isPureBoard = (m) => isBoard(m.access) && !hasAny(m.access, ["Member", "Officer", "Department Admin", "Project Admin"]);   // governance-only → not expected at drills (overdue-items still flags them)
-  const attendanceGaps = pastAttended.length === 0 ? [] : (members || []).filter((m) => countsInStats(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
+  const attendanceGaps = pastAttended.length === 0 ? [] : (members || []).filter((m) => isCountedMember(m) && m.status === "Active" && !isPureBoard(m)).map((m) => {   // exclude owner/test
     // Only flag members who have attended at least one B4C session; measure the gap from their LAST actual attendance.
     // Never-attended members are skipped entirely — no station-tenure/first-drill fallback (B4C has no history for them yet).
     const attendedISO = pastAttended.filter((s) => eligibleFor(m, s) && (s.attendance || []).includes(m.id)).map((s) => toISODate(sessDate(s))).sort();
@@ -11496,7 +11497,7 @@ function certStatus(exp, neverExpires = false) {
    of the denominator. Audited against production on 2026-10-04: exactly three distinct values —
    Active (101), Probationary (9), Inactive (2). No nulls, no case variants. */
 function certCoverage(members, { includeProbationary = false } = {}) {
-  const cm = (members || []).filter(countsInStats);
+  const cm = (members || []).filter(isCountedMember);   // WS-4c: cert coverage over the headcount (separated out)
   const inScope = cm.filter((m) => m.status === "Active" || (includeProbationary && m.status === "Probationary"));
   const covered = [], uncovered = [];
   let undatedCerts = 0, withCerts = 0, current = 0;
@@ -11803,10 +11804,10 @@ function Roster({ S, role, members, setMembers, sessions, plan, notify, meId, in
   const [bandEl, setBandEl] = useState(null);   // the band's action slot — RosterMembers portals its Print / Add member into it
   const selected = members.find((m) => m.id === sel);
   const update = (m) => setMembers((ms) => ms.map((x) => (x.id === m.id ? m : x)));
-  // Roster DISPLAY excludes PA/owner (countsInStats: not a Project Admin, not an excluded id)
+  // Roster DISPLAY excludes PA/owner (isListedMember: not a Project Admin, not an excluded id)
   // so the self-row now merged into `members` (to fix me-lookups) never surfaces the PA/owner
   // in their own roster. Identity/detail paths (selected, update, MemberDetail) keep full array.
-  const rosterList = members.filter(countsInStats);
+  const rosterList = members.filter(isListedMember);
   if (selected && leader) return <MemberDetail S={S} member={selected} role={role} back={() => setSel(null)} onUpdate={update} sessions={sessions} notify={notify} members={members} meId={meId} dept={dept} />;
   return (
     <PageShell band kicker={(() => { const k = tab === "certs" ? "CERTIFICATIONS" : tab === "attendance" ? "ATTENDANCE" : "ROSTER"; return dept?.name ? `${k} · ${dept.name}` : k; })()} title="Your people, all in one place"
@@ -11840,10 +11841,10 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   const [adding, setAdding] = useState(false); const [nm, setNm] = useState(""); const [rl, setRl] = useState("Firefighter"); const [ph, setPh] = useState(""); const [em, setEm] = useState(""); const [st, setSt] = useState("Active"); const [ax, setAx] = useState(["Member"]); const [mt, setMt] = useState(""); const [bday, setBday] = useState(""); const [sdate, setSdate] = useState(""); const [addr, setAddr] = useState(""); const [showInactive, setShowInactive] = useState(false); const [query, setQuery] = useState(""); const [sendLink, setSendLink] = useState(true);
   useEditorOpen(adding);   // add-member form open — hold the roster refresh
   const sColor = (s) => s === "Active" ? FIRE.greenText : (s === "Probationary" ? FIRE.amberText : FIRE.textMuted);
-  // Live text filter — composes (AND) with countsInStats + the inactive toggle. An active query also reveals inactive matches.
+  // Live text filter — composes (AND) with isListedMember + the inactive toggle. An active query also reveals inactive matches.
   const q = query.trim().toLowerCase();
   const matches = (m) => !q || [m.name, m.email, m.role, (Array.isArray(m.access) ? m.access.join(" ") : "")].some((f) => (f || "").toLowerCase().includes(q));
-  const rosterAll = members.filter(countsInStats);   // full roster (owner/test/PA excluded) — the "of Y" and the stat chips
+  const rosterAll = members.filter(isListedMember);   // full roster (owner/test/PA excluded) — the "of Y"; the Members chip is headcount()
   const rosterTotal = rosterAll.length;
   const [statusTab, setStatusTab] = useState("all");   // facelift tabs: all | Active | Probationary (composes with search + the inactive toggle)
   const [sortBy, setSortBy] = useState("roster");      // roster (today's order) | name | compliance | status
@@ -11852,9 +11853,12 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   const compliance = (m) => { const cs = m.certs || []; return cs.length ? Math.round((cs.filter((c) => certStatus(c.exp, c.neverExpires).rank === 2).length / cs.length) * 100) : null; };
   const rated = rosterAll.map(compliance).filter((v) => v != null);
   const avgCompliance = rated.length ? Math.round(rated.reduce((t, v) => t + v, 0) / rated.length) : null;
-  const nActive = rosterAll.filter((m) => m.status === "Active").length, nProb = rosterAll.filter((m) => m.status === "Probationary").length;
+  // WS-4c B: the stat chips are the HEADCOUNT (shared/members.js — Active/Probationary, not separated; the dashboard and the
+  // email read the same). The "All" tab and "Showing N of Y" stay LIST counts (rosterTotal) — Inactive is listed, never counted.
+  const hc = headcount(members);
+  const nActive = hc.active, nProb = hc.probationary;
   const STATUS_RANK = { Active: 0, Probationary: 1, Inactive: 2 };
-  const filtered = members.filter((m) => countsInStats(m) && (showInactive || !q || m.status !== "Inactive") && matches(m))
+  const filtered = members.filter((m) => isListedMember(m) && (showInactive || !q || m.status !== "Inactive") && matches(m))
     .filter((m) => statusTab === "all" || m.status === statusTab)
     .slice().sort((x, y) => sortBy === "name" ? (x.name || "").localeCompare(y.name || "")
       : sortBy === "compliance" ? (compliance(y) ?? -1) - (compliance(x) ?? -1)
@@ -11944,8 +11948,8 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
     <div>
       {/* Stat chips — members / active / probationary / average cert compliance, from the roster rows on hand. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(150px, 100%), 1fr))", gap: 8, marginBottom: 10 }}>
-        {chip(Users, "Members", String(rosterTotal), `${nActive} active · ${nProb} probationary`)}
-        {chip(CheckCircle2, "Active", String(nActive), rosterTotal ? `${Math.round((nActive / rosterTotal) * 100)}% of roster` : null, nActive ? FIRE.greenText : null)}
+        {chip(Users, "Members", String(hc.counted), `${nActive} active · ${nProb} probationary · + ${hc.inactive} inactive`)}
+        {chip(CheckCircle2, "Active", String(nActive), hc.counted ? `${Math.round((nActive / hc.counted) * 100)}% of members` : null, nActive ? FIRE.greenText : null)}
         {chip(UserPlus, "Probationary", String(nProb), "in onboarding")}
         {chip(Award, "Avg cert compliance", avgCompliance == null ? "—" : `${avgCompliance}%`, rated.length ? `across ${rated.length} with certs on file` : "No certs on file yet", avgCompliance == null ? null : pctColor(avgCompliance))}
       </div>
@@ -11998,7 +12002,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
           {query && <button style={S.clearBtn} onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {[["all", "All", rosterTotal], ["Active", "Active", nActive], ["Probationary", "Probationary", nProb]].map(([k, l, n]) => {
+          {[["all", "All", rosterTotal], ["Active", "Active", rosterAll.filter((m) => m.status === "Active").length], ["Probationary", "Probationary", rosterAll.filter((m) => m.status === "Probationary").length]].map(([k, l, n]) => {   // tab counts = what the tab LISTS
             const on = statusTab === k;
             return <button key={k} onClick={() => setStatusTab(k)} aria-pressed={on} style={{ fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, padding: "5px 11px", background: on ? FIRE.redBright : FIRE.card2Noir, border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, color: on ? FIRE.white : FIRE.textSecondary }}>{l} <b style={FS.num}>{n}</b></button>;
           })}
@@ -12015,13 +12019,13 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
         <div style={{ fontSize: 12, color: FIRE.textMuted }}>Showing {filtered.length} of {rosterTotal}</div>
       {members.some((m) => m.status === "Inactive") && (
         <div style={{ marginLeft: "auto" }}>
-          <button onClick={() => setShowInactive((v) => !v)} aria-pressed={showInactive} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(showInactive ? { borderColor: FIRE.redBright, background: "rgba(200,50,58,.12)", color: FIRE.textPrimary } : null) }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && countsInStats(m)).length})`}</button>
+          <button onClick={() => setShowInactive((v) => !v)} aria-pressed={showInactive} style={{ ...FS.btn, padding: "6px 11px", fontSize: 12, ...(showInactive ? { borderColor: FIRE.redBright, background: "rgba(200,50,58,.12)", color: FIRE.textPrimary } : null) }}>{showInactive ? "Hide inactive" : `Show inactive (${members.filter((m) => m.status === "Inactive" && isListedMember(m)).length})`}</button>
         </div>
       )}
       </div>
       {filtered.length === 0 && <Card padding="15px 16px" style={{ textAlign: "center", color: FIRE.textMuted }}>{query ? `No members match "${query}".` : "No members to show."}</Card>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 12 }}>
-        {/* Owner + test + Project Admin hidden via countsInStats; search + status tab + inactive toggle compose (AND) */}
+        {/* Owner + test + Project Admin hidden via isListedMember; search + status tab + inactive toggle compose (AND) */}
         {filtered.map((m) => { const cp = compliance(m); const ini = (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase(); return (
           <Card key={m.id} className={onOpen ? "rl-card" : undefined} padding="13px" style={{ display: "flex", flexDirection: "column", gap: 9, ...(onOpen ? { cursor: "pointer" } : null) }} onClick={onOpen ? () => onOpen(m.id) : undefined}>
             <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
@@ -13261,7 +13265,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
   const PEOPLE_CAP = 12;
   const pctById = new Map(att90.rows.map((r) => [r.id, r.pct]));   // same 90-day call as the tiles (att90)
   const people = [...members].sort((a, b) => (pctById.get(b.id) ?? -1) - (pctById.get(a.id) ?? -1));
-  const activeMembers = (members || []).filter((m) => countsInStats(m) && m.status === "Active");
+  const activeMembers = (members || []).filter((m) => isCountedMember(m) && m.status === "Active");
   const activeLeaders = activeMembers.filter((m) => isLeader(m.access));
   const recentEvents = (sessions || [])
     .filter((s) => s.done && (s.attendance || []).length > 0 && !isRestrictedEvent(s))   // TRAINING only — leadership EVENTS excluded
@@ -13450,7 +13454,8 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
   const [loading, setLoading] = useState(false); const [out, setOut] = useState(""); const [err, setErr] = useState("");
   const [chiefNote, setChiefNote] = useState("");   // "From the Chief" — the chief's own words; never sent to the AI
   const [presetKey, setPresetKey] = useState("year"); const [range, setRange] = useState(() => presetRange("year"));   // report period; default This Year (prior behavior)
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only; members stays full for names/identity
+  const cm = members.filter(isCountedMember);   // WS-4c: the headcount (B-1..B-4) — counts only; members stays full for names/identity
+  const inactiveN = headcount(members).inactive;   // shown alongside, never inside
   const active = cm.filter((m) => m.status === "Active").length;
   const prob = cm.filter((m) => m.status === "Probationary").length;
   const certs = []; cm.forEach((m) => m.certs.forEach((c) => certs.push(certStatus(c.exp, c.neverExpires).rank)));
@@ -14053,8 +14058,8 @@ function BoardStats({ S, role, members, sessions, dept }) {
   const on = (k) => moduleEnabled(k, dept?.disabled_modules);
 
   // Compliance + roster — AS OF TODAY.
-  const cm = members.filter(countsInStats);
-  const byStatus = (st) => cm.filter((m) => m.status === st).length;
+  const cm = members.filter(isListedMember);   // real people — the join-year figures below, as before
+  const hc = headcount(members);   // WS-4c B: the Members hero is the headcount (Active/Probationary, not separated); Inactive alongside
   const cov = certCoverage(members, { includeProbationary: true });
   // `joined` is free text on the roster; only a leading 4-digit year is trusted. Anything else is
   // not counted as new rather than guessed into this year.
@@ -14179,7 +14184,7 @@ function BoardStats({ S, role, members, sessions, dept }) {
 
       <StatsSection icon={Users} title="Roster" note="As of today">
         <StatsGrid>
-          <HeroTile n={String(cm.length)} label="Members" sub={`${byStatus("Active")} active · ${byStatus("Probationary")} probationary · ${byStatus("Inactive")} inactive`} />
+          <HeroTile n={String(hc.counted)} label="Members" sub={`${hc.active} active · ${hc.probationary} probationary · + ${hc.inactive} inactive`} />
           <HeroTile n={datedJoins ? String(newThisYear) : "—"} label={`Joined in ${thisYear}`} />
         </StatsGrid>
         <div style={{ ...FS.cardNoir, padding: 18, marginTop: 12 }}><RosterBreakdown members={members} /></div>
@@ -22803,7 +22808,7 @@ function oicRoutingLine(it, members) {
 /* AWAITING SIGN-OFF — onboarding_signoff_queue(): items members marked ready. Leadership sees the department's; a person
    or tier approver sees theirs (the database scopes it). The control renders only where can_sign is true. Hidden when
    there is nothing to show. */
-function OnbSignoffQueue({ notify, onChanged, refreshKey, enabled = true }) {
+function OnbSignoffQueue({ notify, onChanged, refreshKey, enabled = true, onCount }) {   // onCount: WS-4c E-2 — the overview tile reads this list's length
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState(false);
   const [tick, setTick] = useState(0);
@@ -22813,7 +22818,7 @@ function OnbSignoffQueue({ notify, onChanged, refreshKey, enabled = true }) {
     supabase.rpc("onboarding_signoff_queue").then(({ data, error }) => {
       if (!alive) return;
       if (error || !Array.isArray(data)) { setErr(true); return; }   // a failed read keeps the last list
-      setErr(false); setRows(data);
+      setErr(false); setRows(data); if (onCount) onCount(data.length);
     });
     return () => { alive = false; };
   }, [tick, refreshKey, enabled]);
@@ -23128,13 +23133,14 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   // The featured member's COMPUTED path (member_probation_status) — resolves the auto kinds (ack / hours / cert) and
   // drives the gate banner, the reviews and the supervised-time log below the checklist.
   const pathFor = person?.id && person.id !== 0 ? person.id : null;
-  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor && probOn);
+  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor && probOn);   // WS-4c E-1 (ruled): computed only with probation ON
   const pstById = Object.fromEntries((pst?.items || []).map((it) => [it.item_id, it]));
   const [boardTick, setBoardTick] = useState(0);
   const [boardRows, setBoardRows] = useState(null);
   const refreshPath = () => { reloadPst(); setBoardTick((t) => t + 1); };
   // manual items: the progress row (as before); auto kinds: the server's computed answer
-  // (probation off: every item is a plain officer sign-off again, whatever its saved kind)
+  // (probation off: every item is a plain officer sign-off again, whatever its saved kind — WS-4c E-1, Ashlea's ruling:
+  // the switch keeps its original meaning; ON = computed for non-manual items, OFF = manual ticks)
   const doneOf = (it) => (probOn && it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
   // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
   const grouped = groupOnboarding(items);
@@ -23169,7 +23175,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   /* ALL-MEMBERS OVERVIEW — the ONE added read: done flags for every PROBATIONARY member in onboarding, so each gets a
      ring and the tiles can total across them. Dept-scoped by the existing onboarding_progress RLS (the same policy the
      per-member read above already relies on); select-only, no write. The featured member keeps its live `checks`. */
-  const probMembers = candidates.filter((m) => m.status === "Probationary");
+  const probMembers = candidates.filter((m) => m.status === "Probationary" && m.separated !== true);   // WS-4c B-4: = dept_probation_board's population
   const probKey = probMembers.map((m) => m.id).join(",");
   const [allProg, setAllProg] = useState(null);   // member_id → Set(item_id done) · null = loading
   const [allProgErr, setAllProgErr] = useState(false);
@@ -23210,7 +23216,10 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   const overview = probMembers.map((m) => ({ m, p: progressOf(m) }));
   const known = overview.filter((o) => o.p);
   const avgDone = known.length ? Math.round(known.reduce((t, o) => t + o.p.pct, 0) / known.length) : null;
-  const awaiting = known.length === overview.length ? known.reduce((t, o) => t + o.p.openSignable, 0) : null;
+  // WS-4c E-2: "Awaiting sign-off" = the onboarding_signoff_queue rows (items members MARKED READY) — the queue card on
+  // this screen reports its length, so the tile and the queue agree by construction. It used to count every open manual item.
+  const [queueN, setQueueN] = useState(null);
+  const awaiting = queueN;
 
   async function toggle(itemId) {   // sign / un-sign through the RPC — it stamps checked_by + checked_at server-side
     if (!canSign || !selId || isSelf) return;   // the RPC refuses a self-sign; the control isn't offered either
@@ -23375,7 +23384,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
           <button style={probOn ? FS.btn : FS.btnPrimary} disabled={togBusy} onClick={() => setProbation(!probOn)}>{togBusy ? "Saving…" : probOn ? "Turn off" : "Turn on"}</button>
         </Card>
       )}
-      {!editMode && <OnbSignoffQueue notify={notify} refreshKey={queueTick} enabled={!!meId} onChanged={() => { setProgTick((t) => t + 1); refreshPath(); }} />}
+      {!editMode && <OnbSignoffQueue notify={notify} refreshKey={queueTick} enabled={!!meId} onCount={setQueueN} onChanged={() => { setProgTick((t) => t + 1); refreshPath(); }} />}
       {/* PROBATION BOARD — ready for the vote + every probationary member's gate (dept_probation_board) */}
       {!editMode && probOn && canSign && <ProbationBoard onPick={(id) => setSelId(id)} refreshKey={boardTick} onRows={setBoardRows} />}
       {!editMode && probOn && !canSign && <div style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "0 0 12px" }}>Probation progress, reviews and supervised time are visible to the Board, Department Admins and Officers. You can set up the checklist and the gate here.</div>}
@@ -23385,7 +23394,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(160px, 100%), 1fr))", gap: 10, marginBottom: 12 }}>
           {[[UserPlus, "In onboarding", String(probMembers.length), "probationary members", null],
             [BarChart3, "Avg completion", avgDone == null ? "—" : `${avgDone}%`, probMembers.length === 1 ? "for the one member" : `across the ${probMembers.length}`, avgDone == null ? null : avgDone >= 100 ? FIRE.greenText : null],
-            [ClipboardCheck, "Awaiting sign-off", awaiting == null ? "—" : String(awaiting), "open items", awaiting ? FIRE.amberText : null]].map(([Icon, l, v, sub, tone]) => (
+            [ClipboardCheck, "Awaiting sign-off", awaiting == null ? "—" : String(awaiting), "marked ready", awaiting ? FIRE.amberText : null]].map(([Icon, l, v, sub, tone]) => (
             <div key={l} style={{ ...FS.cardNoir, borderRadius: 12, padding: "13px 15px", minWidth: 0 }}>
               <div style={{ fontSize: 11, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}><Icon size={14} color={FIRE.textMuted} />{l}</div>
               <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone || FIRE.textPrimary, ...FS.num }}>{v}</div>
@@ -25468,8 +25477,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const doneTraining = sessions.filter((s) => s.done && !isRestrictedEvent(s)).sort((a, b) => sessDate(b) - sessDate(a));   // completed TRAINING, newest first (leadership EVENTS excluded)
   const lastDone = doneTraining[0];   // most recent TRAINING — leadership EVENTS excluded
   const lastAtt = lastDone ? (lastDone.attendance || []).length : 0;
-  const cm = members.filter(countsInStats);   // counted members (owner/test excluded) — counts only, NOT identity/display
-  const totalMembers = cm.length;
+  const totalMembers = headcount(members).counted;   // WS-4c: the headcount (Active/Probationary, not separated) — counts only, NOT identity/display
   const hasAtt = !!lastDone && lastAtt > 0;
   const ringR = 26, ringC = 2 * Math.PI * ringR, ringFrac = totalMembers ? lastAtt / totalMembers : 0;
   // Card 3 — next not-done session from today forward (pure read)
@@ -25776,7 +25784,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
               const att = s.attendance || [];
               const open = openAtt === s.id;
               const restricted = isRestrictedEvent(s);
-              const counted = members.filter(countsInStats);                                                          // same exclusion as every other stat: STATS_EXCLUDED_IDS (owner + Demo/test accounts) + any Project Admin
+              const counted = members.filter(isListedMember);                                                          // same exclusion as every other stat: STATS_EXCLUDED_IDS (owner + Demo/test accounts) + any Project Admin
               const expected = restricted ? counted.filter((m) => rollFor(s, m)) : counted;                           // expected roll: board->Board, leadership->leaders, else everyone
               const roll = restricted ? counted.filter((m) => rollFor(s, m) || att.includes(m.id)) : counted;         // shown = expected ∪ actual attendees (an invited non-member still shows, tagged 'not counted')
               const expCount = expected.length;                                                                        // denominator M
@@ -28659,13 +28667,16 @@ function FundProgress({ name, raised, goal }) {
 // never dropped, so the segments always add up to the roster.
 function RosterBreakdown({ members }) {
   const { grown, transition } = useChartGrow();
-  const cm = (members || []).filter(countsInStats);
-  const n = (st) => cm.filter((m) => m.status === st).length;
-  const active = n("Active"), prob = n("Probationary"), inactive = n("Inactive"), other = cm.length - active - prob - inactive;
+  const cm = (members || []).filter(isListedMember);
+  // WS-4c B: the segments come from headcount() — a SEPARATED member (status still Active) is its own segment, never
+  // inside Active; Inactive stays its own segment, outside the headcount.
+  const hc = headcount(members);
+  const active = hc.active, prob = hc.probationary, inactive = hc.inactive, separated = hc.separated, other = cm.length - active - prob - inactive - separated;
   const parts = [
     { key: "a", n: active, label: "Active", color: FIRE.green },
     { key: "p", n: prob, label: "Probationary", color: FIRE.amberText },
     { key: "i", n: inactive, label: "Inactive", color: FIRE.textMuted },
+    ...(separated ? [{ key: "s", n: separated, label: "Separated", color: FIRE.textMuted2 }] : []),
     ...(other ? [{ key: "o", n: other, label: "Other", color: FIRE.textMuted2 }] : []),
   ];
   if (!cm.length) return <div style={{ fontSize: 13, color: FIRE.textMuted }}>No members on the roster yet.</div>;
@@ -28741,12 +28752,11 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
   const [ovSpan, setOvSpan] = useState(6);
   const ovMonths = useMemo(() => lastMonths(ovSpan), [ovSpan]);
   const ovTrend = useMemo(() => (overview ? attendanceSeries(members, sessions, ovMonths) : null), [overview, members, sessions, ovMonths]);
-  const cm = (members || []).filter(countsInStats);   // counted members (owner/test excluded)
-  const total = cm.length;
-  // Headcount breakdown for the Members tile. The tile shows the FULL roster; the cert/attendance charts carry
-  // their own Active+Probationary denominators. Any status outside the three is listed rather than dropped.
-  const nActive = cm.filter((m) => m.status === "Active").length, nProb = cm.filter((m) => m.status === "Probationary").length;
-  const nInactive = cm.filter((m) => m.status === "Inactive").length, nOther = total - nActive - nProb - nInactive;
+  const cm = (members || []).filter(isListedMember);   // real people (owner/test/PA excluded) — the expired-cert figure below
+  // WS-4c B: the Members tile is the HEADCOUNT — Active + Probationary, not separated (shared/members.js, the email's
+  // rule too). Inactive is shown alongside ("+ N inactive"), never inside. It used to be the full roster, every status.
+  const hc = headcount(members);
+  const total = hc.counted, nActive = hc.active, nProb = hc.probationary, nInactive = hc.inactive;
   // ROSTER COVERAGE, not records — see certCoverage. expdC is "any expired cert exists", a different question.
   let expdC = 0; cm.forEach((m) => (m.certs || []).forEach((c) => { if (certStatus(c.exp, c.neverExpires).rank === 0) expdC++; }));
   const cov = certCoverage(members, { includeProbationary: true });
@@ -28768,7 +28778,7 @@ function DeptHealthCharts({ members, sessions, dept, duties, dutiesLoaded, go, b
     </ChartPanel>
   ) : null;
   const boardTile = <StatTile key="board" icon={Landmark} value={boardRated ? `${boardPct}%` : "\u2014"} tone={boardRated ? pctToneName(boardPct) : "muted"} label="Board attendance" sub={doneBoard.length ? `${doneBoard.length} board meeting${doneBoard.length === 1 ? "" : "s"} this year` : "No board meetings yet this year"} onClick={to("training")} />;
-  const membersTile = <StatTile key="members" icon={Users} value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · ${nInactive} inactive${nOther ? ` · ${nOther} other` : ""}`} onClick={to("roster", "members")} />;
+  const membersTile = <StatTile key="members" icon={Users} value={String(total)} label="Members" sub={`${nActive} active · ${nProb} probationary · + ${nInactive} inactive`} onClick={to("roster", "members")} />;
   const drillsTile = <StatTile key="drills" icon={Flame} value={String(drillsHeld)} label="Drills held" sub="this year" onClick={to("training")} />;
   if (overview) {
     const hoursOn = moduleEnabled("stationhours", dept?.disabled_modules);
