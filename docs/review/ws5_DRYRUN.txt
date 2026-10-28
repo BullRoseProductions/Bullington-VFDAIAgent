@@ -1,0 +1,71 @@
+== WS-5 PGlite dry run (2026-10-28) — mock, not the live DB ==
+  ok  anon grant map: mock = live on all 57 objects (MAINTAIN compared out) 
+  ok  the 19 {public} policies: md5 of the full definition reproduces the LIVE pin for 19/19 
+  ok  storage policy (S-1): md5 reproduces the LIVE pin
+  ok  gate functions: 5/5 bodies md5 = live 
+   (labelled substitution: authenticated matrix pin ×1, service_role matrix pin ×1 → the mock's own md5)
+-- apply (part 1)
+  ok  migration ran; every in-transaction post-condition held
+   state: {"fn_count":5,"total_policies":58,"auth_matrix_md5":"469ace9b94dc51dfe714b67132361e71","anon_acl_entries":0,"verified_presence":2,"default_acl_postgres":{"public:S":"{authenticated=rwU/postgres,service_role=rwU/postgres}","public:f":"{authenticated=X/postgres,service_role=X/postgres}","public:r":"{authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres}","(global):f":"{postgres=X/postgres}"},"public_role_policies":0,"anon_readable_relations":0,"flipped_to_authenticated":19}
+  ok  state row: anon 0 entries / 0 readable, 0 {public} policies, 19 flipped
+  ok  verified untouched (2 in the mock)
+   default ACLs now: public:r={authenticated=arwdDxt/postgres,service_role=arwdDxt/postgres}  public:S={authenticated=rwU/postgres,service_role=rwU/postgres}  public:f={authenticated=X/postgres,service_role=X/postgres}  (global):f={postgres=X/postgres}
+  ok  F-3 forward-fix: a NEW public table / sequence / function grants anon nothing (t false s false f false); authenticated still gets them (t true f true); a new function in another schema has no PUBLIC EXECUTE (false)
+   existing function grants untouched (is_leader acl: {=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres})
+  ok  re-run refused: PREFLIGHT: anon holds nothing and no {public} policy is left — WS-5 looks applied. Refusing.
+-- RETEST (part 1)
+   PASS  O1 anon holds nothing on any public relation or sequence; no {public}/{anon} policy left
+   PASS  O2 the 19 policies: TO authenticated, predicates byte-identical to the pins
+   PASS  O3 authenticated / service_role privileges = the pins; defaults grant anon nothing; no PUBLIC function default
+   — Alpha (mock)
+      PASS  T1 112 relation reads as a real DA + member: identical with the policies TO authenticated or TO public (106 non-empty)
+      PASS  T2 anon refused on all 56 relations
+      PASS  T3 station_presence byte-identical; verified 2 unchanged
+   — Bravo (mock)
+      PASS  T1 112 relation reads as a real DA + member: identical with the policies TO authenticated or TO public (104 non-empty)
+      PASS  T2 anon refused on all 56 relations
+      PASS  T3 station_presence byte-identical; verified 2 unchanged
+   — Charlie (mock, nobody)
+      (no real DA in this department — skipped)
+      (no real member in this department — skipped)
+      SKIP  T1 no real DA or member to read as
+      PASS  T2 anon refused on all 56 relations
+      PASS  T3 station_presence byte-identical; verified 2 unchanged
+   11 passed, 0 failed, 1 skipped
+  ok  RETEST all green
+-- post-apply drift (RETEST must go red)
+  ok  anon re-granted SELECT on certs → FAIL  O1 anon still holds a grant, or a {public}/{anon} policy is left  [7 passed, 4 failed, 1 skipped]
+  ok  a policy put back TO public → FAIL  O1 anon still holds a grant, or a {public}/{anon} policy is left  [9 passed, 2 failed, 1 skipped]
+  ok  a flipped predicate edited → FAIL  O2 a flipped policy's role or predicate is not as pinned  [10 passed, 1 failed, 1 skipped]
+  ok  anon default re-added → FAIL  O3 a privilege matrix or a default ACL is not as intended  [10 passed, 1 failed, 1 skipped]
+  ok  authenticated lost SELECT on duties → FAIL  O3 a privilege matrix or a default ACL is not as intended  [10 passed, 1 failed, 1 skipped]
+-- storage S-1 (part 2)
+  ok  storage migration ran; post-conditions held (other storage policies byte-identical)
+   state: {"policy":"equipment photos upload da or manager INSERT {authenticated}","storage_policies":3,"storage_public_or_anon_policies":0}
+  ok  storage re-run refused: PREFLIGHT: already TO authenticated — S-1 looks applied. Refusing.
+   PASS  S1 the policy is TO authenticated, WITH CHECK identical to the pin
+   PASS  S2 no {public}/{anon} storage policy
+   PASS  S3 storage policy count 3
+   3 passed, 0 failed, 0 skipped   (S3 count localized: live 7 → mock 3)
+  ok  storage RETEST green
+  ok  storage drift (policy back TO public) → RETEST red on S1 + S2
+-- preflight drift (migration must refuse; nothing changes)
+  ok  anon gained INSERT on equipment_issues → PREFLIGHT: the anon grant set drifted from the Step 0 capture. Re-read it before applying. Refusing.
+  ok  anon lost a grant on events → PREFLIGHT: the anon grant set drifted from the Step 0 capture. Re-read it before applying. Refusing.
+  ok  a {public} policy's predicate edited → PREFLIGHT: policy "authenticated can read duties" on duties drifted (or is gone). Refusing.
+  ok  a {public} policy dropped → PREFLIGHT: policy "leaders can read meetings" on meetings drifted (or is gone). Refusing.
+  ok  a 20th {public} policy appeared → PREFLIGHT: expected exactly 19 {public} policies. Refusing.
+  ok  authenticated's matrix moved → PREFLIGHT: authenticated's privilege matrix drifted. Refusing.
+  ok  service_role's matrix moved → PREFLIGHT: service_role's privilege matrix drifted. Refusing.
+  ok  an object not owned by postgres → PREFLIGHT: a public object is not owned by postgres — the default-privileges fix would not cover it. Refusing.
+-- mutated migrations (the in-transaction proof must catch and roll back)
+  ok  a flip that also rewrites the predicate → Post-condition failed: a real member's or DA's row counts changed: 00000000-0000-0000-0000-00000000000a|DA|ai_outputs 2->3; 00000000-0000-0000-0000-00  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a flip that subtly narrows the predicate → Post-condition failed: policy "leaders can read action_items" on action_items is not the same predicate TO authenticated (adf9106eeb243d02200473ef6222  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a flip to the wrong role → Post-condition failed: a real member's or DA's row counts changed: 00000000-0000-0000-0000-00000000000a|DA|ai_outputs 2->0; 00000000-0000-0000-0000-00  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a forgotten flip → Post-condition failed: policy "dept reads ai_outputs" on ai_outputs is not the same predicate TO authenticated (faa12de96e5e67a68845806bddedfb23|{publ  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a forgotten REVOKE → Post-condition failed: anon (or PUBLIC) still holds an ACL entry on a public relation. Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a REVOKE that also hits authenticated → Post-condition failed: a real member's or DA's row counts changed: 00000000-0000-0000-0000-00000000000a|DA|duties 2->E:42501; 00000000-0000-0000-0000-  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a stray GRANT to PUBLIC → Post-condition failed: anon (or PUBLIC) still holds an ACL entry on a public relation. Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  the global PUBLIC function default left out → Post-condition failed: the default privileges are not as intended. Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
+  ok  a write to station_presence → Post-condition failed: verified presence changed (2 -> 1). Rolling back.  [rolled back: 19 {public} policies, 390 anon entries remain]
+ALL EXPECTED

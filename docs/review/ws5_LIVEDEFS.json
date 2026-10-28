@@ -1,0 +1,482 @@
+{
+ "read_at": "2026-10-28",
+ "source": "live ifeptqnlucmvhlvadcpj, read-only",
+ "counts": {
+  "fns": 228,
+  "policies": 181,
+  "verified": 965,
+  "storage_policies": 7
+ },
+ "owners": {
+  "postgres": 93
+ },
+ "anon_acl": {
+  "certs": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "duties": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "events": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "members": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "duty_log": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "meetings": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "profiles": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "documents": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "resources": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "ai_outputs": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "cert_types": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "ai_feedback": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "departments": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "drill_plans": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "maintenance": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "station_log": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "action_items": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "member_notes": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "members_view": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "announcements": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "notifications": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "session_plans": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_type": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "funding_events": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "fundraiser_log": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "member_devices": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "member_private": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "training_plans": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "post_categories": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_checks": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_photos": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "cert_submissions": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "content_calendar": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_issues": "MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE",
+  "equipment_photos": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "onboarding_items": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "station_presence": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "training_officer": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_custody": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_handoff": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_manager": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "training_sessions": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "notification_prefs": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "push_subscriptions": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "recruitment_events": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "session_attendance": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "onboarding_progress": "DELETE,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE",
+  "standard_cert_types": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_check_items": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_maintenance": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_issue_batch": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_check_results": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "equipment_handoff_items": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "apparatus_service_periods": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE",
+  "training_session_audit_seq_seq": "SELECT,UPDATE,USAGE"
+ },
+ "gate_fns": {
+  "is_leader": {
+   "def": "CREATE OR REPLACE FUNCTION public.is_leader()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n",
+   "md5": "3f462af26a46909309f856f769226baa"
+  },
+  "my_member_id": {
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n",
+   "md5": "3f66369c8af7bc07ec59831af6536fee"
+  },
+  "is_dept_admin": {
+   "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n",
+   "md5": "c692e44f62923d2bf4c1a39a21a87bf7"
+  },
+  "my_department_id": {
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n",
+   "md5": "87f546659c3804a943b48e419e017f18"
+  },
+  "is_equipment_manager": {
+   "def": "CREATE OR REPLACE FUNCTION public.is_equipment_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:equipment managers — an ACTIVE registry row for the caller's member row IN the caller's department. Department-scoped\n  -- 2026-10-24 (the is_training_officer() shape): it used to match the caller's email in ANY department, so a manager in one\n  -- department was a manager in every department they belonged to.\n    select exists (\n      select 1 from public.equipment_manager em\n       where em.member_id = public.my_member_id()\n         and em.department_id = public.my_department_id()\n         and em.removed_at is null\n    );\n  $function$\n",
+   "md5": "a979933dac145e88d58331a04d6c918a"
+  }
+ },
+ "default_acl": [
+  {
+   "ns": "public",
+   "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "role": "postgres",
+   "type": "r"
+  },
+  {
+   "ns": "public",
+   "acl": "{postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "role": "postgres",
+   "type": "f"
+  },
+  {
+   "ns": "public",
+   "acl": "{postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres}",
+   "role": "postgres",
+   "type": "S"
+  },
+  {
+   "ns": "public",
+   "acl": "{postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "public",
+   "acl": "{postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  },
+  {
+   "ns": "public",
+   "acl": "{postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "storage",
+   "acl": "{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+   "role": "postgres",
+   "type": "r"
+  },
+  {
+   "ns": "storage",
+   "acl": "{postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "role": "postgres",
+   "type": "f"
+  },
+  {
+   "ns": "storage",
+   "acl": "{postgres=rwU/postgres,anon=rwU/postgres,authenticated=rwU/postgres,service_role=rwU/postgres}",
+   "role": "postgres",
+   "type": "S"
+  },
+  {
+   "ns": "auth",
+   "acl": "{postgres=arwdDxtm/supabase_auth_admin,dashboard_user=arwdDxtm/supabase_auth_admin}",
+   "role": "supabase_auth_admin",
+   "type": "r"
+  },
+  {
+   "ns": "auth",
+   "acl": "{postgres=rwU/supabase_auth_admin,dashboard_user=rwU/supabase_auth_admin}",
+   "role": "supabase_auth_admin",
+   "type": "S"
+  },
+  {
+   "ns": "auth",
+   "acl": "{postgres=X/supabase_auth_admin,dashboard_user=X/supabase_auth_admin}",
+   "role": "supabase_auth_admin",
+   "type": "f"
+  },
+  {
+   "ns": "realtime",
+   "acl": "{postgres=rwU/supabase_admin,dashboard_user=rwU/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "realtime",
+   "acl": "{postgres=X/supabase_admin,dashboard_user=X/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "graphql_public",
+   "acl": "{postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "graphql_public",
+   "acl": "{postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  },
+  {
+   "ns": "graphql_public",
+   "acl": "{postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "extensions",
+   "acl": "{postgres=a*r*w*d*D*x*t*m*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  },
+  {
+   "ns": "extensions",
+   "acl": "{postgres=X*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "extensions",
+   "acl": "{postgres=r*w*U*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "graphql",
+   "acl": "{postgres=arwdDxtm/supabase_admin,anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  },
+  {
+   "ns": "graphql",
+   "acl": "{postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "graphql",
+   "acl": "{postgres=rwU/supabase_admin,anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,service_role=rwU/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "cron",
+   "acl": "{postgres=r*w*U*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "S"
+  },
+  {
+   "ns": "cron",
+   "acl": "{postgres=a*r*w*d*D*x*t*m*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  },
+  {
+   "ns": "cron",
+   "acl": "{postgres=X*/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "f"
+  },
+  {
+   "ns": "realtime",
+   "acl": "{postgres=a*r*wdDxtm/supabase_admin,dashboard_user=arwdDxtm/supabase_admin}",
+   "role": "supabase_admin",
+   "type": "r"
+  }
+ ],
+ "storage_policy": {
+  "cmd": "INSERT",
+  "md5": "fd2ac571628b3755bb0517ff5db09851",
+  "name": "equipment photos upload da or manager",
+  "qual": null,
+  "roles": "{public}",
+  "permissive": "PERMISSIVE",
+  "with_check": "((bucket_id = 'station-documents'::text) AND ((storage.foldername(name))[1] = (my_department_id())::text) AND ((storage.foldername(name))[2] = 'equipment'::text) AND (is_dept_admin() OR is_equipment_manager()))",
+  "table_owner": "supabase_storage_admin"
+ },
+ "auth_matrix_md5": "34269436e943f9e0146f940c44a222ff",
+ "public_policies": [
+  {
+   "cmd": "SELECT",
+   "md5": "fb0895d133d5c4f27e407a628e517f7b",
+   "tbl": "action_items",
+   "name": "leaders can read action_items",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "2226e4850f341e4cca8e54f6a40b7c48",
+   "tbl": "ai_feedback",
+   "name": "leaders can read ai_feedback",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "7e881c6dcccbf5819f46285ed35d4519",
+   "tbl": "ai_outputs",
+   "name": "dept reads ai_outputs",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "c8d594221ad7249b27e5530836f1a46f",
+   "tbl": "certs",
+   "name": "Leaders read all certs",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "76adc646fd3e42ce6b2848082121bc1b",
+   "tbl": "content_calendar",
+   "name": "authenticated can read content_calendar",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "65cd0ced16ade6788d756e39d076108b",
+   "tbl": "documents",
+   "name": "authenticated can read documents",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "6e6ed65eaaee0b9bc2bb11be5b4feeac",
+   "tbl": "duties",
+   "name": "authenticated can read duties",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "md5": "222b2a75b0c5716a6436a5de0fe2150e",
+   "tbl": "equipment",
+   "name": "da or manager manage equipment",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "bccc49398c78eab7a46089dfe756d6b0",
+   "permissive": "PERMISSIVE",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "e6b10bbc3375823e5045c90110048891",
+   "tbl": "equipment",
+   "name": "members read equipment",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "md5": "191d8255342dc0489aa957db734154e6",
+   "tbl": "equipment_photos",
+   "name": "da or manager manage equipment photos",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "bccc49398c78eab7a46089dfe756d6b0",
+   "permissive": "PERMISSIVE",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "fcf3f1a55fa6d2b1d4a3b9d78782cca2",
+   "tbl": "equipment_photos",
+   "name": "members read equipment photos",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "md5": "966a116b301f3f64fadf1487f1190f53",
+   "tbl": "equipment_type",
+   "name": "da or manager manage equipment types",
+   "qual": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "bccc49398c78eab7a46089dfe756d6b0",
+   "permissive": "PERMISSIVE",
+   "with_check": "((is_dept_admin() OR is_equipment_manager()) AND (department_id = my_department_id()))"
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "3870668e5cecb05d129fb2f2b85c1663",
+   "tbl": "equipment_type",
+   "name": "members read equipment types",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "a5ca268f581a0c7fafab99517b71948d",
+   "tbl": "events",
+   "name": "authenticated can read events",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "6aedc8f31a35bdf0271c9f5851f7859b",
+   "tbl": "maintenance",
+   "name": "authenticated can read maintenance",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "03cbac40664a7b34d26d2da57c7f061c",
+   "tbl": "meetings",
+   "name": "leaders can read meetings",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "98393de0953d2ae84ae90c75576a6af5",
+   "tbl": "members",
+   "name": "leaders read members base table",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "a8c4de2c41df0e3ada826362bfb33507",
+   "tbl": "onboarding_progress",
+   "name": "leaders can read onboarding_progress",
+   "qual": "(is_leader() AND (department_id = my_department_id()))",
+   "roles": "{public}",
+   "pred_md5": "6bc7e77ed4ffcc0986bf2545eb3180c1",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "md5": "8421473009c6a890befb4f8e5011c7a6",
+   "tbl": "training_sessions",
+   "name": "authenticated can read training_sessions",
+   "qual": "(department_id = my_department_id())",
+   "roles": "{public}",
+   "pred_md5": "faa12de96e5e67a68845806bddedfb23",
+   "permissive": "PERMISSIVE",
+   "with_check": null
+  }
+ ],
+ "public_grantee_acl": 0,
+ "service_matrix_md5": "62597aaef6ee03b94682a71f101db36c"
+}
