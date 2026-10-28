@@ -117,7 +117,29 @@
 - Imports `isListedMember` / `isCountedMember`. Its **attendance %** is over `isCountedMember`, with separation read from `member_separation(member_id)`: tolerant, never `terminated_on`.
 - **Duty, credited-hours and notification people stay the listed set.** Moving a credited-hours population is WS-4d's lens, and cert currency is F-1.
 
-## 4 · Onboarding (E), client-only
+## 4a · UPDATE after review (Ashlea's rulings, B4C_WS4c_Members_ReviewRecord.md)
+
+- **Who sees `separated`:** leaders only. **Kept as built**; no change.
+- **E-1 is GATED ON THE PROBATION SWITCH:**
+  - **ON:** the server's computed status for non-manual items.
+  - **OFF:** every item stays a plain manual officer tick (the switch's original meaning).
+- **Result in code:** that is main's existing onboarding logic, so the E-1 parts of ca956f1 are **restored to main's text**:
+  - the Plain member card and checklist (raw ticks);
+  - the admin's `useProbationStatus(…, probOn)` + `doneOf` gate;
+  - the overview's tick loader, with the board used only when ON.
+- **The onboarding delta vs main is now only:**
+  - **E-2:** the queue-backed "Awaiting sign-off" tile (`onCount`, "marked ready");
+  - **B-4:** separated members out of the overview population;
+  - two ruling comments.
+- **Tests:** `ws4c_members_test` (31/0) renders the real `OnboardingCard` both ways:
+  - **OFF:** a ticked auto item counts (2 of 3), and `my_probation_status` is never called.
+  - **ON:** the computed status (1 of 3; the ticked-but-unsatisfied item stays open).
+  - It also pins the admin-screen gates.
+- **Unchanged since ca956f1:** the SQL (same sha256), `shared/members.js`, the listed/counted wiring and the digest.
+- **Also fixed:** a **time-of-day flake** in `ws4b_shared_test` (already on main). Its F-2 fixture used `toISOString()` (a UTC date), so after ~7 pm Central "31 days ago" read as 30 and the check went red every evening. It now builds a local calendar date; the suite was green at 19:53 CDT.
+  - Underlying note for WS-4 follow-up: `shared/maint-due.js` reads the date prefix of `last_done_at` (a UTC timestamp). So a task logged after ~7 pm Central counts as done the next day. This is pre-existing in the email, and in the app since 4b.
+
+## 4 · Onboarding (E), client-only — AS FIRST DRAFTED (superseded by 4a for E-1; E-2 unchanged)
 
 - **E-1, open items = the server's computed status** (`my_probation_status` / `member_probation_status` / `dept_probation_board`):
   - the member card (Plain) and the member's own checklist (Plain);

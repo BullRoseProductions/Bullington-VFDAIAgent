@@ -262,7 +262,9 @@ ok("A-2: app, email and daily push all drop a RETIRED rig's maintenance tasks",
   && dig.includes("detectMaintenanceFrom((data || []).filter((r) => !r.apparatus?.deleted_at), today)") && pulse.includes("if (r.apparatus?.deleted_at) continue;"));
 const { maintStatus: maintRule, startOfToday } = await imp("shared/maint-due.js");
 const lbl = (row) => { const s = maintRule(row, startOfToday()); return !s ? "Current" : s.kind === "maint_overdue" ? "Overdue" : "Due soon"; };
-const dIso = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
+// LOCAL calendar date, n days ago. (Was toISOString(): a UTC date, so after ~7 pm Central "31 days ago" read as 30 and this
+// check went red every evening — fixed in WS-4c. The rule reads the date prefix, so the fixture must be a local date.)
+const dIso = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 ok("F-2: never done reads Overdue (was 'Due soon'); 10 of 30 days → Current; 20 of 30 → Due soon (14-day window); 31 → Overdue",
   lbl({ department_id: "d", cadence: "Monthly", last_done_at: null }) === "Overdue" && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(10) }) === "Current"
   && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(20) }) === "Due soon" && lbl({ department_id: "d", cadence: "Monthly", last_done_at: dIso(31) }) === "Overdue");

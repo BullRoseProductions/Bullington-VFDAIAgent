@@ -6,8 +6,9 @@ PASS headcount: 3 counted (2 active + 1 probationary) · 1 inactive alongside ·
 PASS Roster: the Members chip = the headcount (3: 2 active + 1 probationary) · '+ 1 inactive' alongside ["Members32 active · 1 probationary · + 1 inactive","3","2","1","1"] Members32 active · 1 probationary · + 1 inactiveActive267% of membersProbationary1in on
 PASS Roster: the separated member is still LISTED (listed ≠ counted); the Project Admin is not 
 PASS C-1 via B-4: a separated Active member and an Inactive member are out of the attendance rows and the average [["a",100]]
-PASS E-1: the card asks the server (my_probation_status) even with probation OFF 
-PASS E-1: open items = the computed set — the TICKED but unsatisfied 'CPR card on file' stays open (raw ticks said 2 of 3) YOUR ONBOARDING1 of 3 complete33%NEXT UP· CPR card on file· Ride-along x2See your full checklist
+PASS E-1 probation OFF: every item a manual tick — the ticked CPR card counts (2 of 3); only 'Ride-along x2' is next up YOUR ONBOARDING2 of 3 complete67%NEXT UP· Ride-along x2See your full checklist
+PASS E-1 probation OFF: the computed status (my_probation_status) is never asked for []
+PASS E-1 probation ON: the server's computed status — the ticked-but-unsatisfied CPR card stays open (1 of 3) YOUR PATH TO ACTIVEProbation start not setGate not configured1 of 3 complete33%NEXT UP· CPR card on file· Ride-along x2See your full path
 PASS PIN: the owner/test/demo ids live ONLY in shared/members.js (not App.jsx, not digest.js) 
 PASS PIN App: imports isListedMember + isCountedMember + headcount from ../shared/members.js; no countsInStats / STATS_EXCLUDED_IDS of its own 
 PASS PIN digest: imports isListedMember + isCountedMember; no countsInStats / id list of its own 
@@ -20,7 +21,9 @@ PASS PIN count site — Training headcount reads shared/members.js
 PASS PIN count site — the email's attendance % is over isCountedMember (with the separation flag) 
 PASS B-4 plumbing: the app maps members_view.separated; the email reads member_separation(member_id) only — never terminated_on 
 PASS E-2: 'Awaiting sign-off' = the signoff queue's rows (onCount), not the open manual items 
-PASS E-1: the admin overview reads the computed board with probation OFF too; the raw onboarding_progress overview read is gone 
+PASS E-1 gated (admin screen): the featured member's computed status is read only with probation ON, and auto items use it only when ON 
+PASS E-1 gated (admin overview): ON = the board's computed rows, OFF = the manual ticks (bd only when probOn) 
+PASS E-1 gated (member): the dispatcher keeps OFF on the Plain (tick) card + checklist, ON on the computed path 
 PASS B-4: the onboarding overview population drops separated members (= dept_probation_board's) 
 PASS runtime files changed vs origin/main = App.jsx, digest.js, shared/attendance.js (comment) + the new shared/members.js ["api/digest.js","shared/attendance.js","shared/members.js","src/App.jsx"]
 PASS locked-token counts unchanged (App.jsx 132 · digest.js 32 · assistant.js 14) 132 · 32

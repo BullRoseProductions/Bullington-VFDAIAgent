@@ -23011,21 +23011,17 @@ function useMyOnboarding(meId) {
 function OnboardingCardPlain({ S, me, go, dept }) {
   const noir = React.useContext(NoirCtx);   // Noir dashboards: CardHead header
   const moduleOn = moduleEnabled("onboarding", dept?.disabled_modules);
-  const { items, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
-  // WS-4c E-1: OPEN ITEMS = the server's computed status (my_probation_status — the same read as the path card), even
-  // with the probation program off. It used to count raw progress ticks, which ignored the auto items the server resolves.
-  const { st, err: stErr, reload: stReload } = useProbationStatus(null, moduleOn && !!me?.id);
+  const { items, prog, err, reload } = useMyOnboarding(moduleOn ? me?.id : null);
   if (!moduleOn) return null;
   // Retry card only for Probationary: for anyone else a failed read can't say whether they've started,
   // and a long-time member shouldn't get an onboarding error on every flaky resume.
-  if ((err && !items) || (stErr && !st)) return me?.status !== "Probationary" ? null : (
+  if (err && !items) return me?.status !== "Probationary" ? null : (
     <Card padding={16} style={{ marginBottom: 14, fontSize: 13.5, color: FIRE.textMuted }}>
-      Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={() => { reload(); stReload(); }}>Retry</button>
+      Couldn't load your onboarding checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button>
     </Card>
   );
-  if (!items || items.length === 0 || !st) return null;   // the computed status is the answer — never a raw-tick guess while it loads
-  const sat = Object.fromEntries((st.items || []).map((x) => [x.item_id, !!x.satisfied]));
-  const open = items.filter((it) => !sat[it.id]);
+  if (!items || items.length === 0) return null;
+  const open = items.filter((it) => !onboardingDone(it, me, prog));
   if (open.length === 0) return null;
   const done = items.length - open.length;
   if (me?.status !== "Probationary" && done === 0) return null;
@@ -23044,13 +23040,8 @@ function OnboardingCardPlain({ S, me, go, dept }) {
 // The member's own checklist, read-only. Officers sign items on the Onboarding screen; nothing here writes.
 function MyOnboardingPlain({ S, me, members, notify }) {
   const { items, prog, err, reload } = useMyOnboarding(me?.id);
-  // WS-4c E-1: done / open = the server's computed status (my_probation_status), even with probation off — the raw
-  // progress ticks only supply the "Signed by" line now. Until it loads the checklist reads "Loading", never a guess.
-  const { st } = useProbationStatus(null, !!me?.id);
-  const sat = st ? Object.fromEntries((st.items || []).map((x) => [x.item_id, !!x.satisfied])) : null;
-  const isDone = (it) => !!sat?.[it.id];
   const mentorName = me?.mentorId ? (members || []).find((m) => m.id === me.mentorId)?.name : null;
-  const done = (items || []).filter(isDone).length;
+  const done = (items || []).filter((it) => onboardingDone(it, me, prog)).length;
   const total = (items || []).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
   return (
@@ -23058,7 +23049,7 @@ function MyOnboardingPlain({ S, me, members, notify }) {
       <NoirSkin>
       {err && !items ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Couldn't load your checklist. <button style={{ ...FS.btn, padding: "4px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
-      ) : items === null || (items.length > 0 && !sat) ? (
+      ) : items === null ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Loading checklist…</Card>
       ) : total === 0 ? (
         <Card padding={18} style={{ fontSize: 13.5, color: FIRE.textMuted }}>Your department hasn't set up an onboarding checklist yet.</Card>
@@ -23077,12 +23068,12 @@ function MyOnboardingPlain({ S, me, members, notify }) {
           {err && <div style={{ marginTop: 8, fontSize: 12.5, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded. <button style={{ ...FS.btn, padding: "2px 8px" }} onClick={reload}>Retry</button></div>}
         </Card>
         {groupOnboarding(items).map((g) => {
-          const gDone = g.items.filter(isDone).length;
+          const gDone = g.items.filter((it) => onboardingDone(it, me, prog)).length;
           return (
           <Card key={g.category} padding="14px 16px" style={{ marginBottom: 12 }}>
             <CardHead icon={ClipboardCheck} title={g.category} right={<span style={{ color: gDone === g.items.length ? FIRE.greenText : FIRE.textSecondary, ...FS.num }}>{gDone}/{g.items.length}</span>} />
             {g.items.map((it, i) => {
-              const ok = isDone(it);
+              const ok = onboardingDone(it, me, prog);
               const sub = it.is_mentor ? (mentorName ? `Mentor: ${mentorName}` : null) : onboardingSignedLine(prog[it.id], members);
               return (
                 <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: i === g.items.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
@@ -23142,15 +23133,15 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   // The featured member's COMPUTED path (member_probation_status) — resolves the auto kinds (ack / hours / cert) and
   // drives the gate banner, the reviews and the supervised-time log below the checklist.
   const pathFor = person?.id && person.id !== 0 ? person.id : null;
-  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor);   // WS-4c E-1: computed even with probation off
+  const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor && probOn);   // WS-4c E-1 (ruled): computed only with probation ON
   const pstById = Object.fromEntries((pst?.items || []).map((it) => [it.item_id, it]));
   const [boardTick, setBoardTick] = useState(0);
   const [boardRows, setBoardRows] = useState(null);
   const refreshPath = () => { reloadPst(); setBoardTick((t) => t + 1); };
-  // manual items: the progress row (the server's answer for a manual item IS the tick); auto kinds: the server's
-  // computed answer. WS-4c E-1 (ruled): the same EVEN WITH PROBATION OFF — it used to treat every item as a plain
-  // officer sign-off when off, whatever its saved kind (see claude/B4C_WS4c_Draft.md: 0 items in the OFF departments today).
-  const doneOf = (it) => (it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
+  // manual items: the progress row (as before); auto kinds: the server's computed answer
+  // (probation off: every item is a plain officer sign-off again, whatever its saved kind — WS-4c E-1, Ashlea's ruling:
+  // the switch keeps its original meaning; ON = computed for non-manual items, OFF = manual ticks)
+  const doneOf = (it) => (probOn && it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));
   // group DB items by category (categories in first-appearance order; items already ordered by sort_order)
   const grouped = groupOnboarding(items);
   const doneCount = (items || []).filter(doneOf).length;   // mentor item = real mentor_id
@@ -23186,38 +23177,41 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
      per-member read above already relies on); select-only, no write. The featured member keeps its live `checks`. */
   const probMembers = candidates.filter((m) => m.status === "Probationary" && m.separated !== true);   // WS-4c B-4: = dept_probation_board's population
   const probKey = probMembers.map((m) => m.id).join(",");
-  // WS-4c E-1: everyone's progress is the server's computed status (dept_probation_board) — the raw onboarding_progress
-  // overview read is gone. With probation ON the ProbationBoard card hands its rows up; with it OFF nothing renders that
-  // card, so read the board here. A failed read keeps the last-known rows; with none the rings read "—", never a guess.
-  const [boardErr, setBoardErr] = useState(false);
-  const [boardRetry, setBoardRetry] = useState(0);
+  const [allProg, setAllProg] = useState(null);   // member_id → Set(item_id done) · null = loading
+  const [allProgErr, setAllProgErr] = useState(false);
+  const [allTick, setAllTick] = useState(0);
   useEffect(() => {
-    if (probOn || !canSign) return;
+    if (!probMembers.length) { setAllProg(new Map()); return; }
     let alive = true;
-    supabase.rpc("dept_probation_board").then(({ data, error }) => {
-      if (!alive) return;
-      if (error || !Array.isArray(data)) { setBoardErr(true); return; }
-      setBoardErr(false); setBoardRows(data);
-    });
+    supabase.from("onboarding_progress").select("member_id, item_id, done").in("member_id", probMembers.map((m) => m.id))
+      .then(({ data, error }) => {
+        if (!alive) return;
+        if (error || !data) { setAllProgErr(true); return; }   // a failed read keeps the last-known overview
+        const mp = new Map();
+        data.forEach((r) => { if (!r.done) return; if (!mp.has(r.member_id)) mp.set(r.member_id, new Set()); mp.get(r.member_id).add(r.item_id); });
+        setAllProgErr(false); setAllProg(mp);
+      });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [probOn, canSign, boardTick, boardRetry, probKey]);
-  useReconnect(() => { if (boardErr) setBoardRetry((t) => t + 1); });
+  }, [probKey, allTick, selId]);   // re-read on switching members, so a ring left behind after a sign-off is current
+  useReconnect(() => { if (allProgErr) setAllTick((t) => t + 1); });
   // one member's completion: the featured member from live `checks`, everyone else from the overview read
   const progressOf = (m) => {
     if (!items || !items.length) return null;
-    if (String(m.id) === String(selId)) {   // the featured member: live, from doneOf (its computed status + the live ticks)
-      const doneN = items.filter(doneOf).length, open = items.filter((it) => !doneOf(it));
-      return { pct: Math.round((doneN / items.length) * 100), doneN, open };
-    }
-    const bd = (boardRows || []).find((r) => r.member_id === m.id)?.detail;   // WS-4c E-1: computed, probation on OR off
+    if (probOn && canSign && boardRows === null && String(m.id) !== String(selId)) return null;   // wait for the board's computed status ("—"), never a low count
+    const bd = !probOn || String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;
     if (bd && Array.isArray(bd.items) && bd.items.length) {   // the server's computed status — auto kinds + legacy ticks included
       const byId = Object.fromEntries(items.map((it) => [it.id, it]));
       const openD = bd.items.filter((x) => !x.satisfied).map((x) => byId[x.item_id] || { id: x.item_id, label: x.label, is_mentor: false });
       const doneD = bd.items.length - openD.length;
-      return { pct: Math.round((doneD / bd.items.length) * 100), doneN: doneD, open: openD };
+      return { pct: Math.round((doneD / bd.items.length) * 100), doneN: doneD, open: openD, openSignable: openD.filter((it) => !it.is_mentor && (!it.kind || it.kind === "manual")).length };   // board rows exist only when on
     }
-    return null;   // no computed status for them (yet) → "—", never a raw-tick count
+    const doneIds = String(m.id) === String(selId) ? null : (allProg ? (allProg.get(m.id) || new Set()) : undefined);
+    if (doneIds === undefined) return null;
+    const isDone = (it) => (doneIds ? (it.is_mentor ? !!m.mentorId : doneIds.has(it.id)) : doneOf(it));
+    const doneN = items.filter(isDone).length;
+    const open = items.filter((it) => !isDone(it));
+    return { pct: Math.round((doneN / items.length) * 100), doneN, open, openSignable: open.filter((it) => !it.is_mentor && (!probOn || !it.kind || it.kind === "manual")).length };
   };
   const overview = probMembers.map((m) => ({ m, p: progressOf(m) }));
   const known = overview.filter((o) => o.p);
@@ -23408,7 +23402,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
             </div>
           ))}
         </div>
-        {boardErr && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginBottom: 10 }}>Couldn't load everyone's progress — showing what's known. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setBoardRetry((t) => t + 1)}>Retry</button></div>}
+        {allProgErr && <div style={{ fontSize: 12.5, color: FIRE.amberText, marginBottom: 10 }}>Couldn't load everyone's progress — showing what's known. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={() => setAllTick((t) => t + 1)}>Retry</button></div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 12, marginBottom: 12 }}>
           {overview.map(({ m, p }) => {
             const on = String(m.id) === String(selId);

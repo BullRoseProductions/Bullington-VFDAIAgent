@@ -9,8 +9,10 @@
 //   3. RosterMembers (rendered): the Members chip = the headcount (a separated Active member, an Inactive member and a
 //      Project Admin are out; "+ 1 inactive"); the list still shows the separated member (listed ≠ counted)
 //   4. deptAttendance (the App's wrapper): a separated Active member is out of the rows and the average (C-1 via B-4)
-//   5. E-1 — OnboardingCardPlain (rendered): open items = the server's computed status, not the raw ticks (a ticked auto
-//      item the server says is unsatisfied stays OPEN); E-2 — "Awaiting sign-off" = the signoff queue's rows (pins)
+//   5. E-1 GATED ON THE SWITCH (Ashlea's ruling) — OnboardingCard (rendered): probation OFF = every item a manual tick
+//      (a ticked auto item counts; the computed status is never read); probation ON = the server's computed status (the
+//      ticked-but-unsatisfied auto item stays open); the admin screen's gates pinned. E-2 — "Awaiting sign-off" = the
+//      signoff queue's rows (pins)
 //   6. invariants: verified literal counts 132 · 32 · 14; no station_presence line added; Notify held; runtime files
 import { mkdtempSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
@@ -79,10 +81,10 @@ await build({
     b.onResolve({ filter: /NoirDialogs(\.jsx)?$/ }, () => ({ path: "nd", namespace: "fake" }));
     b.onResolve({ filter: /^\.\/apiBase(\.js)?$/ }, () => ({ path: "api", namespace: "fake" }));
     b.onLoad({ filter: /.*/, namespace: "fake" }, (a) => ({ contents: MOCKS[a.path], loader: "js" }));
-    b.onLoad({ filter: /src[\\/]App\.jsx$/ }, (a) => ({ contents: readFileSync(a.path, "utf8") + `\nexport { RosterMembers, OnboardingCardPlain, deptAttendance };\nexport { createRoot } from "react-dom/client";\nexport { act } from "react";\nexport { default as React } from "react";\n`, loader: "jsx", resolveDir: join(root, "src") }));
+    b.onLoad({ filter: /src[\\/]App\.jsx$/ }, (a) => ({ contents: readFileSync(a.path, "utf8") + `\nexport { RosterMembers, OnboardingCard, deptAttendance };\nexport { createRoot } from "react-dom/client";\nexport { act } from "react";\nexport { default as React } from "react";\n`, loader: "jsx", resolveDir: join(root, "src") }));
   } }],
 });
-const { RosterMembers, OnboardingCardPlain, deptAttendance, createRoot, act, React } = await import(pathToFileURL(out).href);
+const { RosterMembers, OnboardingCard, deptAttendance, createRoot, act, React } = await import(pathToFileURL(out).href);
 const S = new Proxy({}, { get: () => ({}) });
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
@@ -113,19 +115,28 @@ globalThis.__sb = { calls: [], writes: [], table: () => [], answer: () => ({ dat
   ok("C-1 via B-4: a separated Active member and an Inactive member are out of the attendance rows and the average", JSON.stringify(r.rows.map((x) => x.id)) === '["a"]' && r.avg === 100, JSON.stringify(r.rows.map((x) => [x.id, x.pct])));
 }
 
-// ---------------------------------------------------------------- 5. E-1: the member card reads the computed status
+// ---------------------------------------------------------------- 5. E-1 GATED ON THE SWITCH (Ashlea's ruling)
+// One member, three items: i1 ticked + satisfied; i2 "CPR card on file" TICKED by an officer but the server (an auto cert
+// item) says unsatisfied; i3 open. Probation OFF → the switch's original meaning, every item a manual tick: 2 of 3, and the
+// computed status is never asked for. Probation ON → the server's computed status: 1 of 3, the CPR card is still open.
 { const ITEMS = [{ id: "i1", category: "Getting started", label: "Read the SOP binder", is_mentor: false, sort_order: 1 },
     { id: "i2", category: "Getting started", label: "CPR card on file", is_mentor: false, sort_order: 2 },
     { id: "i3", category: "Getting started", label: "Ride-along x2", is_mentor: false, sort_order: 3 }];
   const PROG = [{ item_id: "i1", done: true, checked_by: "o1", checked_at: "2026-10-01T00:00:00Z" }, { item_id: "i2", done: true, checked_by: "o1", checked_at: "2026-10-01T00:00:00Z" }];   // i2 TICKED
-  const STATUS = { status: "Probationary", items: [{ item_id: "i1", label: "Read the SOP binder", satisfied: true }, { item_id: "i2", label: "CPR card on file", satisfied: false }, { item_id: "i3", label: "Ride-along x2", satisfied: false }] };
-  globalThis.__sb = { calls: [], writes: [], table: (t) => (t === "onboarding_items" ? ITEMS : t === "onboarding_progress" ? PROG : []),
-    answer: (n) => (n === "my_probation_status" ? { data: STATUS, error: null } : { data: null, error: null }) };
-  const { host, unmount } = await mount(OnboardingCardPlain, { S, me: { id: "me", status: "Probationary" }, go: () => {}, dept: { probation_enabled: false } });
-  const t = norm(host.textContent);
-  ok("E-1: the card asks the server (my_probation_status) even with probation OFF", globalThis.__sb.calls.includes("my_probation_status"));
-  ok("E-1: open items = the computed set — the TICKED but unsatisfied 'CPR card on file' stays open (raw ticks said 2 of 3)", t.includes("1 of 3 complete") && /NEXT UP.*CPR card on file/.test(t), t.slice(0, 220));
-  await unmount(); }
+  const STATUS = { status: "Probationary", gate: {}, items: [{ item_id: "i1", label: "Read the SOP binder", satisfied: true }, { item_id: "i2", label: "CPR card on file", satisfied: false }, { item_id: "i3", label: "Ride-along x2", satisfied: false }] };
+  const world = () => ({ calls: [], writes: [], table: (t) => (t === "onboarding_items" ? ITEMS : t === "onboarding_progress" ? PROG : []),
+    answer: (n) => (n === "my_probation_status" ? { data: STATUS, error: null } : { data: null, error: null }) });
+  globalThis.__sb = world();
+  { const { host, unmount } = await mount(OnboardingCard, { S, me: { id: "me", status: "Probationary" }, go: () => {}, dept: { probation_enabled: false } });
+    const t = norm(host.textContent);
+    ok("E-1 probation OFF: every item a manual tick — the ticked CPR card counts (2 of 3); only 'Ride-along x2' is next up", t.includes("2 of 3 complete") && /NEXT UP.*Ride-along x2/.test(t) && !/NEXT UP.*CPR card on file/.test(t), t.slice(0, 200));
+    ok("E-1 probation OFF: the computed status (my_probation_status) is never asked for", !globalThis.__sb.calls.includes("my_probation_status"), JSON.stringify(globalThis.__sb.calls));
+    await unmount(); }
+  globalThis.__sb = world();
+  { const { host, unmount } = await mount(OnboardingCard, { S, me: { id: "me", status: "Probationary" }, go: () => {}, dept: { probation_enabled: true } });
+    const t = norm(host.textContent);
+    ok("E-1 probation ON: the server's computed status — the ticked-but-unsatisfied CPR card stays open (1 of 3)", globalThis.__sb.calls.includes("my_probation_status") && t.includes("1 of 3 complete") && /NEXT UP.*CPR card on file/.test(t), t.slice(0, 220));
+    await unmount(); } }
 
 // ---------------------------------------------------------------- 2. HELPER PINS + E-2 + invariants
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
@@ -150,9 +161,15 @@ ok("B-4 plumbing: the app maps members_view.separated; the email reads member_se
   src.includes("separated: m.separated ?? null,") && dig.includes('sb.from("member_separation").select("member_id")') && !/select\([^)]*terminated_on/.test(dig) && !/select\([^)]*terminated_on/.test(src));
 ok("E-2: 'Awaiting sign-off' = the signoff queue's rows (onCount), not the open manual items",
   src.includes("onCount={setQueueN}") && src.includes("const awaiting = queueN;") && src.includes("setErr(false); setRows(data); if (onCount) onCount(data.length);") && !src.includes("o.p.openSignable"));
-ok("E-1: the admin overview reads the computed board with probation OFF too; the raw onboarding_progress overview read is gone",
-  src.includes("if (probOn || !canSign) return;") && src.includes('supabase.rpc("dept_probation_board").then(({ data, error }) => {\n      if (!alive) return;\n      if (error || !Array.isArray(data)) { setBoardErr(true); return; }')
-  && !src.includes('supabase.from("onboarding_progress").select("member_id, item_id, done").in("member_id"'));
+ok("E-1 gated (admin screen): the featured member's computed status is read only with probation ON, and auto items use it only when ON",
+  src.includes("const { st: pst, reload: reloadPst } = useProbationStatus(pathFor, !!pathFor && probOn);")
+  && src.includes('const doneOf = (it) => (probOn && it.kind && it.kind !== "manual" ? !!pstById[it.id]?.satisfied : onboardingDone(it, person, checks));'));
+ok("E-1 gated (admin overview): ON = the board's computed rows, OFF = the manual ticks (bd only when probOn)",
+  src.includes('const bd = !probOn || String(m.id) === String(selId) ? null : (boardRows || []).find((r) => r.member_id === m.id)?.detail;')
+  && src.includes('supabase.from("onboarding_progress").select("member_id, item_id, done").in("member_id", probMembers.map((m) => m.id))'));
+ok("E-1 gated (member): the dispatcher keeps OFF on the Plain (tick) card + checklist, ON on the computed path",
+  src.includes("function OnboardingCard(props) { return probationOn(props.dept) ? <OnboardingCardPath {...props} /> : <OnboardingCardPlain {...props} />; }")
+  && src.includes("function MyOnboarding(props) { return probationOn(props.dept) ? <MyOnboardingPath {...props} /> : <MyOnboardingPlain {...props} />; }"));
 ok("B-4: the onboarding overview population drops separated members (= dept_probation_board's)", src.includes('const probMembers = candidates.filter((m) => m.status === "Probationary" && m.separated !== true);'));
 const changed = execSync("git diff --name-only origin/main -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const untracked = execSync("git ls-files --others --exclude-standard -- src api shared", { cwd: root }).toString().trim().split("\n").filter(Boolean);
