@@ -31,6 +31,7 @@ import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, write
 import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
+import { safeHref } from "./safeHref.js";   // M-2: every user-supplied link passes one scheme allowlist (http/https/mailto/tel)
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk } from "./appUpdate";
@@ -591,13 +592,16 @@ function ResourceActions({ r, compact }) {
     </a>
   );
   const b = compact ? iconBtn : labelBtn;
+  // M-2: the website and email are typed in by people — a rejected scheme renders no button at all.
+  const web = safeHref(r.website);
+  const mail = r.email ? safeHref(`mailto:${r.email}`) : null;
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
       {r.phone       && b(`tel:${telDigits(r.phone)}`,       Phone,         "Call")}
       {r.text_number && b(`sms:${telDigits(r.text_number)}`, MessageSquare, "Text")}
       {r.address     && b(mapsHref(r.address),               MapPin,        "Directions")}
-      {r.website     && b(r.website,                          Globe,         "Website")}
-      {r.email       && b(`mailto:${r.email}`,                Mail,          "Email")}
+      {web           && b(web,                                Globe,         "Website")}
+      {mail          && b(mail,                               Mail,          "Email")}
     </div>
   );
 }
@@ -6567,10 +6571,13 @@ function DocViewer({ url, name, path, onClose, footer }) {
           setPdf(doc); setNumPages(doc.numPages); setStatus("ready");
         } else if (k === "docx") {
           const buf = await res.arrayBuffer();
-          const mammoth = await loadMammoth();
+          const [mammoth, { sanitizeDocxHtml }] = await Promise.all([loadMammoth(), import("./safeHtml.js")]);
           const { value } = await mammoth.convertToHtml({ arrayBuffer: buf });   // text + basic structure (NOT pixel-perfect Word)
           if (cancelled) return;
-          if (value && value.trim()) { setHtml(value); setStatus("ready"); } else { setStatus("error"); }   // empty => download fallback
+          // M-1: a Word hyperlink can carry javascript:/data: and mammoth passes it through — the ONLY html that reaches
+          // dangerouslySetInnerHTML below is DOMPurify's output (src/safeHtml.js). Sanitized empty => download fallback.
+          const safe = sanitizeDocxHtml(value);
+          if (safe && safe.trim()) { setHtml(safe); setStatus("ready"); } else { setStatus("error"); }
         } else if (k === "image") {
           setStatus("ready");
         } else {
@@ -10885,12 +10892,15 @@ function DonationFunds({ S, notify, meId, members }) {
                     <button style={{ ...FS.btn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => (giftFor === c.id ? setGiftFor(null) : openGift(c))}>
                       <Plus size={13} /> Record a gift
                     </button>
-                    {c.external_url && (
-                      <a href={c.external_url} target="_blank" rel="noopener noreferrer"
-                         style={{ ...FS.btn, textDecoration: "none", display: "inline-flex", padding: "6px 12px", fontSize: 12.5, color: FIRE.blueText, borderColor: "rgba(120,160,220,.35)" }}>
-                        <ExternalLink size={13} /> Donate page
-                      </a>
-                    )}
+                    {(() => {
+                      const donate = safeHref(c.external_url);   // M-2: typed in by a manager — a rejected scheme renders no link
+                      return donate && (
+                        <a href={donate} target="_blank" rel="noopener noreferrer"
+                           style={{ ...FS.btn, textDecoration: "none", display: "inline-flex", padding: "6px 12px", fontSize: 12.5, color: FIRE.blueText, borderColor: "rgba(120,160,220,.35)" }}>
+                          <ExternalLink size={13} /> Donate page
+                        </a>
+                      );
+                    })()}
                   </div>
 
                   {giftFor === c.id && (
