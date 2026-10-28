@@ -247,7 +247,8 @@ ok("pin: DOMPurify is bundled from node_modules (no CDN script) and imported onl
 const vcount = (p) => (readFileSync(join(root, p), "utf8").match(/verified/gi) || []).length;
 ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", vcount("src/App.jsx") === 132 && vcount("api/digest.js") === 32 && vcount("api/assistant.js") === 14, `${vcount("src/App.jsx")}/${vcount("api/digest.js")}/${vcount("api/assistant.js")}`);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
-const changed = execSync("git diff --name-only origin/main", { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-42): base 84a698c .. reviewed 273eb67 — "vs origin/main" would go red once merged.
+const changed = execSync("git diff --name-only 84a698c 273eb67", { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const allowed = (p) => ["src/App.jsx", "src/safeHref.js", "src/safeHtml.js", "package.json", "package-lock.json"].includes(p) || /^docs\/review\/xss_m1m2/.test(p) || /^claude\/B4C_XSS_M1M2/.test(p);
-ok("only the expected files changed vs origin/main (App.jsx, the two helpers, package.json/lock, this test, the review record) — no DB, no api/", changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
+ok("only the expected files changed in the reviewed range 84a698c..273eb67 (App.jsx, the two helpers, package.json/lock, this test, the review record) — no DB, no api/", changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
 process.exit(process.exitCode || 0);   // the DOM's timers would otherwise keep node alive
