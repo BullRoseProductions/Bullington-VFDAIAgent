@@ -1,0 +1,281 @@
+{
+ "fns": {
+  "is_leader": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_leader()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n",
+   "md5": "3f462af26a46909309f856f769226baa",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "is_announcer": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_announcer()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(email) = lower(auth.email())\n      and status in ('Active','Probationary')\n      and access && array['Department Admin','Project Admin','Officer']::text[]\n  );\n$function$\n",
+   "md5": "eda2b1609930debb7b586ac5afba4779",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "my_member_id": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.my_member_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select id\n  from public.members\n  where lower(email) = lower(auth.email())\n    and status in ('Active','Probationary')\n    and department_id = public.my_department_id()\n  limit 1;\n$function$\n",
+   "md5": "3f66369c8af7bc07ec59831af6536fee",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "v"
+  },
+  "is_dept_admin": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_dept_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.department_id = public.my_department_id()\n      and members.access && array['Project Admin','Department Admin']::text[]\n  );\n$function$\n",
+   "md5": "c692e44f62923d2bf4c1a39a21a87bf7",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "is_leadership": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_leadership()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[]\n  );\n$function$\n",
+   "md5": "cc5861c24398fbf58147fee6f60cf410",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "is_project_admin": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_project_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1\n    from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Project Admin']::text[]\n  );\n$function$\n",
+   "md5": "c9ccab22952488726207085155d7fdef",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "my_department_id": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.my_department_id()\n RETURNS uuid\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    -- 1) the saved active station, ONLY if it's still one of the caller's departments\n    ( select mad.department_id\n        from public.member_active_department mad\n       where mad.email = lower(auth.email())\n         and exists ( select 1 from public.members m\n                       where lower(m.email) = lower(auth.email())\n                         and m.status in ('Active','Probationary')\n                         and m.department_id = mad.department_id ) ),\n    -- 2) else their department, deterministically. Single-dept = byte-identical to the old body.\n    ( select m.department_id\n        from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n       order by m.department_id\n       limit 1 )\n  );\n$function$\n",
+   "md5": "87f546659c3804a943b48e419e017f18",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "v"
+  },
+  "is_department_admin": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_department_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from members\n    where lower(members.email) = lower(auth.email())\n      and members.status in ('Active','Probationary')\n      and members.access && array['Department Admin','Project Admin']::text[]\n  );\n$function$\n",
+   "md5": "99570e1790f233594464da32436c8ca7",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "is_training_manager": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_training_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:training officers — THE training-management gate: a Department Admin in the caller's department (not Project Admin —\n  -- deliberately not is_dept_admin()) OR an active training officer there. Schedules / edits / completes / reopens sessions\n  -- (meetings and board events included), marks the roster, manages categories and the drill-plan library.\n    select exists (\n      select 1 from public.members m\n       where lower(m.email) = lower(auth.email())\n         and m.status in ('Active','Probationary')\n         and m.department_id = public.my_department_id()\n         and m.access && array['Department Admin']::text[]\n    ) or public.is_training_officer();\n  $function$\n",
+   "md5": "472b87b0abca586ba0a13cd615b376fe",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  },
+  "is_equipment_manager": {
+   "acl": "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+   "def": "CREATE OR REPLACE FUNCTION public.is_equipment_manager()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  -- B4C:equipment managers — an ACTIVE registry row for the caller's member row IN the caller's department. Department-scoped\n  -- 2026-10-24 (the is_training_officer() shape): it used to match the caller's email in ANY department, so a manager in one\n  -- department was a manager in every department they belonged to.\n    select exists (\n      select 1 from public.equipment_manager em\n       where em.member_id = public.my_member_id()\n         and em.department_id = public.my_department_id()\n         and em.removed_at is null\n    );\n  $function$\n",
+   "md5": "a979933dac145e88d58331a04d6c918a",
+   "args": "",
+   "config": "{search_path=public}",
+   "secdef": true,
+   "volatile": "s"
+  }
+ },
+ "rels": [
+  "action_items",
+  "aftercall_items",
+  "aftercall_run_items",
+  "aftercall_runs",
+  "ai_feedback",
+  "ai_outputs",
+  "announcements",
+  "apparatus",
+  "apparatus_check_items",
+  "apparatus_check_results",
+  "apparatus_checks",
+  "apparatus_maintenance",
+  "apparatus_maintenance_log",
+  "apparatus_photos",
+  "apparatus_service_periods",
+  "apparatus_tests",
+  "celebrations",
+  "cert_submissions",
+  "cert_types",
+  "certs",
+  "content_calendar",
+  "departments",
+  "document_acknowledgments",
+  "document_series",
+  "document_versions",
+  "documents",
+  "donation_activity",
+  "donation_campaigns",
+  "donation_donors",
+  "drill_plans",
+  "duties",
+  "duty_log",
+  "equipment",
+  "equipment_custody",
+  "equipment_handoff",
+  "equipment_handoff_items",
+  "equipment_issue_batch",
+  "equipment_issues",
+  "equipment_manager",
+  "equipment_photos",
+  "equipment_type",
+  "event_need_claims",
+  "event_needs",
+  "events",
+  "funding_events",
+  "fundraiser_log",
+  "fundraiser_sponsors",
+  "fundraisers",
+  "gear_items",
+  "maintenance",
+  "meetings",
+  "member_active_department",
+  "member_active_station",
+  "member_credentials",
+  "member_devices",
+  "member_notes",
+  "member_private",
+  "member_probation",
+  "member_qualifications",
+  "members",
+  "members_view",
+  "notification_prefs",
+  "notifications",
+  "onboarding_items",
+  "onboarding_progress",
+  "post_categories",
+  "probation_milestones",
+  "profiles",
+  "push_subscriptions",
+  "qualification_types",
+  "readiness_requirements",
+  "recruitment_events",
+  "resources",
+  "session_attendance",
+  "session_plans",
+  "session_registrations",
+  "standard_cert_types",
+  "station_log",
+  "station_presence",
+  "stations",
+  "supervised_sessions",
+  "training_officer",
+  "training_plans",
+  "training_session_audit",
+  "training_sessions"
+ ],
+ "counts": {
+  "fns": 228,
+  "policies": 181,
+  "verified": 966,
+  "departments": 5,
+  "multi_dept_emails": 0
+ },
+ "source": "live ifeptqnlucmvhlvadcpj, read-only",
+ "read_at": "2026-10-28",
+ "matrices": {
+  "exec": {
+   "anon": null,
+   "service_role": "be4f8b109c8da81a6f27b70a91c4fc22",
+   "authenticated": "03905499aecf41738dfed8b3f4f90e9d"
+  },
+  "auth_tables": "34269436e943f9e0146f940c44a222ff",
+  "service_tables": "62597aaef6ee03b94682a71f101db36c"
+ },
+ "departments": {
+  "rls": true,
+  "force": false,
+  "owner": "postgres",
+  "policies": [
+   {
+    "cmd": "UPDATE",
+    "md5": "2f6bfaa802936dbce6fa83f7871a4a1a",
+    "name": "DA can update own department",
+    "qual": "((id = my_department_id()) AND is_dept_admin())",
+    "roles": "{authenticated}",
+    "permissive": "PERMISSIVE",
+    "with_check": "((id = my_department_id()) AND is_dept_admin())"
+   },
+   {
+    "cmd": "SELECT",
+    "md5": "cfd5b3a357ce1cac61482b5c6064cf26",
+    "name": "signed in can read departments",
+    "qual": "true",
+    "roles": "{authenticated}",
+    "permissive": "PERMISSIVE",
+    "with_check": null
+   }
+  ]
+ },
+ "server_version": "17.6",
+ "role_helper_sweep": [
+  {
+   "md5": "eda2b160",
+   "src": " select exists ( select 1 from public.members where lower(email) = lower(auth.email()) and status in ('Active','Probationary') and access && array['Department Admin','Project Admin','Officer']::text[] ); ",
+   "name": "is_announcer",
+   "dept_scoped": false
+  },
+  {
+   "md5": "44083b6d",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.department_id = public.my_department_id() and members.access && array['Board Member','Department Admin','Officer']::text[] ); ",
+   "name": "is_canmanage",
+   "dept_scoped": true
+  },
+  {
+   "md5": "92fa1803",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.department_id = public.my_department_id() and members.access && array['Department Admin','Officer']::text[] ); ",
+   "name": "is_canmanage_ops",
+   "dept_scoped": true
+  },
+  {
+   "md5": "99570e17",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.access && array['Department Admin','Project Admin']::text[] ); ",
+   "name": "is_department_admin",
+   "dept_scoped": false
+  },
+  {
+   "md5": "c692e44f",
+   "src": " select exists ( select 1 from public.members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.department_id = public.my_department_id() and members.access && array['Project Admin','Department Admin']::text[] ); ",
+   "name": "is_dept_admin",
+   "dept_scoped": true
+  },
+  {
+   "md5": "3f462af2",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.department_id = public.my_department_id() and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[] ); ",
+   "name": "is_leader",
+   "dept_scoped": true
+  },
+  {
+   "md5": "cc5861c2",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.access && array['Project Admin','Department Admin','Board Member','Officer']::text[] ); ",
+   "name": "is_leadership",
+   "dept_scoped": false
+  },
+  {
+   "md5": "c9ccab22",
+   "src": " select exists ( select 1 from members where lower(members.email) = lower(auth.email()) and members.status in ('Active','Probationary') and members.access && array['Project Admin']::text[] ); ",
+   "name": "is_project_admin",
+   "dept_scoped": false
+  },
+  {
+   "md5": "472b87b0",
+   "src": " -- B4C:training officers — THE training-management gate: a Department Admin in the caller's department (not Project Admin — -- deliberately not is_dept_admin()) OR an active training officer there. Schedules / edits / completes / reopens sessions -- (meetings and board events included), marks the roster, manages categories and the drill-plan library. select exists ( select 1 from public.members m where lower(m.email) = lower(auth.email()) and m.status in ('Active','Probationary') and m.department_id = public.my_department_id() and m.access && array['Department Admin']::text[] ) or public.is_training_officer(); ",
+   "name": "is_training_manager",
+   "dept_scoped": true
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "def",
+    "name": "is_announcer",
+    "info": "eda2b1609930debb7b586ac5afba4779 · {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} · s · {search_path=public}",
+    "detail": "CREATE OR REPLACE FUNCTION public.is_announcer()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1 from public.members\n    where lower(email) = lower(auth.email())\n      and status in ('Active','Probationary')\n      and access && array['Department Admin','Project Admin','Officer']::text[]\n  );\n$function$\n"
+  },
+  {
+    "kind": "policy",
+    "name": "announcements · announcers insert announcements",
+    "info": "INSERT",
+    "detail": "USING — | CHECK ((department_id = my_department_id()) AND (author_id = my_member_id()) AND is_announcer())"
+  }
+]

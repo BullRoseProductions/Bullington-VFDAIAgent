@@ -1,0 +1,92 @@
+PASS  pins reproduce in the mock: both departments policies (md5 over the full definition)
+PASS  pins reproduce in the mock: all 9 helper functions (md5 of pg_get_functiondef, created from the LIVE text)
+
+— L-2 departments scope
+PASS  before: a DA reads all 3 mock departments; a stranger reads all 3 (the finding)
+PASS  L-2 migration applies (preflight + in-transaction proof pass) and returns its state row  — {"fn_count":10,"total_policies":87,"verified_presence":2,"departments_select":"SELECT {authenticated} USING (id = my_department_id())","departments_update_md5":"2f6bfaa802936dbce6fa83f7871a4a1a"}
+PASS  after: DA of Alpha reads 1 department (Alpha); member of Bravo reads 1 (Bravo); stranger 0
+PASS  after: every other relation unchanged for a DA (certs 2 rows for Alpha's DA, as before)
+PASS  re-run refuses (already applied), changes nothing  — PREFLIGHT: "signed in can read departments" already reads USING (id = my_department_id()) — L-2 look
+PASS  O1 SELECT policy = (id = my_department_id()) TO authenticated; UPDATE policy = its pin
+PASS  O2 a signed-in stranger reads 0 of 3 departments; anon refused / 0
+— Alpha (mock)
+   PASS  T1 DA reads exactly 1 department: their own
+   PASS  T2 DA: the app's own-department read returns their row
+   PASS  T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+   PASS  T1 member reads exactly 1 department: their own
+   PASS  T2 member: the app's own-department read returns their row
+   PASS  T3 member: no-op UPDATE of own department touches 0 row(s), as before
+   PASS  T4 with USING (true) put back (rolled back) the DA reads all 3 — the policy is what scopes it
+— Bravo (mock)
+   PASS  T1 DA reads exactly 1 department: their own
+   PASS  T2 DA: the app's own-department read returns their row
+   PASS  T3 DA: no-op UPDATE of own department touches 1 row(s), as before
+   PASS  T1 member reads exactly 1 department: their own
+   PASS  T2 member: the app's own-department read returns their row
+   PASS  T3 member: no-op UPDATE of own department touches 0 row(s), as before
+   PASS  T4 with USING (true) put back (rolled back) the DA reads all 3 — the policy is what scopes it
+— Charlie (mock, nobody)
+   SKIP  no real DA in this department
+   SKIP  no real member in this department
+16 passed, 0 failed, 2 skipped
+PASS  RETEST: 0 failed (O1 O2 + per department T1 T2 T3 T4; Charlie has nobody → skips)  — PASS  O1 SELECT policy = (id = my_department_id()) TO authenticated; UPDATE policy = its pin | PASS  O2 a signed-in stranger reads 0 of 3 departments; anon refused / 0 | — Alpha (mock) |    PASS  T1 DA reads exactly 1 department: their own |    PASS  T2 DA: the app's own-department read returns their row |    PASS  T3 DA: no-op UPDATE of own department touches 1 row(s), as before |    PASS  T1 mem
+PASS  ROLLBACK: puts USING (true) back and proves the captured md5
+PASS  ROLLBACK refuses a second time (not in the applied state)
+PASS  re-apply after rollback passes preflight again
+PASS  post-apply drift (policy quietly put back to USING (true)) → RETEST FAILs  — FAIL  O1 departments policies not as intended: SELECT|PERMISSIVE|{authenticated}|true| | FAIL  O2 a stranger or anon can still read departments | — Alpha (mock) |    FAIL  T1 DA reads 3 departments (o
+PASS  L-2 preflight refuses: the SELECT policy drifted (another predicate)  — PREFLIGHT: departments policy "signed in can read departments" drifted (or is gone). Refusing.
+PASS  L-2 preflight refuses: the UPDATE policy drifted  — PREFLIGHT: departments policy "DA can update own department" drifted (or is gone). Refusing.
+PASS  L-2 preflight refuses: a third departments policy appeared  — PREFLIGHT: departments should carry exactly 2 policies. Refusing.
+PASS  L-2 preflight refuses: FORCE ROW LEVEL SECURITY turned on  — PREFLIGHT: departments must be RLS on, FORCE off, owned by postgres (so DEFINER readers bypass it). Refusing.
+PASS  L-2 preflight refuses: my_department_id() drifted  — PREFLIGHT: my_department_id() drifted from the capture. Refusing.
+PASS  L-2 preflight refuses: someone has member rows in two departments  — PREFLIGHT (L-2): someone now has member rows in more than one department — the "no live behaviour change" prem
+PASS  L-2 preflight refuses: authenticated lost a grant (matrix drift)  — PREFLIGHT (L-2): authenticated's or service_role's table privileges drifted from the capture. Refusing.
+PASS  L-2 proof catches + rolls back: the new predicate still lets everyone read (id = my_department_id() OR true)  — Post-condition failed: 00000000-0000-0000-0000-00000000000a|DA|departments should read departments 3 -> 1, read 3 -> 3. 
+PASS  L-2 proof catches + rolls back: the new predicate is too narrow (false)  — Post-condition failed: 00000000-0000-0000-0000-00000000000a|DA|departments should read departments 3 -> 1, read 3 -> 0. 
+PASS  L-2 proof catches + rolls back: a stranger-shaped hole (id = my_department_id() OR auth.email() LIKE '%invalid%')  — Post-condition failed: a signed-in stranger still reads 3 departments. Rolling back.
+PASS  L-2 proof catches + rolls back: it also loosens another table's policy  — Post-condition failed: 00000000-0000-0000-0000-00000000000a|DA|certs changed 2 -> 3 (only departments may move). Rolling
+PASS  L-2 proof catches + rolls back: it also edits the UPDATE policy  — Post-condition failed: the UPDATE policy changed. Rolling back.
+PASS  L-2 proof catches + rolls back: it also revokes a grant  — Post-condition failed: a table privilege or EXECUTE matrix changed. Rolling back.
+PASS  L-2 proof catches + rolls back: it also replaces a function  — Post-condition failed: a public function changed. Rolling back.
+
+— L-4 role helpers scope
+PASS  RETEST on the UNMIGRATED database fails S0 and X1 (it has teeth: the DA acting in another department is still a leader)  — FAIL  S0 a helper body / attribute / ACL is not as intended | — Alpha (mock) |    PASS  H1 DA at home: leadership / admin / announcer as their role says |    PASS  H1 officer at home: leadership / admin / announcer as their role says |    PASS  H1 member at home: leadership / admin / announcer as th
+PASS  L-4 migration applies (preflight + in-transaction proof pass) and returns its state row
+PASS  re-run refuses (already applied)  — PREFLIGHT: is_leadership / is_department_admin already delegate — L-4 looks applied. Refusing.
+PASS  S0 the three helpers are the generated department-scoped bodies; attributes + ACL as captured; is_equipment_manager / is_project_admin unchanged
+— Alpha (mock)
+   PASS  H1 DA at home: leadership / admin / announcer as their role says
+   PASS  H1 officer at home: leadership / admin / announcer as their role says
+   PASS  H1 member at home: leadership / admin / announcer as their role says
+   PASS  X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+   PASS  X1 back home: all three true again
+— Bravo (mock)
+   PASS  H1 DA at home: leadership / admin / announcer as their role says
+   PASS  H1 officer at home: leadership / admin / announcer as their role says
+   PASS  H1 member at home: leadership / admin / announcer as their role says
+   PASS  X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0
+   PASS  X1 back home: all three true again
+— Charlie (mock, nobody)
+   SKIP  X1 no real Department Admin here
+11 passed, 0 failed, 1 skipped
+PASS  RETEST: 0 failed — S0, H1 (DA / officer / member at home), X1 (synthesized second department: all three false, RPC refused, audit 0; home again: true)  — PASS  S0 the three helpers are the generated department-scoped bodies; attributes + ACL as captured; is_equipment_manager / is_project_admin unchanged | — Alpha (mock) |    PASS  H1 DA at home: leadership / admin / announcer as their role says |    PASS  H1 officer at home: leadership / admin / announcer as their role says |    PASS  H1 member at home: leadership / admin / announcer as their role says |    PASS  X1 the DA acting in another department (plain member there): all three helpers false, dept_on_station_now refused, training_session_audit 0 |    PASS  X1 back home: all three true agai
+PASS  RETEST rolled everything back (no synthetic member row left, member_active_department empty)
+PASS  ROLLBACK: all three back to their captured md5 + ACL
+PASS  ROLLBACK refuses a second time
+PASS  re-apply after rollback passes
+PASS  post-apply drift (is_announcer quietly put back role-anywhere) → RETEST FAILs (S0 and X1)  — FAIL  S0 a helper body / attribute / ACL is not as intended | — Alpha (mock) |    PASS  H1 DA at home: leadership / admin / announcer as their role says |    PASS  H1 officer at home: leadership / adm
+PASS  THE FIX, directly: an Officer of Alpha acting in Bravo (member there) — before: leadership+announcer true; after: both false  — }truetrue → falsefalse
+PASS  L-4 preflight refuses: is_leadership() drifted  — PREFLIGHT: is_leadership() drifted from the capture (or is gone). Refusing.
+PASS  L-4 preflight refuses: is_leader() (what it will delegate to) drifted  — PREFLIGHT: is_leader() drifted from the capture (or is gone). Refusing.
+PASS  L-4 preflight refuses: is_equipment_manager() drifted  — PREFLIGHT: is_equipment_manager() drifted from the capture (or is gone). Refusing.
+PASS  L-4 preflight refuses: someone has member rows in two departments  — PREFLIGHT (L-4): someone now has member rows in more than one department — the "no live behaviour change" prem
+PASS  L-4 preflight refuses: anon can execute a public function  — PREFLIGHT (L-4): the function EXECUTE matrices drifted from the capture (or anon can execute a public function
+PASS  L-4 proof catches + rolls back: is_leadership becomes `select true` (wider than before)  — Post-condition failed: a member's helper answer changed (member-hash leadership,admin,announcer): 43558f96a962 false,fal
+PASS  L-4 proof catches + rolls back: is_leadership becomes is_dept_admin (narrower: Officers / Board lose it)  — Post-condition failed: a member's helper answer changed (member-hash leadership,admin,announcer): 44dd65db9abe true,fals
+PASS  L-4 proof catches + rolls back: is_announcer loses Officer  — Post-condition failed: a member's helper answer changed (member-hash leadership,admin,announcer): ef9c1269728e true,fals
+PASS  L-4 proof catches + rolls back: it also revokes EXECUTE on a helper from authenticated  — permission denied for function is_leadership
+PASS  L-4 proof catches + rolls back: it also loosens a policy  — Post-condition failed: a real member's or DA's row counts changed: 00000000-0000-0000-0000-00000000000a|DA|events 2->3; 
+PASS  L-4 proof catches + rolls back: it also replaces another function  — Post-condition failed: a public function other than the three changed. Rolling back.
+PASS  L-4 proof catches + rolls back: it makes a helper VOLATILE  — Post-condition failed: is_announcer() is not exactly the generated body, or its STABLE / DEFINER / search_path / ACL cha
+
+48 passed, 0 failed
