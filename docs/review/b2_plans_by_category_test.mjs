@@ -147,9 +147,10 @@ ok("a read-only member sees Plans by category too", !!group("Vehicle Extrication
 // ---------------------------------------------------------------- 5 no new read + fences
 ok("no new read: the screen's RPCs are dept_drill_plans (+ set_drill_plan on create) only", globalThis.__sb.calls.every((c) => ["dept_drill_plans", "set_drill_plan"].includes(c.n)), JSON.stringify([...new Set(globalThis.__sb.calls.map((c) => c.n))]));
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-48): base 2ea5a38 .. reviewed d931538 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} d931538`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const okFile = (p) => ["src/App.jsx", "docs/review/b2_plans_by_category_test.mjs"].includes(p) || /^claude\/B4C_BugB2_/.test(p);
-ok(`only src/App.jsx (+ this test / notes) changed vs ${BASE} — no SQL / API / vercel.json`, changed.every(okFile), JSON.stringify(changed.filter((p) => !okFile(p))));
+ok(`only src/App.jsx (+ this test / notes) changed in the reviewed range ${BASE}..d931538 — no SQL / API / vercel.json`, changed.every(okFile), JSON.stringify(changed.filter((p) => !okFile(p))));
 ok("grouped from plans[].category (the cats set), no new query in the section", src.includes("{plans && cats.length > 0 && (") && src.includes("const inCat = list.filter((p) => p.category === c);"));
 ok("verified untouched: App.jsx 132 (108 raw)", (src.match(new RegExp("verifie" + "d", "gi")) || []).length === 132 && (src.match(new RegExp("verifie" + "d", "g")) || []).length === 108);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
