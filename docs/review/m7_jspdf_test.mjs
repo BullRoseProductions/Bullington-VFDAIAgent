@@ -104,10 +104,11 @@ if (process.env.M7_OLD_ROOT) {
 } else console.log("SKIP  old-vs-new byte comparison (set M7_OLD_ROOT to a main checkout with its node_modules)");
 
 // ---------------------------------------------------------------- 7. fences
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-45): base 7e1addc .. reviewed 0a87254 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} 0a87254`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 // + two older review tests whose bare window stub lacked atob/btoa, which jspdf 4's node build binds at import (test-only)
 const allowed = (p) => ["package.json", "package-lock.json", "src/report.js", "src/printPdf.js", "docs/review/scorecard_ui_test.mjs", "docs/review/onboarding_item_config_ui_test.mjs"].includes(p) || /^docs\/review\/m7_/.test(p) || /^claude\/B4C_M7_/.test(p);
-ok(`only package.json + lockfile + src/report.js + src/printPdf.js (+ M-7 review files) changed vs ${BASE} — no api / shared / sql / vercel.json`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
+ok(`only package.json + lockfile + src/report.js + src/printPdf.js (+ M-7 review files) changed in the reviewed range ${BASE}..0a87254 — no api / shared / sql / vercel.json`, changed.every(allowed), JSON.stringify(changed.filter((p) => !allowed(p))));
 const tok = (p) => (rd(p).match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
