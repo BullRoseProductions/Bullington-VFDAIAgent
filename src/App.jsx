@@ -24209,7 +24209,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const [attachOpen, setAttachOpen] = useState(false);
   const [attachSess, setAttachSess] = useState("");
   const [lastAttached, setLastAttached] = useState(null);   // the session_plans row attach returned — opens in the real plan viewer
-  const featRef = useRef(null), topicRef = useRef(null);
+  const featRef = useRef(null), topicRef = useRef(null), libRef = useRef(null);
   const { setViewPlan, mounts } = usePlanViewer(S, notify, dept);
   useEditorOpen(!!form.topic.trim() || !!form.focus.trim());
   const nameOf = (id) => (members || []).find((m) => m.id === id)?.name || null;
@@ -24234,6 +24234,10 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const cats = [...new Set(list.map((p) => p.category).filter(Boolean))].sort();
   const shown = list.filter((p) => (!catFilter || p.category === catFilter) && (!q.trim() || `${p.title} ${p.category || ""} ${p.audience || ""}`.toLowerCase().includes(q.trim().toLowerCase())));
   const select = (id) => { setSelId(id); setEditing(false); setAttachOpen(false); setLastAttached(null); setTimeout(() => featRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  // Bug B2: "Plans by category" drives the library's existing category filter. Picking a category clears the search too,
+  // so every plan in it lists; picking the active one again shows all. Opening a plan from it also filters to its category.
+  const showCategory = (c) => { setCatFilter(catFilter === c ? "" : c); setQ(""); setTimeout(() => libRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  const openFromCategory = (c, id) => { setCatFilter(c); setQ(""); select(id); };
   // Collapse the open plan (its card again, or the panel's Collapse button). Not while editing — that would drop the edit.
   const collapse = () => { if (editing) return; setSelId(PLAN_CLOSED); setAttachOpen(false); setLastAttached(null); };
   const refresh = async (okText) => { const r = await load(); if (r.error) notify({ kind: "error", title: "Saved — but couldn't refresh the library", text: "Reload to see the change.", details: r.error.message }); else if (okText) notify({ kind: "success", text: okText }); };
@@ -24343,7 +24347,43 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
           </div>
         )}
 
-        <div style={tpSecLab}><BookOpen size={16} color={FIRE.redBright} />Your plan library
+        {/* Bug B2 — PLANS BY CATEGORY: the plan library grouped by each plan's OWN category field (plans[].category, the
+            same values as the filter below; no new read). Deliberately its own section, not inside the "Training
+            categories" card further down: that card is the recurring-requirements tracker (name + cadence, what the
+            Schedule shows as due), a different notion of "category". */}
+        {plans && cats.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={tpSecLab}><FolderOpen size={16} color={FIRE.redBright} />Plans by category
+              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>Each plan's own category — the recurring Training categories are below</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 260px), 1fr))", gap: 10 }}>
+              {cats.map((c) => {
+                const inCat = list.filter((p) => p.category === c);
+                const onC = catFilter === c;
+                return (
+                  <div key={c} data-plan-category={c} style={{ ...FS.cardNoir, borderRadius: 12, padding: "11px 13px", border: `1px solid ${onC ? FIRE.redBright : FIRE.lineNoir}`, minWidth: 0 }}>
+                    <button type="button" aria-pressed={onC} onClick={() => showCategory(c)} title={onC ? "Show all plans" : `Show only ${c} in the library`}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: colorOf(c) }} />
+                      <span style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c}</span>
+                      <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, color: FIRE.textMuted, ...FS.num }}>{inCat.length} plan{inCat.length === 1 ? "" : "s"}</span>
+                    </button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 7 }}>
+                      {inCat.map((p) => (
+                        <button key={p.id} type="button" onClick={() => openFromCategory(c, p.id)}
+                          style={{ background: "none", border: 0, padding: "2px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 12.5, color: FIRE.textSecondary, display: "flex", gap: 6, alignItems: "baseline", minWidth: 0 }}>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span>
+                          <span style={{ flexShrink: 0, fontSize: 10.5, color: p.status === "approved" ? FIRE.greenText : FIRE.amberText }}>{p.status === "approved" ? "Approved" : "Draft"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div ref={libRef} style={tpSecLab}><BookOpen size={16} color={FIRE.redBright} />Your plan library
           {plans && <span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12, ...FS.num }}>{list.length}</span>}
           <span style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
             <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}><Search size={13} color={FIRE.textMuted} style={{ position: "absolute", left: 10, pointerEvents: "none" }} />
