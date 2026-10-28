@@ -24039,16 +24039,43 @@ function PlanSummary({ regs, nameById, compact }) {
    same generation; only the user message carries this form. drillPlanToContent maps that generator's plan object onto
    the five drill_plans.content keys Slice A's attach serializer and the plan viewer read. */
 const DRILL_PLAN_SYSTEM = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"objectives\":string[],\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
+/* Per-step regenerate (StepRegen): rewrite ONE run-of-show step of a draft, the others untouched. The same guardrails as
+   DRILL_PLAN_SYSTEM, narrowed to a single step, through the same gated /api/claude (WS-2: requireMember → input limits →
+   chargeAiCall "claude"). The reply must be exactly one step in the drafting schema; parseStepReply fails closed. */
+const DRILL_STEP_SYSTEM = "You are an experienced volunteer fire/EMS training officer revising ONE step of an existing, SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. If the step involves a high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), say in its actions that it requires a qualified instructor and an assigned safety officer, plus authorization. Rewrite ONLY the step marked >>> TARGET. Keep it consistent with the steps before and after it and with the plan's objectives, equipment and safety notes; do not repeat other steps' content; do not change the rest of the plan. Do not invent specifics the plan does not give (apparatus names or numbers, addresses, people, protocol or SOG numbers) — keep it appropriate to this department, realistic for the stated staffing and apparatus. Keep the minutes close to the original unless the officer's note asks otherwise. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"title\":string,\"minutes\":integer,\"actions\":string[]}. 3-6 actions: short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences.";
 const strList = (a) => (Array.isArray(a) ? a.filter((x) => x != null && String(x).trim() !== "").map((x) => String(x)) : []);
+const oneLine = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
+/* A drafted step { title, minutes, actions[] } → the stored run_of_show entry { t: "Title — N min", d: "a; b; c" }. Shared by
+   drillPlanToContent and the per-step rewrite so the two cannot drift. Single-line and pipe-free so it ROUND-TRIPS: the
+   editor writes "t | d" and splits back at the first "|" (runToText / runFromText), and libRowToPacket reads "— N min" as
+   an integer. For a normal step this is byte-for-byte what drillPlanToContent always produced. */
+function stepToRun(st) {
+  const title = oneLine(st.title || "Step").replace(/\|/g, "/") || "Step";
+  const mins = Number(st.minutes) > 0 ? Math.round(Number(st.minutes)) : 0;
+  return { t: title + (mins ? ` — ${mins} min` : ""), d: strList(st.actions).map(oneLine).filter(Boolean).join("; ") || (typeof st.detail === "string" ? oneLine(st.detail) : "") };
+}
+// The editor's run-of-show text: one step per line, "t | d" (d optional); parsed back at the FIRST "|".
+const runToText = (run) => (run || []).map((x) => (x && typeof x === "object" ? `${x.t || ""}${x.d ? ` | ${x.d}` : ""}` : String(x))).join("\n");
+const runFromText = (text) => tpSplit(text).map((l) => { const i = l.indexOf("|"); return i < 0 ? { t: l, d: "" } : { t: l.slice(0, i).trim(), d: l.slice(i + 1).trim() }; });
+/* The model's reply for ONE step → the step, or null. FAIL-CLOSED: exactly a JSON object with title a non-empty string,
+   minutes a non-negative integer or null, actions a non-empty array of non-blank strings. Anything else → null, and the
+   caller leaves the step exactly as it was (no partial apply). */
+function parseStepReply(text) {
+  const raw = String(text || "").replace(/```json|```/g, "").trim();
+  let o = null;
+  try { o = JSON.parse(raw); } catch { const m = raw.match(/\{[\s\S]*\}/); try { o = m ? JSON.parse(m[0]) : null; } catch { o = null; } }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  if (typeof o.title !== "string" || !oneLine(o.title)) return null;
+  if (!(o.minutes === null || (Number.isInteger(o.minutes) && o.minutes >= 0))) return null;
+  if (!Array.isArray(o.actions) || !o.actions.length || !o.actions.every((a) => typeof a === "string" && oneLine(a))) return null;
+  return { title: o.title, minutes: o.minutes, actions: o.actions };
+}
 function drillPlanToContent(plan) {
   const p = plan || {};
   return {
     summary: typeof p.summary === "string" ? p.summary : "",
     objectives: strList(p.objectives),
-    run_of_show: (Array.isArray(p.steps) ? p.steps : []).filter((s) => s && typeof s === "object").map((s) => ({
-      t: String(s.title || "Step") + (s.minutes ? ` — ${s.minutes} min` : ""),
-      d: strList(s.actions).join("; ") || (typeof s.detail === "string" ? s.detail : ""),
-    })),
+    run_of_show: (Array.isArray(p.steps) ? p.steps : []).filter((s) => s && typeof s === "object").map(stepToRun),
     materials: strList(p.equipment),
     safety: strList(p.safetyNotes),
   };
@@ -24067,23 +24094,60 @@ const tpSplit = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(B
 
 /* Edit a library plan: the documented content keys as plain text (one item per line; a run-of-show line is
    "step | details"). Unknown content keys are carried through untouched. */
-function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel, saveLabel = "Save changes" }) {
+function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel, saveLabel = "Save changes", onRewriteStep }) {
   const c = p.content || {};
   const [f, setF] = useState({
     title: p.title || "", category: p.category || "", duration: p.duration_min ? String(p.duration_min) : "", audience: p.audience || "",
-    summary: c.summary || "", objectives: tpLines(c.objectives), run: (c.run_of_show || []).map((s) => (s && typeof s === "object" ? `${s.t || ""}${s.d ? ` | ${s.d}` : ""}` : String(s))).join("\n"),
+    summary: c.summary || "", objectives: tpLines(c.objectives), run: runToText(c.run_of_show),
     materials: tpLines(c.materials), safety: tpLines(c.safety),
   });
   useEditorOpen(true);   // a half-edited plan: a roster refresh must not drop it
   const up = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  /* PER-STEP REWRITE (drafts only — the parent passes onRewriteStep only for a draft). Rows are derived live from the
+     run-of-show text; a rewrite replaces exactly that one line (every other raw line, blank lines and spacing included,
+     is untouched) in FORM STATE ONLY — nothing is written until Save changes (set_drill_plan). While one runs: the
+     run-of-show box is read-only, every Rewrite button and Save are disabled. If the target line changed meanwhile, or
+     the reply is malformed, nothing is applied. */
+  const [rw, setRw] = useState(null);            // index of the step being rewritten
+  const [rwNote, setRwNote] = useState({});      // per-step optional note
+  const [rwUndo, setRwUndo] = useState({});      // per-step { before, after } — one level
+  const [rwMsg, setRwMsg] = useState(null);      // { i, ok, text }
+  const live = useRef(true); useEffect(() => () => { live.current = false; }, []);
+  const fRef = useRef(f); fRef.current = f;     // the text as it is NOW, when a reply lands
+  const runLines = tpSplit(f.run);
+  // Replace the n-th NON-BLANK line of the raw text (what tpSplit / runFromText count) — raw, so the others stay byte-identical.
+  const swapLine = (raw, n, next) => { let k = -1; return raw.split("\n").map((l) => (l.trim() && ++k === n ? next : l)).join("\n"); };
+  async function rewrite(i) {
+    if (rw != null || !onRewriteStep) return;
+    const before = runLines[i];
+    setRw(i); setRwMsg(null);
+    let step = null;
+    try { step = await onRewriteStep({ title: f.title, category: f.category, duration: f.duration, audience: f.audience, summary: f.summary, objectives: tpSplit(f.objectives) }, runLines, i, (rwNote[i] || "").trim()); }
+    catch { step = null; }
+    if (!live.current) return;
+    setRw(null);
+    if (!step) { setRwMsg({ i, ok: false, text: "Couldn't rewrite that step — it's unchanged. Try again." }); return; }
+    const r = stepToRun(step);
+    const next = `${r.t}${r.d ? ` | ${r.d}` : ""}`;
+    if (tpSplit(fRef.current.run)[i] !== before) { setRwMsg({ i, ok: false, text: "That step changed while it was being rewritten — nothing was applied." }); return; }
+    setF((x) => ({ ...x, run: swapLine(x.run, i, next) }));
+    setRwUndo((u) => ({ ...u, [i]: { before, after: next } }));
+    setRwMsg({ i, ok: true, text: `Step ${i + 1} rewritten — review, then ${saveLabel}.` });
+  }
+  function undoRewrite(i) {
+    const u = rwUndo[i]; if (!u || rw != null) return;
+    setF((x) => (tpSplit(x.run)[i] === u.after ? { ...x, run: swapLine(x.run, i, u.before) } : x));
+    setRwUndo((o) => { const n = { ...o }; delete n[i]; return n; });
+    setRwMsg({ i, ok: true, text: `Step ${i + 1} restored.` });
+  }
   const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
-  const area = (k, t, h = 70) => <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl(t)}<textarea style={{ ...FS.input, minHeight: h, resize: "vertical" }} value={f[k]} onChange={up(k)} /></label>;
+  const area = (k, t, h = 70) => <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl(t)}<textarea style={{ ...FS.input, minHeight: h, resize: "vertical" }} value={f[k]} onChange={up(k)} readOnly={k === "run" && rw != null} aria-busy={k === "run" && rw != null ? true : undefined} /></label>;
   function save() {
     const dur = f.duration.trim() === "" ? null : Number(f.duration);
     onSave({
       title: f.title, category: f.category, duration_min: dur, audience: f.audience,
       content: { ...c, summary: f.summary.trim(), objectives: tpSplit(f.objectives), materials: tpSplit(f.materials), safety: tpSplit(f.safety),
-        run_of_show: tpSplit(f.run).map((l) => { const i = l.indexOf("|"); return i < 0 ? { t: l, d: "" } : { t: l.slice(0, i).trim(), d: l.slice(i + 1).trim() }; }) },
+        run_of_show: runFromText(f.run) },
     });
   }
   return (
@@ -24097,11 +24161,30 @@ function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel, saveLabel
         {area("summary", "Summary", 60)}
         {area("objectives", "Objectives — one per line")}
         {area("run", "Run of show — one step per line, \"step | details\"", 90)}
+        {onRewriteStep && runLines.length > 0 && (
+          <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 6 }} data-rewrite-steps>
+            {lbl("Rewrite a step")}
+            {runLines.map((l, i) => {
+              const head = (l.indexOf("|") < 0 ? l : l.slice(0, l.indexOf("|"))).trim();
+              return (
+                <div key={i} data-rewrite-row={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, color: FIRE.textSecondary, minWidth: 0, flex: "1 1 200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Step {i + 1} · {head}</span>
+                  <input style={{ ...FS.input, flex: "2 1 220px", padding: "6px 9px", fontSize: 12 }} maxLength={300} placeholder="Optional: what to change…" aria-label={`Note for step ${i + 1}`}
+                    value={rwNote[i] || ""} onChange={(e) => setRwNote((n) => ({ ...n, [i]: e.target.value }))} disabled={rw != null} />
+                  <button type="button" style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} disabled={rw != null || busy} onClick={() => rewrite(i)} aria-label={`Rewrite step ${i + 1}`}>
+                    {rw === i ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} color={FIRE.btnIcon} />} Rewrite</button>
+                  {rwUndo[i] && <button type="button" style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} disabled={rw != null} onClick={() => undoRewrite(i)} aria-label={`Undo rewrite of step ${i + 1}`}><RotateCcw size={13} color={FIRE.btnIcon} /> Undo</button>}
+                  {rwMsg && rwMsg.i === i && <span role={rwMsg.ok ? "status" : "alert"} style={{ flexBasis: "100%", fontSize: 11.5, color: rwMsg.ok ? FIRE.greenText : FIRE.redText }}>{rwMsg.text}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {area("materials", "Materials & apparatus — one per line")}
         {area("safety", "Safety — one per line")}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saveLabel}</button>
+        <button style={{ ...FS.btnPrimary, opacity: busy || rw != null ? 0.7 : 1 }} disabled={busy || rw != null} onClick={save}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saveLabel}</button>
         <button style={FS.btn} disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -24261,6 +24344,14 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     setForm((f) => ({ ...f, topic: "", standard: "", focus: "" }));
     await refresh("Drafted — it's in your library as a draft, awaiting review.");
     if (data?.id) select(data.id);
+  }
+  /* Per-step regenerate: ONE "claude" call (the same gated /api/claude as draft()). The whole current run of show goes as
+     read-only context with the target marked; only the target comes back, validated by parseStepReply (null = leave it). */
+  async function rewriteStep(plan, runLines, index, note) {
+    const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Plan: ${plan.title || "(untitled)"}\n${plan.category ? `Category: ${plan.category}\n` : ""}${plan.duration ? `Duration: ${plan.duration} minutes\n` : ""}${plan.audience ? `Who it's for: ${plan.audience}\n` : ""}${plan.summary ? `Summary: ${plan.summary}\n` : ""}${plan.objectives?.length ? `Objectives:\n${plan.objectives.map((o) => `- ${o}`).join("\n")}\n` : ""}`
+      + `Run of show (one step per line, "step | details"):\n${runLines.map((l, k) => `${k === index ? ">>> TARGET " : ""}${k + 1}. ${l}`).join("\n")}\n`
+      + `Rewrite step ${index + 1} only.${note ? `\nNote from the officer: ${note}` : ""}`;
+    return parseStepReply(await callClaude(DRILL_STEP_SYSTEM, user));
   }
   async function act(kind, rpc, args, okText) {
     setBusy(kind);
@@ -24458,7 +24549,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                   <button style={{ ...FS.btn, marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => setViewPlan({ ...lastAttached, kind: "ai" })}><Eye size={14} color={FIRE.btnIcon} /> View as attached</button>
                 </div>
               )}
-              {editing ? <DrillPlanEditForm S={S} p={sel} categories={categories} busy={busy === "edit"} onSave={(v) => saveEdit(sel, v)} onCancel={() => setEditing(false)} /> : (() => {
+              {editing ? <DrillPlanEditForm S={S} p={sel} categories={categories} busy={busy === "edit"} onSave={(v) => saveEdit(sel, v)} onCancel={() => setEditing(false)} onRewriteStep={sel.status === "draft" ? rewriteStep : undefined} /> : (() => {
                 const c = sel.content || {};
                 const objectives = strList(c.objectives), materials = strList(c.materials), safety = strList(c.safety);
                 const run = (Array.isArray(c.run_of_show) ? c.run_of_show : []).map((s) => (s && typeof s === "object" ? s : { t: String(s), d: "" }));
