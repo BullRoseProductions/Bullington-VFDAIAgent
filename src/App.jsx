@@ -24198,6 +24198,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const [drafting, setDrafting] = useState(false);
   const [draftErr, setDraftErr] = useState("");
   const [selId, setSelId] = useState(null);
+  const PLAN_CLOSED = "closed";   // selId sentinel: the detail was collapsed on purpose (no draft fallback) — see `sel`
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [busy, setBusy] = useState(null);               // the action in flight
@@ -24224,10 +24225,15 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   useReconnect(() => { if (loadErr) load(); });
 
   const list = plans || [];
-  const sel = list.find((p) => p.id === selId) || list.find((p) => p.status === "draft") || null;
+  // selId: null = nothing chosen yet (the first draft awaiting review surfaces on its own); PLAN_CLOSED = the member
+  // collapsed the detail on purpose — show nothing, NOT the first draft. Without that sentinel "closed" could not be
+  // expressed: clearing the selection just fell through to a draft, so an opened plan could never be collapsed (bug B1).
+  const sel = selId === PLAN_CLOSED ? null : (list.find((p) => p.id === selId) || list.find((p) => p.status === "draft") || null);
   const cats = [...new Set(list.map((p) => p.category).filter(Boolean))].sort();
   const shown = list.filter((p) => (!catFilter || p.category === catFilter) && (!q.trim() || `${p.title} ${p.category || ""} ${p.audience || ""}`.toLowerCase().includes(q.trim().toLowerCase())));
   const select = (id) => { setSelId(id); setEditing(false); setAttachOpen(false); setLastAttached(null); setTimeout(() => featRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  // Collapse the open plan (its card again, or the panel's Collapse button). Not while editing — that would drop the edit.
+  const collapse = () => { if (editing) return; setSelId(PLAN_CLOSED); setAttachOpen(false); setLastAttached(null); };
   const refresh = async (okText) => { const r = await load(); if (r.error) notify({ kind: "error", title: "Saved — but couldn't refresh the library", text: "Reload to see the change.", details: r.error.message }); else if (okText) notify({ kind: "success", text: okText }); };
 
   async function draft() {
@@ -24351,11 +24357,11 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
         {shown.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 1fr))", gap: 13, marginBottom: 20 }}>
             {shown.map((p) => {
-              const on = sel && sel.id === p.id;
+              const on = !!sel && sel.id === p.id;   // a real boolean: aria-pressed must read "false", not vanish, when nothing is open
               const nObj = (p.content?.objectives || []).length;
               const who = p.status === "approved" ? nameOf(p.approved_by) : nameOf(p.created_by);
               return (
-                <button key={p.id} type="button" onClick={() => select(p.id)} aria-pressed={on}
+                <button key={p.id} type="button" onClick={() => (on ? collapse() : select(p.id))} aria-pressed={on}
                   style={{ ...FS.cardNoir, textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 13, padding: "15px 16px", border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, display: "block", width: "100%" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 9 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 3, marginTop: 4, flexShrink: 0, background: colorOf(p.category) }} />
@@ -24381,8 +24387,9 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 5, flexWrap: "wrap" }}>
                 <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{sel.title}</div>
                 {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={sel.source === "ai" ? "Draft · AI" : sel.source === "library" ? "Draft · library" : "Draft"} tone="warn" />}
+                {!editing && <button type="button" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={collapse} aria-label="Collapse this plan"><ChevronUp size={14} color={FIRE.btnIcon} /> Collapse</button>}
                 {canWrite && !editing && (
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
                     <button style={FS.btn} disabled={!!busy} onClick={() => { setEditing(true); setAttachOpen(false); }}><Pencil size={14} color={FIRE.btnIcon} /> Edit</button>
                     <button style={FS.btn} disabled={!!busy} onClick={() => scheduleWith(sel)}><Plus size={14} color={FIRE.btnIcon} /> Schedule with this plan</button>
                     <button style={FS.btn} disabled={!!busy} onClick={() => setAttachOpen((v) => !v)} aria-expanded={attachOpen}><Calendar size={14} color={FIRE.btnIcon} /> Attach to session</button>
