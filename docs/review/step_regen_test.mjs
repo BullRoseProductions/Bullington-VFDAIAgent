@@ -225,9 +225,10 @@ ok("DRILL_STEP_SYSTEM carries DRILL_PLAN_SYSTEM's guardrails (not a substitute; 
   ["You are NOT a substitute for certified instruction, medical direction, or the AHJ.", "Defer to local protocols, state requirements, and medical direction.", "qualified instructor", "safety officer", "authorization", "realistic for the stated staffing and apparatus", "Do not invent specifics", "Respond with ONLY one valid JSON object"].every((x) => DRILL_STEP_SYSTEM.includes(x))
   && ["You are NOT a substitute for certified instruction, medical direction, or the AHJ.", "Defer to local protocols, state requirements, and medical direction."].every((x) => DRILL_PLAN_SYSTEM.includes(x)));
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean);
+// Pinned to the reviewed range (released as industrial-noir-49): base 2c772d3 .. reviewed a927044 — "vs the base" would go red once later work lands.
+const changed = execSync(`git diff --name-only ${BASE} a927044`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const okFile = (p) => ["src/App.jsx", "docs/review/step_regen_test.mjs"].includes(p) || /^claude\/B4C_StepRegen_/.test(p);
-ok(`only src/App.jsx (+ this test / notes) changed vs ${BASE} — api/claude.js (the WS-2 gate) untouched, no SQL`, changed.every(okFile) && !changed.includes("api/claude.js"), JSON.stringify(changed.filter((p) => !okFile(p))));
+ok(`only src/App.jsx (+ this test / notes) changed in the reviewed range ${BASE}..a927044 — api/claude.js (the WS-2 gate) untouched, no SQL`, changed.every(okFile) && !changed.includes("api/claude.js"), JSON.stringify(changed.filter((p) => !okFile(p))));
 const claudeJs = readFileSync(join(root, "api/claude.js"), "utf8");
 ok("the gate a rewrite goes through: /api/claude → requireMember → inputProblem → chargeAiCall(ctx, \"claude\")", /requireMember\(req, res\)[\s\S]*inputProblem\([\s\S]*chargeAiCall\(ctx, "claude", res\)/.test(claudeJs));
 ok("drafts only: onRewriteStep is passed only when sel.status === \"draft\"", src.includes('onRewriteStep={sel.status === "draft" ? rewriteStep : undefined}'));
