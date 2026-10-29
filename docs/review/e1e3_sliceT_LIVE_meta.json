@@ -1,0 +1,683 @@
+{
+ "counts": {
+  "fns": 228,
+  "policies": 181,
+  "sessions": 176,
+  "verified": 991,
+  "done_with_duration": 31
+ },
+ "ledger": {
+  "5bc40678-2775-46c2-af35-fbc7a37792a6": {
+   "iso": "e9644ac6df7cc252440b92e1fc31bd0f",
+   "attested": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "6d51b00a-bdb0-4807-8e45-70bb53d4dcff": {
+   "iso": "8b9ad8eeb67fff769e73ee79f8d34d59",
+   "attested": "dada3111bc3278777bcc412716e40c03"
+  },
+  "6fbb2d91-62d1-4c4a-997e-ad54c0569974": {
+   "iso": "c61d7dbf280a50a2ff80981621bb2de8",
+   "attested": "7d11f87c8a99aef98db53268eb421054"
+  },
+  "94667450-481c-4f40-a6b6-86e1b364be93": {
+   "iso": "d41d8cd98f00b204e9800998ecf8427e",
+   "attested": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "a8dbabd1-541d-435e-a8cf-5eebc80f2576": {
+   "iso": "da4f1cf54d46150793ab929effb98cba",
+   "attested": "f7fd7efe7a2be16ad77c9502c8bec444"
+  }
+ },
+ "columns": {
+  "members": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "name",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "role",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "access",
+    "null": false,
+    "type": "_text",
+    "default": "ARRAY['Member'::text]"
+   },
+   {
+    "name": "status",
+    "null": true,
+    "type": "text",
+    "default": "'Active'::text"
+   },
+   {
+    "name": "phone",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "joined",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "participation",
+    "null": true,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "email",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "mentor_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "reach_out_member_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "password_set",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   }
+  ],
+  "departments": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "name",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "station",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "primary_color",
+    "null": true,
+    "type": "text",
+    "default": "'#B11E2A'::text"
+   },
+   {
+    "name": "accent_color",
+    "null": true,
+    "type": "text",
+    "default": "'#1F4E79'::text"
+   },
+   {
+    "name": "font",
+    "null": true,
+    "type": "text",
+    "default": "'Modern sans'::text"
+   },
+   {
+    "name": "tagline",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "voice",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "logo_url",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "city",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "disabled_modules",
+    "null": false,
+    "type": "_text",
+    "default": "'{}'::text[]"
+   },
+   {
+    "name": "station_lat",
+    "null": true,
+    "type": "float8",
+    "default": null
+   },
+   {
+    "name": "station_lng",
+    "null": true,
+    "type": "float8",
+    "default": null
+   },
+   {
+    "name": "station_radius_m",
+    "null": false,
+    "type": "int4",
+    "default": "150"
+   },
+   {
+    "name": "week_start_day",
+    "null": false,
+    "type": "int2",
+    "default": "1"
+   },
+   {
+    "name": "max_shift_hours",
+    "null": false,
+    "type": "int2",
+    "default": "10"
+   },
+   {
+    "name": "geofence_enabled",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "geofence_backstop_hours",
+    "null": true,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "expected_shift_hours",
+    "null": true,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "aftercall_enabled",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "probation_enabled",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   }
+  ],
+  "training_plans": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "name",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "cadence",
+    "null": false,
+    "type": "text",
+    "default": "'Monthly'::text"
+   },
+   {
+    "name": "last_iso",
+    "null": true,
+    "type": "date",
+    "default": null
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "color",
+    "null": false,
+    "type": "text",
+    "default": "'#54506B'::text"
+   },
+   {
+    "name": "starts_on",
+    "null": true,
+    "type": "date",
+    "default": null
+   }
+  ],
+  "station_presence": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "member_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "checked_in_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "checked_out_at",
+    "null": true,
+    "type": "timestamptz",
+    "default": null
+   },
+   {
+    "name": "verified",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "source",
+    "null": false,
+    "type": "text",
+    "default": "'geo'::text"
+   },
+   {
+    "name": "kind",
+    "null": false,
+    "type": "text",
+    "default": "'standby'::text"
+   },
+   {
+    "name": "session_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "auto_closed",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "offsite_label",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "location_confirmed",
+    "null": true,
+    "type": "bool",
+    "default": null
+   },
+   {
+    "name": "approved_at",
+    "null": true,
+    "type": "timestamptz",
+    "default": null
+   },
+   {
+    "name": "approved_by",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "station_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "fence_exit_at",
+    "null": true,
+    "type": "timestamptz",
+    "default": null
+   }
+  ],
+  "training_sessions": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "plan_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "title",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "date",
+    "null": false,
+    "type": "date",
+    "default": null
+   },
+   {
+    "name": "done",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "signin_token",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "signin_open",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "series_id",
+    "null": true,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "audience",
+    "null": false,
+    "type": "text",
+    "default": "'everyone'::text"
+   },
+   {
+    "name": "start_time",
+    "null": true,
+    "type": "time",
+    "default": null
+   },
+   {
+    "name": "counts_toward_attendance",
+    "null": false,
+    "type": "bool",
+    "default": "true"
+   },
+   {
+    "name": "location_lat",
+    "null": true,
+    "type": "float8",
+    "default": null
+   },
+   {
+    "name": "location_lng",
+    "null": true,
+    "type": "float8",
+    "default": null
+   },
+   {
+    "name": "location_radius_m",
+    "null": true,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "location_label",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "is_offsite",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "duration_min",
+    "null": true,
+    "type": "int2",
+    "default": null
+   },
+   {
+    "name": "is_meeting",
+    "null": false,
+    "type": "bool",
+    "default": "false"
+   },
+   {
+    "name": "status",
+    "null": false,
+    "type": "text",
+    "default": "'scheduled'::text"
+   }
+  ],
+  "session_attendance": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "session_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "member_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "checked_in_at",
+    "null": true,
+    "type": "timestamptz",
+    "default": null
+   },
+   {
+    "name": "created_at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   }
+  ],
+  "training_session_audit": [
+   {
+    "name": "id",
+    "null": false,
+    "type": "uuid",
+    "default": "gen_random_uuid()"
+   },
+   {
+    "name": "seq",
+    "null": false,
+    "type": "int8",
+    "default": null
+   },
+   {
+    "name": "department_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "session_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "action",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "actor_id",
+    "null": false,
+    "type": "uuid",
+    "default": null
+   },
+   {
+    "name": "actor_name",
+    "null": false,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "at",
+    "null": false,
+    "type": "timestamptz",
+    "default": "now()"
+   },
+   {
+    "name": "reason",
+    "null": true,
+    "type": "text",
+    "default": null
+   },
+   {
+    "name": "changes",
+    "null": false,
+    "type": "jsonb",
+    "default": "'{}'::jsonb"
+   },
+   {
+    "name": "roster_added",
+    "null": false,
+    "type": "_uuid",
+    "default": "'{}'::uuid[]"
+   },
+   {
+    "name": "roster_removed",
+    "null": false,
+    "type": "_uuid",
+    "default": "'{}'::uuid[]"
+   },
+   {
+    "name": "roster_before",
+    "null": false,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "roster_after",
+    "null": false,
+    "type": "int4",
+    "default": null
+   },
+   {
+    "name": "roster_snapshot",
+    "null": true,
+    "type": "_uuid",
+    "default": null
+   }
+  ]
+ },
+ "read_at": "2026-10-29 23:03:18.605812+00",
+ "triggers": {
+  "training_session_lock_guard": "CREATE TRIGGER training_session_lock_guard BEFORE INSERT OR UPDATE ON public.training_sessions FOR EACH ROW EXECUTE FUNCTION tg_training_session_lock_guard()",
+  "trg_close_training_presence_on_done": "CREATE TRIGGER trg_close_training_presence_on_done AFTER UPDATE ON public.training_sessions FOR EACH ROW WHEN (((old.done IS DISTINCT FROM new.done) AND (new.done = true))) EXECUTE FUNCTION close_training_presence_on_done()",
+  "trg_close_training_presence_on_delete": "CREATE TRIGGER trg_close_training_presence_on_delete BEFORE DELETE ON public.training_sessions FOR EACH ROW EXECUTE FUNCTION close_training_presence_on_session_delete()",
+  "training_session_date_membership_window": "CREATE TRIGGER training_session_date_membership_window BEFORE UPDATE OF date ON public.training_sessions FOR EACH ROW EXECUTE FUNCTION tg_training_session_date_membership_window()"
+ },
+ "constraints": {
+  "training_sessions_pkey": "PRIMARY KEY (id)",
+  "training_sessions_plan_id_fkey": "FOREIGN KEY (plan_id) REFERENCES training_plans(id) ON DELETE SET NULL",
+  "training_sessions_status_check": "CHECK ((status = ANY (ARRAY['scheduled'::text, 'cancelled'::text])))",
+  "training_sessions_location_pair": "CHECK (((location_lat IS NULL) = (location_lng IS NULL)))",
+  "training_sessions_audience_check": "CHECK ((audience = ANY (ARRAY['everyone'::text, 'leadership'::text, 'board'::text])))",
+  "training_sessions_duration_range": "CHECK (((duration_min IS NULL) OR ((duration_min >= 1) AND (duration_min <= 1440))))",
+  "training_sessions_department_id_fkey": "FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE",
+  "training_sessions_coords_require_offsite": "CHECK ((is_offsite OR ((location_lat IS NULL) AND (location_lng IS NULL))))"
+ },
+ "policies_md5": "a9947383b4635e2e54fa89fa81947fc9"
+}

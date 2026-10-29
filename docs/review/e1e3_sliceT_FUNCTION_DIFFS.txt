@@ -1,0 +1,183 @@
+# E1/E3 Slice T — the three function changes as unified diffs (live capture → generated DRAFT text)
+# Generated from docs/review/e1e3_sliceT_LIVE_fns.json and sql/e1e3_sliceT_session_times_DRAFT.sql. Evidence only.
+
+## guard
+--- guard (live)
++++ guard (DRAFT)
+@@ -11,6 +11,8 @@
+     -- Slice 7: status ('scheduled'/'cancelled') changes ONLY under the flag (approve_session_change), on any row, and a new
+     -- row is always 'scheduled'. date / start_time stay free on an upcoming, unattended session (plain Edit — ruling 3b).
+     -- Applies to EVERY writer, the table owner included — a hand fix in the SQL editor must set the flag on purpose.
++    -- B4C:E1E3 slice T — actual_start / actual_end / setup_min follow duration_min's rule: set once on a not-yet-finalized row
++    -- (Finalize), Correct-only after.
+     begin
+       if coalesce(current_setting('b4c.session_correction', true), '') = 'on' then return NEW; end if;
+       if TG_OP = 'INSERT' then
+@@ -36,7 +38,13 @@
+          or NEW.department_id is distinct from OLD.department_id
+          or NEW.series_id is distinct from OLD.series_id
+          or (NEW.duration_min is distinct from OLD.duration_min
+-             and not (OLD.duration_min is null and OLD.done is not true)) then
++             and not (OLD.duration_min is null and OLD.done is not true))
++         or (NEW.actual_start is distinct from OLD.actual_start
++             and not (OLD.actual_start is null and OLD.done is not true))
++         or (NEW.actual_end is distinct from OLD.actual_end
++             and not (OLD.actual_end is null and OLD.done is not true))
++         or (NEW.setup_min is distinct from OLD.setup_min
++             and not (OLD.setup_min is null and OLD.done is not true)) then
+         raise exception 'LOCKED_SESSION: this session is finalized, cancelled or has attendance — change it with Correct (or Restore), which is logged.'
+           using errcode = '42501';
+       end if;
+
+## correct
+--- correct (live)
++++ correct (DRAFT)
+@@ -8,6 +8,8 @@
+     -- C1 hybrid: a training manager within 14 days of the drill (Central); older = Department Admin only (D1: the ROLE,
+     -- never Project Admin). C2: a reason of 10+ characters. Fields: §2a whitelist only. Roster: add/remove in the same
+     -- transaction; the membership-window triggers still run, and a refusal there aborts the whole call (nothing written).
++    -- B4C:E1E3 slice T — actual_start / actual_end / setup_min are correctable. With times present the length is DERIVED from
++    -- them (the CHECK enforces it); a duration_min that disagrees is refused. Clearing both times leaves a length-only session.
+     declare
+       v_dept   uuid := public.my_department_id();
+       v_me     uuid := public.my_member_id();
+@@ -15,11 +17,13 @@
+       v_reason text := btrim(coalesce(p_reason, ''));
+       v_chg    jsonb := coalesce(p_changes, '{}'::jsonb);
+       v_keys   constant text[] := array['title', 'date', 'start_time', 'duration_min', 'audience', 'plan_id',
+-                                        'counts_toward_attendance', 'is_meeting', 'is_offsite', 'location_label'];
++                                        'counts_toward_attendance', 'is_meeting', 'is_offsite', 'location_label',
++                                        'actual_start', 'actual_end', 'setup_min'];
+       s        public.training_sessions%rowtype;
+       v_bad    text[];
+       n_title text; n_date date; n_start time; n_dur integer; n_aud text; n_plan uuid;
+       n_counts boolean; n_meet boolean; n_off boolean; n_label text;
++      n_astart time; n_aend time; n_setup integer; v_span integer;
+       v_diff   jsonb := '{}'::jsonb;
+       v_add    uuid[]; v_rem uuid[];
+       v_before integer; v_after integer;
+@@ -51,10 +55,24 @@
+       n_meet   := case when v_chg ? 'is_meeting'   then (v_chg->>'is_meeting')::boolean else s.is_meeting end;
+       n_off    := case when v_chg ? 'is_offsite'   then (v_chg->>'is_offsite')::boolean else s.is_offsite end;
+       n_label  := case when v_chg ? 'location_label' then nullif(btrim(v_chg->>'location_label'), '') else s.location_label end;
++      n_astart := case when v_chg ? 'actual_start' then nullif(v_chg->>'actual_start', '')::time else s.actual_start end;
++      n_aend   := case when v_chg ? 'actual_end'   then nullif(v_chg->>'actual_end', '')::time else s.actual_end end;
++      n_setup  := case when v_chg ? 'setup_min'    then nullif(v_chg->>'setup_min', '')::integer else s.setup_min end;
+       if n_title is null or n_title = '' then raise exception 'BAD_VALUE: a session needs a title.'; end if;
+       if n_date is null then raise exception 'BAD_VALUE: a session needs a date.'; end if;
+       if n_counts is null or n_off is null then raise exception 'BAD_VALUE: counts_toward_attendance / is_offsite cannot be blank.'; end if;
+       if n_dur is not null and (n_dur < 1 or n_dur > 1440) then raise exception 'BAD_VALUE: a length is 1–1440 minutes.'; end if;
++      if (n_astart is null) <> (n_aend is null) then raise exception 'BAD_VALUE: the actual start and end go together — give both or clear both.'; end if;
++      if n_astart is not null then
++        if n_aend = n_astart then raise exception 'BAD_VALUE: the actual end must differ from the start.'; end if;
++        if extract(second from n_astart) <> 0 or extract(second from n_aend) <> 0 then raise exception 'BAD_VALUE: actual times are whole minutes.'; end if;
++        v_span := ((extract(epoch from (n_aend - n_astart)) / 60)::integer + case when n_aend <= n_astart then 1440 else 0 end);   -- an end at or before the start ran past midnight
++        if v_chg ? 'duration_min' and n_dur is distinct from v_span then
++          raise exception 'BAD_VALUE: the length comes from the actual start and end (% minutes) — change the times instead.', v_span;
++        end if;
++        n_dur := v_span;
++      end if;
++      if n_setup is not null and (n_setup < 0 or n_setup > 600) then raise exception 'BAD_VALUE: setup is 0–600 minutes.'; end if;
+       if n_aud is null or n_aud not in ('everyone', 'leadership', 'board') then raise exception 'BAD_VALUE: unknown audience.'; end if;
+       if n_plan is distinct from s.plan_id and n_plan is not null
+          and not exists (select 1 from public.training_plans tp where tp.id = n_plan and tp.department_id = v_dept) then
+@@ -75,6 +93,9 @@
+       if n_date   is distinct from s."date"       then v_diff := v_diff || jsonb_build_object('date',         jsonb_build_object('old', s."date", 'new', n_date)); end if;
+       if n_start  is distinct from s.start_time   then v_diff := v_diff || jsonb_build_object('start_time',   jsonb_build_object('old', s.start_time, 'new', n_start)); end if;
+       if n_dur    is distinct from s.duration_min then v_diff := v_diff || jsonb_build_object('duration_min', jsonb_build_object('old', s.duration_min, 'new', n_dur)); end if;
++      if n_astart is distinct from s.actual_start then v_diff := v_diff || jsonb_build_object('actual_start', jsonb_build_object('old', s.actual_start, 'new', n_astart)); end if;
++      if n_aend   is distinct from s.actual_end   then v_diff := v_diff || jsonb_build_object('actual_end',   jsonb_build_object('old', s.actual_end, 'new', n_aend)); end if;
++      if n_setup  is distinct from s.setup_min    then v_diff := v_diff || jsonb_build_object('setup_min',    jsonb_build_object('old', s.setup_min, 'new', n_setup)); end if;
+       if n_aud    is distinct from s.audience     then v_diff := v_diff || jsonb_build_object('audience',     jsonb_build_object('old', s.audience, 'new', n_aud)); end if;
+       if n_plan   is distinct from s.plan_id      then v_diff := v_diff || jsonb_build_object('plan_id',      jsonb_build_object('old', s.plan_id, 'new', n_plan)); end if;
+       if n_counts is distinct from s.counts_toward_attendance then v_diff := v_diff || jsonb_build_object('counts_toward_attendance', jsonb_build_object('old', s.counts_toward_attendance, 'new', n_counts)); end if;
+@@ -110,6 +131,7 @@
+       if v_diff <> '{}'::jsonb then
+         update public.training_sessions
+            set title = n_title, "date" = n_date, start_time = n_start, duration_min = n_dur, audience = n_aud, plan_id = n_plan,
++               actual_start = n_astart, actual_end = n_aend, setup_min = n_setup,
+                counts_toward_attendance = n_counts, is_meeting = n_meet, is_offsite = n_off, location_label = n_label,
+                location_lat = case when n_off then location_lat end,
+                location_lng = case when n_off then location_lng end,
+
+## finalize: the NEW (uuid, time, time, integer) overload vs the live length-only one it was built from (the live one is NOT changed)
+--- finalize(uuid, integer) (live, unchanged)
++++ finalize(uuid, time, time, integer) (new)
+@@ -1,10 +1,12 @@
+-CREATE OR REPLACE FUNCTION public.finalize_training_session(p_session_id uuid, p_duration_min integer)
++CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer DEFAULT NULL::integer)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO 'public'
+ AS $function$
+-    -- B4C:slice6 C4 — what the client's finalize does today (done, plus a FIRST length), logged. R4: a category's
++    -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the
++    -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min
++    -- is recorded only, never credited. Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category's
+     -- last_iso becomes greatest(existing, the drill's date) — and only when the roll is non-empty. If the session was
+     -- reopened, the roster change since that Reopen is logged here (D4).
+     declare
+@@ -12,6 +14,7 @@
+       v_me    uuid := public.my_member_id();
+       s       public.training_sessions%rowtype;
+       v_dur   integer;
++      v_span  integer; v_setup integer;
+       v_now   uuid[]; v_snap uuid[]; v_last text;
+       v_add   uuid[] := '{}'; v_rem uuid[] := '{}';
+       v_diff  jsonb := jsonb_build_object('done', jsonb_build_object('old', false, 'new', true));
+@@ -26,16 +29,30 @@
+       -- B4C:slice7 — a cancelled drill didn't happen: nothing to finalize.
+       if s.status = 'cancelled' then raise exception 'CANCELLED: this session was cancelled — restore it before finalizing.'; end if;
+       if s.signin_open then raise exception 'SIGNIN_OPEN: close the QR sign-in first.'; end if;
+-      if p_duration_min is not null then
+-        if p_duration_min < 1 or p_duration_min > 1440 then raise exception 'BAD_VALUE: a length is 1–1440 minutes.'; end if;
+-        if s.duration_min is not null and s.duration_min <> p_duration_min then
+-          raise exception 'USE_CORRECT: this drill already has a length — change it with Correct.';
+-        end if;
++      if p_actual_start is null or p_actual_end is null then
++        raise exception 'BAD_VALUE: give both the actual start and end — or finalize with just a length.';
+       end if;
+-      v_dur := coalesce(s.duration_min, p_duration_min);
++      if p_actual_end = p_actual_start then raise exception 'BAD_VALUE: the actual end must differ from the start.'; end if;
++      if extract(second from p_actual_start) <> 0 or extract(second from p_actual_end) <> 0 then raise exception 'BAD_VALUE: actual times are whole minutes.'; end if;
++      if p_setup_min is not null and (p_setup_min < 0 or p_setup_min > 600) then raise exception 'BAD_VALUE: setup is 0–600 minutes.'; end if;
++      v_span := ((extract(epoch from (p_actual_end - p_actual_start)) / 60)::integer + case when p_actual_end <= p_actual_start then 1440 else 0 end);   -- an end at or before the start ran past midnight
++      if s.duration_min is not null and s.duration_min <> v_span then
++        raise exception 'USE_CORRECT: this drill already has a length — change it with Correct.';
++      end if;
++      if s.actual_start is not null and (s.actual_start, s.actual_end) is distinct from (p_actual_start, p_actual_end) then
++        raise exception 'USE_CORRECT: this drill already has actual times — change them with Correct.';
++      end if;
++      if s.setup_min is not null and p_setup_min is not null and s.setup_min <> p_setup_min then
++        raise exception 'USE_CORRECT: this drill already has a setup time — change it with Correct.';
++      end if;
++      v_dur := v_span;
++      v_setup := coalesce(s.setup_min, p_setup_min);
+       if v_dur is distinct from s.duration_min then
+         v_diff := v_diff || jsonb_build_object('duration_min', jsonb_build_object('old', s.duration_min, 'new', v_dur));
+       end if;
++      if p_actual_start is distinct from s.actual_start then v_diff := v_diff || jsonb_build_object('actual_start', jsonb_build_object('old', s.actual_start, 'new', p_actual_start)); end if;
++      if p_actual_end is distinct from s.actual_end then v_diff := v_diff || jsonb_build_object('actual_end', jsonb_build_object('old', s.actual_end, 'new', p_actual_end)); end if;
++      if v_setup is distinct from s.setup_min then v_diff := v_diff || jsonb_build_object('setup_min', jsonb_build_object('old', s.setup_min, 'new', v_setup)); end if;
+       select coalesce(array_agg(sa.member_id order by sa.member_id), '{}') into v_now
+         from public.session_attendance sa where sa.session_id = s.id;
+       -- the latest log entry for this session: if it is a Reopen, compare the roll now with the roll then
+@@ -45,7 +62,7 @@
+         select coalesce(array_agg(x order by x), '{}') into v_add from unnest(v_now) x where x <> all (coalesce(v_snap, '{}'));
+         select coalesce(array_agg(x order by x), '{}') into v_rem from unnest(coalesce(v_snap, '{}')) x where x <> all (v_now);
+       end if;
+-      update public.training_sessions set done = true, duration_min = v_dur where id = s.id;
++      update public.training_sessions set done = true, duration_min = v_dur, actual_start = p_actual_start, actual_end = p_actual_end, setup_min = v_setup where id = s.id;
+       if s.plan_id is not null and cardinality(v_now) > 0 then
+         update public.training_plans set last_iso = greatest(coalesce(last_iso, s."date"), s."date") where id = s.plan_id;
+       end if;
+@@ -55,7 +72,7 @@
+               null, v_diff, v_add, v_rem,
+               cardinality(v_now) - cardinality(v_add) + cardinality(v_rem), cardinality(v_now))
+       returning id into v_audit;
+-      return jsonb_build_object('audit_id', v_audit, 'present', cardinality(v_now), 'duration_min', v_dur,
++      return jsonb_build_object('audit_id', v_audit, 'present', cardinality(v_now), 'duration_min', v_dur, 'actual_start', p_actual_start, 'actual_end', p_actual_end, 'setup_min', v_setup,
+                                 'roster_added', to_jsonb(v_add), 'roster_removed', to_jsonb(v_rem));
+     end;
+     $function$

@@ -1,0 +1,49 @@
+PASS  pins reproduce: all 14 captured functions (md5 of pg_get_functiondef) + their ACLs, created from the LIVE text
+PASS  pins reproduce: training_sessions' 8 constraints + 4 triggers deparse exactly as live
+PASS  pins reproduce: the migration's own PREFLIGHT passes on the mock (trigger defs, constraint defs, the column list, every function md5)  — PINS-OK
+PASS  the mock ledger is non-trivial: 3 attested rows in Alpha, the 120-minute drill capped at 90  — 3 rows, 2 capped
+PASS  Slice T applies (preflight + the in-transaction ledger / rows / readers / bodies / ACL proof pass) and returns its state row
+PASS  state row: the 3 columns, 4 validated CHECKs, both finalize overloads, readers = the three  — {"checks":{"training_sessions_actual_pair":true,"training_sessions_setup_range":true,"training_sessions_actual_length":true,"training_sessions_actual_whole_minutes":true},"columns":"actual_start time, actual_end time, setup_min int2","iso_md5":"705c9a9b5532d28824f5e50e74d6059f","fn_count":18,"guard_md5":"c1af95df40d551b75998cde0a8f290f7","correct_md5":"8c00066509e9dca338dc3662f55e1211","attested_md5":"aff25333771cd38c1f473bcde5e1e96e","total_policies":1,"verified_presence":1,"finalize_overloads":"finalize_training_session(uuid,integer) | finalize_training_session(uuid,time without time zone,time without time zone,integer)","times_finalize_md5":"dd5538004b70103a3a07d7428a5fafb4","readers_of_new_columns":["correct_training_session(uuid,jsonb,uuid[],uuid[],text)","finalize_training_session(uuid,time without time zone,time without time zone,integer)","tg_training_session_lock_guard()"]}
+PASS  re-run refuses (already applied)  — PREFLIGHT: actual_start / actual_end / setup_min, a slice-T constraint, or the times finalize alread
+PASS  S0 columns + 4 validated CHECKs + both finalize overloads; finalize/correct/the guard read the new columns, the ledger does not
+PASS  T1 Finalize 19:00–22:26 + setup 20 → 206 min, times + setup stored, the audit diff carries all five
+PASS  T2 past midnight 22:00–01:30 → 210 min
+PASS  T3 raw UPDATE of actual_start / actual_end / setup_min on a finalized session → LOCKED_SESSION (owner too)
+PASS  T4 a duration_min that disagrees with the times is refused by the CHECK (even under the correction flag)
+PASS  T5 Correct actual_end 23:00 → length recomputed 240, diff logs actual_end + duration_min
+PASS  T6 Correct: a length alone while times exist → BAD_VALUE (change the times)
+PASS  T7 Correct: clearing both times → length-only, 240 kept
+PASS  T8 the length-only finalize (45) still works, no times
+PASS  T9 refused: start = end · one time missing · setup 700 · an existing different length (USE_CORRECT)
+PASS  T10 the ledger credits min(90, 206) = 90 min from date + start_time; setup_min (300) has no effect
+PASS  T11 reopened (with its roll): a raw UPDATE of the stored times → LOCKED_SESSION (set once, Correct-only after)
+12 passed, 0 failed, 0 skipped
+PASS  RETEST: 0 failed, 0 skipped — S0 + T1…T11 (finalize with times, past midnight, the guard, the CHECK, Correct ×3, the fallback, refusals, the ledger, reopen)  — 12 passed, 0 failed, 0 skipped
+PASS  RETEST left nothing behind (rolled back): 4 sessions, no RETEST audit rows
+PASS  ROLLBACK: back to every captured pin (correct, the guard, the length-only finalize, ACLs, columns, constraints)
+PASS  ROLLBACK refuses a second time (not applied)
+PASS  re-apply after rollback passes
+PASS  ROLLBACK refuses while a session holds actual times (dropping the columns would lose them)  — ROLLBACK: 1 session(s) hold actual times or a setup time — dropping the columns would lose them. Refusing.
+PASS  post-apply drift (the old guard put back) → RETEST FAILs T3 (raw UPDATE of the times no longer refused)  — FAIL  S0 the slice is not in place as intended | FAIL  T3 the guard stopped 0 of 3 | FAIL  the RETEST block aborted: new row for relation "training_sessions" violates check constraint "training_sessio
+PASS  preflight refuses: correct_training_session drifted  — PREFLIGHT: correct_training_session(p_session_id uuid, p_changes jsonb, p_add uuid[], p_remove uuid[], p_reason text) dr
+PASS  preflight refuses: the lock guard drifted  — PREFLIGHT: tg_training_session_lock_guard() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: attested_training drifted (the ledger)  — PREFLIGHT: attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone) drifted from t
+PASS  preflight refuses: dept_iso_hours_for drifted  — PREFLIGHT: dept_iso_hours_for(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone) drifted from 
+PASS  preflight refuses: the length-only finalize drifted  — PREFLIGHT: finalize_training_session(p_session_id uuid, p_duration_min integer) drifted from the capture (or is gone). R
+PASS  preflight refuses: a training_sessions trigger changed  — PREFLIGHT: a training_sessions trigger changed. Refusing.
+PASS  preflight refuses: a training_sessions constraint changed  — PREFLIGHT: a training_sessions constraint changed. Refusing.
+PASS  preflight refuses: a policy changed  — PREFLIGHT: a public policy changed since the capture. Refusing.
+PASS  preflight refuses: the training_sessions columns changed  — PREFLIGHT: the training_sessions columns changed since the capture. Refusing.
+PASS  preflight refuses: already applied (a new column present)  — PREFLIGHT: actual_start / actual_end / setup_min, a slice-T constraint, or the times finalize already exists — Slice T l
+PASS  proof catches + rolls back: it also moves the ledger (attested_training cap 90 → 120)  — Post-condition failed: the credited-hours ledger moved for department(s) 00000000-0000-0000-0000-00000000000a. Rolling back.
+PASS  proof catches + rolls back: it changes a session row (guard bypassed)  — Post-condition failed: a training_sessions row changed. Rolling back.
+PASS  proof catches + rolls back: it backfills a new column on an existing row  — Post-condition failed: a new column is not NULL on an existing row. Rolling back.
+PASS  proof catches + rolls back: it drops the length CHECK  — Post-condition failed: the four slice-T CHECKs are not all present and validated. Rolling back.
+PASS  proof catches + rolls back: it leaves the old guard in place  — Post-condition failed: the lock guard is not the generated body, or its ACL changed. Rolling back.
+PASS  proof catches + rolls back: it grants the times finalize to anon  — Post-condition failed: the times finalize is not the generated body, not SECURITY DEFINER, or its ACL is wrong (anon must not exec
+PASS  proof catches + rolls back: it also changes another function (open_signin)  — Post-condition failed: another public function changed. Rolling back.
+PASS  proof catches + rolls back: a view reads setup_min  — Post-condition failed: a view reads a new column. Rolling back.
+PASS  proof catches + rolls back: the ISO-hours function starts reading setup_min  — Post-condition failed: the functions reading the new columns are not exactly the three (finalize overload, correct, the guard). Ro
+PASS  proof catches + rolls back: it also adds a policy  — Post-condition failed: a policy or a training_sessions trigger changed. Rolling back.
+
+34 passed, 0 failed
