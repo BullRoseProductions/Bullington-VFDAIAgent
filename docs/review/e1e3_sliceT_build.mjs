@@ -94,9 +94,9 @@ const COR_NEW = edit(COR.def, [
 const FIN_SIG_NEW = "finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer)";
 const FIN_NEW = edit(FIN.def, [
   ["CREATE OR REPLACE FUNCTION public.finalize_training_session(p_session_id uuid, p_duration_min integer)",
-   "CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer DEFAULT NULL::integer)"],
+   "CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer)"],
   ["    -- B4C:slice6 C4 — what the client's finalize does today (done, plus a FIRST length), logged.",
-   "    -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the\n    -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min\n    -- is recorded only, never credited. Otherwise exactly slice 6 C4: done, plus a FIRST length, logged."],
+   "    -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the\n    -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min\n    -- is recorded only, never credited. NO DEFAULTS, on purpose: PostgREST picks an overload by its set of argument names, so\n    -- this one answers ONLY {p_session_id, p_actual_start, p_actual_end, p_setup_min} and the length-only one ONLY\n    -- {p_session_id, p_duration_min} — no call shape can match both (the clients that send p_duration_min keep the old\n    -- function until they're updated). Otherwise exactly slice 6 C4: done, plus a FIRST length, logged."],
   ["      v_dur   integer;\n", "      v_dur   integer;\n      v_span  integer; v_setup integer;\n"],
   [`      if p_duration_min is not null then
         if p_duration_min < 1 or p_duration_min > 1440 then raise exception 'BAD_VALUE: a length is 1–1440 minutes.'; end if;
@@ -286,6 +286,13 @@ ${LEDGER("v_led_after")}
      OR has_function_privilege('anon', '${NEW_FIN}', 'EXECUTE') THEN
     RAISE EXCEPTION 'Post-condition failed: the times finalize is not the generated body, not SECURITY DEFINER, or its ACL is wrong (anon must not execute). Rolling back.';
   END IF;
+  -- the two finalize overloads: exactly these named-argument sets, NO defaults — no call shape (named, as PostgREST sends, or
+  -- positional) can resolve to both, and the existing {p_session_id, p_duration_min} call keeps resolving to the old function
+  IF (SELECT string_agg(array_to_string(p.proargnames, ',') || '/' || p.pronargdefaults, ' | ' ORDER BY p.pronargs)
+        FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session')
+     IS DISTINCT FROM 'p_session_id,p_duration_min/0 | p_session_id,p_actual_start,p_actual_end,p_setup_min/0' THEN
+    RAISE EXCEPTION 'Post-condition failed: the finalize overloads are not exactly {p_session_id,p_duration_min} and {p_session_id,p_actual_start,p_actual_end,p_setup_min} with no defaults. Rolling back.';
+  END IF;
   -- setup_min / actual_* are read by exactly the three functions — nothing in the hours pipeline
   IF (SELECT array_agg(x ORDER BY x) FROM (SELECT unnest(${NEW_REF}) EXCEPT SELECT unnest(v_readers)) z(x)) IS DISTINCT FROM (SELECT array_agg(x ORDER BY x) FROM unnest(${THREE_ARR}) x)
      OR NOT (v_readers <@ ${NEW_REF}) THEN
@@ -316,6 +323,7 @@ SELECT jsonb_build_object(
   'columns', (SELECT string_agg(column_name || ' ' || udt_name, ', ' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'training_sessions' AND column_name IN ('actual_start', 'actual_end', 'setup_min')),
   'checks', (SELECT jsonb_object_agg(conname, convalidated) FROM pg_constraint WHERE conrelid = 'public.training_sessions'::regclass AND conname IN (${Object.keys(CHECK_SQL).map((n) => `'${n}'`).join(", ")})),
   'finalize_overloads', (SELECT string_agg(p.oid::regprocedure::text, ' | ' ORDER BY p.oid::regprocedure::text) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session'),
+  'finalize_named_args', (SELECT string_agg(array_to_string(p.proargnames, ',') || ' (defaults ' || p.pronargdefaults || ')', ' | ' ORDER BY p.pronargs) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session'),
   'correct_md5', ${fmd5(COR.sig)}, 'guard_md5', ${fmd5(GRD.sig)}, 'times_finalize_md5', md5(pg_get_functiondef('${NEW_FIN}'::regprocedure)),
   'readers_of_new_columns', ${NEW_REF},
   'attested_md5', ${fmd5(ATT.sig)}, 'iso_md5', ${fmd5(ISO.sig)},
@@ -436,21 +444,22 @@ BEGIN
     IF v_row.actual_start IS NULL AND v_row.actual_end IS NULL AND v_row.duration_min = 240 THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T7 Correct: clearing both times → length-only, 240 kept' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || 'FAIL  T7 clearing the times' || chr(10); END IF;
 
-    -- T8 the length-only fallback
+    -- T8 the length-only fallback — called NAMED, exactly as the shipped web/native clients call it today ({p_session_id,
+    -- p_duration_min}); it must still resolve to the old function
     EXECUTE 'SET LOCAL ROLE authenticated';
-    PERFORM public.finalize_training_session(s3, 45);
+    PERFORM public.finalize_training_session(p_session_id => s3, p_duration_min => 45);
     EXECUTE 'RESET ROLE';
     SELECT * INTO v_row FROM public.training_sessions WHERE id = s3;
-    IF v_row.done AND v_row.duration_min = 45 AND v_row.actual_start IS NULL AND v_row.setup_min IS NULL THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T8 the length-only finalize (45) still works, no times' || chr(10);
+    IF v_row.done AND v_row.duration_min = 45 AND v_row.actual_start IS NULL AND v_row.setup_min IS NULL THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T8 the shipped clients'' call {p_session_id, p_duration_min} still resolves to the length-only finalize (45, no times)' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || 'FAIL  T8 the fallback' || chr(10); END IF;
 
     -- T9 refusals
     v_n := 0;
     EXECUTE 'SET LOCAL ROLE authenticated';
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => '19:00'); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => '19:00', p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => NULL, p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
     BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:00', p_setup_min => 700); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:30'); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'USE_CORRECT%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:30', p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'USE_CORRECT%' THEN v_n := v_n + 1; END IF; END;
     EXECUTE 'RESET ROLE';
     IF v_n = 4 THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T9 refused: start = end · one time missing · setup 700 · an existing different length (USE_CORRECT)' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  T9 %s of 4 refused%s', v_n, chr(10)); END IF;

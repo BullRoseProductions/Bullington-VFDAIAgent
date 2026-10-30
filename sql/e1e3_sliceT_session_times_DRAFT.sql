@@ -306,7 +306,7 @@ AS $function$
 ;
 
   -- ---------------------------------------------------------------- 4. the NEW times finalize (the length-only overload is untouched — the fallback)
-CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer DEFAULT NULL::integer)
+CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -314,7 +314,10 @@ CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_sta
 AS $function$
     -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the
     -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min
-    -- is recorded only, never credited. Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category's
+    -- is recorded only, never credited. NO DEFAULTS, on purpose: PostgREST picks an overload by its set of argument names, so
+    -- this one answers ONLY {p_session_id, p_actual_start, p_actual_end, p_setup_min} and the length-only one ONLY
+    -- {p_session_id, p_duration_min} — no call shape can match both (the clients that send p_duration_min keep the old
+    -- function until they're updated). Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category's
     -- last_iso becomes greatest(existing, the drill's date) — and only when the roll is non-empty. If the session was
     -- reopened, the roster change since that Reopen is logged here (D4).
     declare
@@ -619,7 +622,10 @@ AS $function$
   IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.finalize_training_session(uuid, time without time zone, time without time zone, integer)'::regprocedure) IS DISTINCT FROM '
     -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the
     -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min
-    -- is recorded only, never credited. Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category''s
+    -- is recorded only, never credited. NO DEFAULTS, on purpose: PostgREST picks an overload by its set of argument names, so
+    -- this one answers ONLY {p_session_id, p_actual_start, p_actual_end, p_setup_min} and the length-only one ONLY
+    -- {p_session_id, p_duration_min} — no call shape can match both (the clients that send p_duration_min keep the old
+    -- function until they''re updated). Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category''s
     -- last_iso becomes greatest(existing, the drill''s date) — and only when the roll is non-empty. If the session was
     -- reopened, the roster change since that Reopen is logged here (D4).
     declare
@@ -694,6 +700,13 @@ AS $function$
      OR has_function_privilege('anon', 'public.finalize_training_session(uuid, time without time zone, time without time zone, integer)', 'EXECUTE') THEN
     RAISE EXCEPTION 'Post-condition failed: the times finalize is not the generated body, not SECURITY DEFINER, or its ACL is wrong (anon must not execute). Rolling back.';
   END IF;
+  -- the two finalize overloads: exactly these named-argument sets, NO defaults — no call shape (named, as PostgREST sends, or
+  -- positional) can resolve to both, and the existing {p_session_id, p_duration_min} call keeps resolving to the old function
+  IF (SELECT string_agg(array_to_string(p.proargnames, ',') || '/' || p.pronargdefaults, ' | ' ORDER BY p.pronargs)
+        FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session')
+     IS DISTINCT FROM 'p_session_id,p_duration_min/0 | p_session_id,p_actual_start,p_actual_end,p_setup_min/0' THEN
+    RAISE EXCEPTION 'Post-condition failed: the finalize overloads are not exactly {p_session_id,p_duration_min} and {p_session_id,p_actual_start,p_actual_end,p_setup_min} with no defaults. Rolling back.';
+  END IF;
   -- setup_min / actual_* are read by exactly the three functions — nothing in the hours pipeline
   IF (SELECT array_agg(x ORDER BY x) FROM (SELECT unnest((SELECT coalesce(array_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text), '{}') FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosrc ~ '(actual_start|actual_end|setup_min)')) EXCEPT SELECT unnest(v_readers)) z(x)) IS DISTINCT FROM (SELECT array_agg(x ORDER BY x) FROM unnest(ARRAY['correct_training_session(uuid,jsonb,uuid[],uuid[],text)', 'finalize_training_session(uuid,time without time zone,time without time zone,integer)', 'tg_training_session_lock_guard()']::text[]) x)
      OR NOT (v_readers <@ (SELECT coalesce(array_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text), '{}') FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosrc ~ '(actual_start|actual_end|setup_min)')) THEN
@@ -725,6 +738,7 @@ SELECT jsonb_build_object(
   'columns', (SELECT string_agg(column_name || ' ' || udt_name, ', ' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'training_sessions' AND column_name IN ('actual_start', 'actual_end', 'setup_min')),
   'checks', (SELECT jsonb_object_agg(conname, convalidated) FROM pg_constraint WHERE conrelid = 'public.training_sessions'::regclass AND conname IN ('training_sessions_actual_pair', 'training_sessions_actual_whole_minutes', 'training_sessions_actual_length', 'training_sessions_setup_range')),
   'finalize_overloads', (SELECT string_agg(p.oid::regprocedure::text, ' | ' ORDER BY p.oid::regprocedure::text) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session'),
+  'finalize_named_args', (SELECT string_agg(array_to_string(p.proargnames, ',') || ' (defaults ' || p.pronargdefaults || ')', ' | ' ORDER BY p.pronargs) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'finalize_training_session'),
   'correct_md5', md5(pg_get_functiondef('public.correct_training_session(uuid, jsonb, uuid[], uuid[], text)'::regprocedure)), 'guard_md5', md5(pg_get_functiondef('public.tg_training_session_lock_guard()'::regprocedure)), 'times_finalize_md5', md5(pg_get_functiondef('public.finalize_training_session(uuid, time without time zone, time without time zone, integer)'::regprocedure)),
   'readers_of_new_columns', (SELECT coalesce(array_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text), '{}') FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosrc ~ '(actual_start|actual_end|setup_min)'),
   'attested_md5', md5(pg_get_functiondef('public.attested_training(uuid, timestamp with time zone, timestamp with time zone)'::regprocedure)), 'iso_md5', md5(pg_get_functiondef('public.dept_iso_hours_for(uuid, timestamp with time zone, timestamp with time zone)'::regprocedure)),

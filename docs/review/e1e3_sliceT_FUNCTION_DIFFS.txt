@@ -100,12 +100,12 @@
                 location_lat = case when n_off then location_lat end,
                 location_lng = case when n_off then location_lng end,
 
-## finalize: the NEW (uuid, time, time, integer) overload vs the live length-only one it was built from (the live one is NOT changed)
+## finalize: the NEW (uuid, time, time, integer) overload — NO defaults — vs the live length-only one it was built from (the live one is NOT changed)
 --- finalize(uuid, integer) (live, unchanged)
 +++ finalize(uuid, time, time, integer) (new)
-@@ -1,10 +1,12 @@
+@@ -1,10 +1,15 @@
 -CREATE OR REPLACE FUNCTION public.finalize_training_session(p_session_id uuid, p_duration_min integer)
-+CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer DEFAULT NULL::integer)
++CREATE FUNCTION public.finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without time zone, p_setup_min integer)
   RETURNS jsonb
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -114,11 +114,14 @@
 -    -- B4C:slice6 C4 — what the client's finalize does today (done, plus a FIRST length), logged. R4: a category's
 +    -- B4C:E1E3 slice T — FINALIZE WITH THE ACTUAL TIMES (the length-only finalize_training_session(uuid, integer) stays as the
 +    -- fallback). The length is DERIVED from the actual start/end (an end at or before the start ran past midnight); setup_min
-+    -- is recorded only, never credited. Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category's
++    -- is recorded only, never credited. NO DEFAULTS, on purpose: PostgREST picks an overload by its set of argument names, so
++    -- this one answers ONLY {p_session_id, p_actual_start, p_actual_end, p_setup_min} and the length-only one ONLY
++    -- {p_session_id, p_duration_min} — no call shape can match both (the clients that send p_duration_min keep the old
++    -- function until they're updated). Otherwise exactly slice 6 C4: done, plus a FIRST length, logged. R4: a category's
      -- last_iso becomes greatest(existing, the drill's date) — and only when the roll is non-empty. If the session was
      -- reopened, the roster change since that Reopen is logged here (D4).
      declare
-@@ -12,6 +14,7 @@
+@@ -12,6 +17,7 @@
        v_me    uuid := public.my_member_id();
        s       public.training_sessions%rowtype;
        v_dur   integer;
@@ -126,7 +129,7 @@
        v_now   uuid[]; v_snap uuid[]; v_last text;
        v_add   uuid[] := '{}'; v_rem uuid[] := '{}';
        v_diff  jsonb := jsonb_build_object('done', jsonb_build_object('old', false, 'new', true));
-@@ -26,16 +29,30 @@
+@@ -26,16 +32,30 @@
        -- B4C:slice7 — a cancelled drill didn't happen: nothing to finalize.
        if s.status = 'cancelled' then raise exception 'CANCELLED: this session was cancelled — restore it before finalizing.'; end if;
        if s.signin_open then raise exception 'SIGNIN_OPEN: close the QR sign-in first.'; end if;
@@ -163,7 +166,7 @@
        select coalesce(array_agg(sa.member_id order by sa.member_id), '{}') into v_now
          from public.session_attendance sa where sa.session_id = s.id;
        -- the latest log entry for this session: if it is a Reopen, compare the roll now with the roll then
-@@ -45,7 +62,7 @@
+@@ -45,7 +65,7 @@
          select coalesce(array_agg(x order by x), '{}') into v_add from unnest(v_now) x where x <> all (coalesce(v_snap, '{}'));
          select coalesce(array_agg(x order by x), '{}') into v_rem from unnest(coalesce(v_snap, '{}')) x where x <> all (v_now);
        end if;
@@ -172,7 +175,7 @@
        if s.plan_id is not null and cardinality(v_now) > 0 then
          update public.training_plans set last_iso = greatest(coalesce(last_iso, s."date"), s."date") where id = s.plan_id;
        end if;
-@@ -55,7 +72,7 @@
+@@ -55,7 +75,7 @@
                null, v_diff, v_add, v_rem,
                cardinality(v_now) - cardinality(v_add) + cardinality(v_rem), cardinality(v_now))
        returning id into v_audit;

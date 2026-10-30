@@ -100,21 +100,22 @@ BEGIN
     IF v_row.actual_start IS NULL AND v_row.actual_end IS NULL AND v_row.duration_min = 240 THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T7 Correct: clearing both times → length-only, 240 kept' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || 'FAIL  T7 clearing the times' || chr(10); END IF;
 
-    -- T8 the length-only fallback
+    -- T8 the length-only fallback — called NAMED, exactly as the shipped web/native clients call it today ({p_session_id,
+    -- p_duration_min}); it must still resolve to the old function
     EXECUTE 'SET LOCAL ROLE authenticated';
-    PERFORM public.finalize_training_session(s3, 45);
+    PERFORM public.finalize_training_session(p_session_id => s3, p_duration_min => 45);
     EXECUTE 'RESET ROLE';
     SELECT * INTO v_row FROM public.training_sessions WHERE id = s3;
-    IF v_row.done AND v_row.duration_min = 45 AND v_row.actual_start IS NULL AND v_row.setup_min IS NULL THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T8 the length-only finalize (45) still works, no times' || chr(10);
+    IF v_row.done AND v_row.duration_min = 45 AND v_row.actual_start IS NULL AND v_row.setup_min IS NULL THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T8 the shipped clients'' call {p_session_id, p_duration_min} still resolves to the length-only finalize (45, no times)' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || 'FAIL  T8 the fallback' || chr(10); END IF;
 
     -- T9 refusals
     v_n := 0;
     EXECUTE 'SET LOCAL ROLE authenticated';
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => '19:00'); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => '19:00', p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '19:00', p_actual_end => NULL, p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
     BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:00', p_setup_min => 700); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'BAD_VALUE%' THEN v_n := v_n + 1; END IF; END;
-    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:30'); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'USE_CORRECT%' THEN v_n := v_n + 1; END IF; END;
+    BEGIN PERFORM public.finalize_training_session(p_session_id => s4, p_actual_start => '18:00', p_actual_end => '19:30', p_setup_min => NULL); EXCEPTION WHEN OTHERS THEN IF SQLERRM LIKE 'USE_CORRECT%' THEN v_n := v_n + 1; END IF; END;
     EXECUTE 'RESET ROLE';
     IF v_n = 4 THEN v_pass := v_pass + 1; rpt := rpt || 'PASS  T9 refused: start = end · one time missing · setup 700 · an existing different length (USE_CORRECT)' || chr(10);
     ELSE v_fail := v_fail + 1; rpt := rpt || format('FAIL  T9 %s of 4 refused%s', v_n, chr(10)); END IF;

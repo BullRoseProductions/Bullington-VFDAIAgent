@@ -42,7 +42,8 @@ exact-match edits. `--check` regenerates all 4 outputs byte-identical.
    - **The span:** `((extract(epoch from (end − start)) / 60)::integer + case when end <= start then 1440 else 0 end)`.
      It's one formula, used by the CHECK and both RPCs; an end at or before the start ran past midnight.
    - Length-only rows (the 31 today, and every future fallback) have no times, so they pass.
-3. **New `finalize_training_session(p_session_id, p_actual_start, p_actual_end, p_setup_min DEFAULT NULL)`.**
+3. **New `finalize_training_session(p_session_id, p_actual_start, p_actual_end, p_setup_min)`, with NO defaults** (see the
+   overload section below).
    - Built from the live length-only finalize, with only the length handling changed.
    - It derives the length; `USE_CORRECT` if a length or times already exist and differ.
    - SECURITY DEFINER, `search_path=public`. `REVOKE … FROM PUBLIC, anon`, then `GRANT EXECUTE TO authenticated,
@@ -60,6 +61,29 @@ exact-match edits. `--check` regenerates all 4 outputs byte-identical.
    - **Without this they would be raw-writable on a locked session.**
 
 Nothing else changes: no policy, no grant, no data, no other function. The diffs are in `e1e3_sliceT_FUNCTION_DIFFS.txt`.
+
+## The finalize overload: no call shape can match both (addendum)
+- PostgREST picks an overload by the **set of argument names** in the request. The two functions are:
+  - the existing `finalize_training_session(uuid, integer)`, which answers only `{p_session_id, p_duration_min}`;
+  - the new one, which answers only `{p_session_id, p_actual_start, p_actual_end, p_setup_min}`.
+- **Neither has a default.** The first draft's `p_setup_min DEFAULT NULL` is removed, so no partial set matches either
+  one, and the two sets can't overlap.
+- Today's web and the installed native app call `rpc("finalize_training_session", { p_session_id, p_duration_min })`.
+  Both keys are always sent, with `p_duration_min` possibly null, so they keep resolving to the old function until U1
+  ships.
+- **The proof is a post-condition.** The overloads' argument-name sets and default counts must be exactly
+  `p_session_id,p_duration_min/0 | p_session_id,p_actual_start,p_actual_end,p_setup_min/0`, or the migration rolls
+  back. The state row prints them.
+- **Dry run:**
+  - each PostgREST shape matches exactly one function;
+  - partial shapes match none;
+  - named `{p_session_id, p_duration_min => NULL}` and positional `(uuid, NULL)` SQL calls resolve, with no "not
+    unique";
+  - a 3-argument times call does not resolve;
+  - putting the default back is caught by the post-condition.
+- **RETEST T8** calls the old function by name, exactly as the shipped clients do.
+- **A pre-existing length** that disagrees with the supplied times' span → `USE_CORRECT`. It never overwrites, and it
+  never writes a pair that would trip the CHECK (T9).
 
 ## Preflight (refuses and changes nothing)
 - **Already applied:** any of the three columns, four CHECKs or the new overload exists → refuse.
@@ -131,7 +155,7 @@ to day.
 - It drops the new overload, restores correct and the guard from their **captured** definitions, drops the four CHECKs
   and the three columns, and proves every pin is back.
 
-## Dry run — `docs/review/e1e3_sliceT_DRYRUN.txt`: **34 passed, 0 failed** (PGlite, a mock built FROM the capture)
+## Dry run — `docs/review/e1e3_sliceT_DRYRUN.txt`: **39 passed, 0 failed** (PGlite, a mock built FROM the capture)
 - **Pins reproduce:** all 14 functions' md5s and ACLs, the 8 constraints and 4 triggers deparse exactly as live, and
   the migration's own preflight passes.
   - The **only** substitution is the md5 of every live policy (the mock can't hold the live DB's 181 policies). It's
@@ -145,7 +169,8 @@ to day.
 - Post-apply drift (the old guard put back) → **RETEST fails T3**.
 - **10 drift refusals:** correct, the guard, `attested_training`, `dept_iso_hours_for`, the length-only finalize, a
   trigger, a constraint, a policy, the columns, already applied.
-- **10 mutations caught and rolled back:**
+- **The overload shapes:** each resolves to exactly one function; partial shapes resolve to none.
+- **11 mutations caught and rolled back:**
   - the ledger moved;
   - a session row changed (guard bypassed);
   - a backfilled new column;
@@ -155,7 +180,8 @@ to day.
   - another function changed;
   - a view reading `setup_min`;
   - the ISO function reading `setup_min`;
-  - an added policy.
+  - an added policy;
+  - the default put back on `p_setup_min`.
 
 ## Tests and invariants
 - `docs/review/e1e3_sliceT_db_test.mjs` (regenerate byte-identical + dry run + fences): **5/0**. The full suite is **40

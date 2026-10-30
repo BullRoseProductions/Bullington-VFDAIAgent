@@ -120,11 +120,26 @@ const FIN_OLD = "finalize_training_session(p_session_id uuid, p_duration_min int
   const r = await run(db, SQL.mig);
   ok("Slice T applies (preflight + the in-transaction ledger / rows / readers / bodies / ACL proof pass) and returns its state row", r.ok, r.msg || "");
   const st = r.rows?.[0]?.state;
-  ok("state row: the 3 columns, 4 validated CHECKs, both finalize overloads, readers = the three", st && st.columns === "actual_start time, actual_end time, setup_min int2"
+  ok("state row: the 3 columns, 4 validated CHECKs, both finalize overloads (named-arg sets, no defaults), readers = the three", st && st.finalize_named_args === "p_session_id,p_duration_min (defaults 0) | p_session_id,p_actual_start,p_actual_end,p_setup_min (defaults 0)" && st.columns === "actual_start time, actual_end time, setup_min int2"
     && Object.values(st.checks).every(Boolean) && Object.keys(st.checks).length === 4 && /\(uuid,integer\) \| finalize_training_session\(uuid,time/.test(st.finalize_overloads)
     && JSON.stringify(st.readers_of_new_columns) === JSON.stringify(["correct_training_session(uuid,jsonb,uuid[],uuid[],text)", "finalize_training_session(uuid,time without time zone,time without time zone,integer)", "tg_training_session_lock_guard()"]), JSON.stringify(st || r.msg || "").slice(0, 900));
   const re = await run(db, SQL.mig);
   ok("re-run refuses (already applied)", !re.ok && /looks applied/.test(re.msg), re.msg?.slice(0, 100));
+  // OVERLOAD RESOLUTION — every call shape resolves to exactly one function (PostgREST matches on the set of argument names)
+  const shape = async (call) => { try { await db.exec(`BEGIN; ${call}; ROLLBACK;`); return "resolved"; } catch (e) { await db.exec("ROLLBACK").catch(() => {}); return String(e.message || e); } };
+  const which = async (args) => val(db, `SELECT string_agg(p.oid::regprocedure::text, ' | ') FROM pg_proc p WHERE p.proname = 'finalize_training_session'
+    AND p.pronargdefaults = 0 AND (SELECT array_agg(x ORDER BY x) FROM unnest(p.proargnames) x) = (SELECT array_agg(x ORDER BY x) FROM unnest(ARRAY[${args.map((a) => `'${a}'`).join(", ")}]) x)`);
+  ok("PostgREST shape {p_session_id, p_duration_min} (today's web + native) matches ONLY the length-only finalize",
+    (await which(["p_session_id", "p_duration_min"])) === "finalize_training_session(uuid,integer)");
+  ok("PostgREST shape {p_session_id, p_actual_start, p_actual_end, p_setup_min} matches ONLY the times finalize",
+    (await which(["p_session_id", "p_actual_start", "p_actual_end", "p_setup_min"])) === "finalize_training_session(uuid,time without time zone,time without time zone,integer)");
+  ok("partial shapes match NOTHING (no defaults): {p_session_id}, {p_session_id, p_actual_start, p_actual_end}, {p_session_id, p_duration_min, p_setup_min}",
+    (await which(["p_session_id"])) === null && (await which(["p_session_id", "p_actual_start", "p_actual_end"])) === null && (await which(["p_session_id", "p_duration_min", "p_setup_min"])) === null);
+  const named2 = await shape("SELECT public.finalize_training_session(p_session_id => '30000000-0000-0000-0000-000000000002', p_duration_min => NULL)");
+  const pos2 = await shape("SELECT public.finalize_training_session('30000000-0000-0000-0000-000000000002', NULL)");
+  const named3 = await shape("SELECT public.finalize_training_session(p_session_id => '30000000-0000-0000-0000-000000000002', p_actual_start => '19:00', p_actual_end => '20:00')");
+  ok("SQL callers: named {p_session_id, p_duration_min => NULL} and positional (uuid, NULL) resolve (to the old one) — not 'is not unique'; a 3-argument times call does NOT resolve",
+    !/not unique/.test(named2) && !/not unique/.test(pos2) && /does not exist/.test(named3), `${named2.slice(0, 60)} · ${pos2.slice(0, 60)} · ${named3.slice(0, 60)}`);
   const rep = await report(db, SQL.ret), c = counts(rep);
   console.log(rep);
   ok("RETEST: 0 failed, 0 skipped — S0 + T1…T11 (finalize with times, past midnight, the guard, the CHECK, Correct ×3, the fallback, refusals, the ledger, reopen)", c && c.f === 0 && c.s === 0 && c.p === 12, rep.split("\n").pop());
@@ -134,7 +149,7 @@ const FIN_OLD = "finalize_training_session(p_session_id uuid, p_duration_min int
   ok("ROLLBACK refuses a second time (not applied)", !(await run(db, SQL.rb)).ok);
   ok("re-apply after rollback passes", (await run(db, SQL.mig)).ok);
   await db.exec(`BEGIN; SELECT set_config('request.jwt.claims', '{"email":"da@a.test"}', true); SET LOCAL ROLE authenticated;
-    SELECT public.finalize_training_session(p_session_id => '30000000-0000-0000-0000-000000000003', p_actual_start => '19:00', p_actual_end => '20:15'); COMMIT;`);
+    SELECT public.finalize_training_session(p_session_id => '30000000-0000-0000-0000-000000000003', p_actual_start => '19:00', p_actual_end => '20:15', p_setup_min => NULL); COMMIT;`);
   const rb2 = await run(db, SQL.rb);
   ok("ROLLBACK refuses while a session holds actual times (dropping the columns would lose them)", !rb2.ok && /hold actual times/.test(rb2.msg), rb2.msg?.slice(0, 120));
   // post-apply drift: the guard quietly put back → RETEST must catch it
@@ -178,6 +193,7 @@ const MUT = [
   ["it also changes another function (open_signin)", at(`  ${fdef("open_signin").def.replace("and its sign-in window has closed", "and its sign-in window is closed")};`), /another public function changed/],
   ["a view reads setup_min", at("  CREATE VIEW public.v_setup AS SELECT id, setup_min FROM public.training_sessions;"), /a view reads a new column/],
   ["the ISO-hours function starts reading setup_min", at(`  ${fdef("dept_iso_hours_for").def.replace("if p_dept is null then", "if p_dept is null or (select max(setup_min) from public.training_sessions) < 0 then")};`), /not exactly the three|dept_iso_hours_for/],
+  ["the times finalize gets a DEFAULT on p_setup_min again", (s) => s.replace("p_actual_end time without time zone, p_setup_min integer)\n RETURNS jsonb", "p_actual_end time without time zone, p_setup_min integer DEFAULT NULL::integer)\n RETURNS jsonb"), /no defaults/],
   ["it also adds a policy", at(`  CREATE POLICY "sneaky" ON public.training_sessions FOR UPDATE TO authenticated USING (true);`), /policy or a training_sessions trigger changed/],
 ];
 for (const [what, mut, re] of MUT) {
