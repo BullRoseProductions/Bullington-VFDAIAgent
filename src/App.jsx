@@ -23723,6 +23723,21 @@ function checkActual(start, end, setup) {
   if (su !== "" && (!/^\d+$/.test(su) || Number(su) > 600)) return { err: { title: "Check the setup time", text: "Setup is whole minutes, 0–600." } };
   return { ...out, setup: su === "" ? null : Number(su) };
 }
+/* E1/E3 U2 — reactions (Slice R). A vote is open until 14 days after the session's date, counted in America/Chicago — the same
+   rule set_session_reaction enforces (it stays the authority; CLOSED from it is shown kindly). The DB's refusals are "CODE: …". */
+const REACT_WINDOW_DAYS = 14;
+function reactClosed(s, now = new Date()) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(now);   // YYYY-MM-DD
+  const [ty, tm, td] = today.split("-").map(Number);
+  return (Date.UTC(ty, tm - 1, td) - Date.UTC(s.y, s.m, s.d)) / 86400000 > REACT_WINDOW_DAYS;
+}
+const REACT_TITLES = { CLOSED: "Voting has closed", NOT_PRESENT: "Only people on the roll can vote", NOT_FINALIZED: "Not finalized yet",
+  CANCELLED: "This session was cancelled", NOT_FOUND: "Session not found", BAD_VALUE: "Check your vote", NOT_ALLOWED: "Can't vote here" };
+function reactErr(error) {
+  const mm = String(error?.message || "").match(/^([A-Z_]+):\s*([\s\S]*)$/);
+  if (mm && mm[1] === "CLOSED") return { title: REACT_TITLES.CLOSED, text: `Votes are open for ${REACT_WINDOW_DAYS} days after a session — thanks for wanting to weigh in.` };
+  return mm && REACT_TITLES[mm[1]] ? { title: REACT_TITLES[mm[1]], text: mm[2] } : { title: "Couldn't save your vote", text: "Please try again." };
+}
 /* The attached plan's estimate — the "Total time: N min" line both writers put in a plan's text (attach_drill_plan_to_session
    and the client's serializer). Display only; never a length. */
 function planEstimate(s) {
@@ -24917,6 +24932,40 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   // E1/E3 U1 — the close-out's "Actual time" (per session): { start, end, setup, lenOnly, len } as typed; finalize reads it.
   const [actDraft, setActDraft] = useState({});
   const [actErr, setActErr] = useState({});                 // { [sessionId]: { title, text } } — inline, before any dialog
+  /* E1/E3 U2 — reactions. myVotes: the caller's OWN votes, read straight from training_session_reactions (its only RLS policy is
+     own-row SELECT, so this can never return anyone else's). tally: leadership's counts from session_reaction_tally — ONE batched
+     call over every finished session on hand; the RPC returns (session_id, up, down) only, and NO row for a session under 3
+     counted votes, so "asked but absent" = not enough votes yet (never shown as zero). */
+  const [myVotes, setMyVotes] = useState({});               // { [sessionId]: 1 | -1 }
+  const [tally, setTally] = useState(null);                 // { asked: Set(ids), by: { [sessionId]: { up, down } } } — null until loaded
+  const [voteBusy, setVoteBusy] = useState(null);
+  const [voteErr, setVoteErr] = useState({});               // { [sessionId]: { title, text } }
+  const loadMyVotes = async () => {
+    const { data, error } = await supabase.from("training_session_reactions").select("session_id, value");
+    if (error || !data) { console.error("[reactions] own votes read failed — keeping last-known:", error); return; }   // a failed read is not "no votes"
+    setMyVotes(Object.fromEntries(data.map((r) => [r.session_id, r.value])));
+  };
+  useEffect(() => { if (meId) loadMyVotes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
+  const finishedIds = (sessions || []).filter((x) => x.done && !x.cancelled).map((x) => x.id).sort();
+  const finishedKey = finishedIds.join(",");
+  const loadTally = async () => {
+    if (!isLeader(role) || !finishedIds.length) return;
+    const ids = finishedIds;
+    const { data, error } = await supabase.rpc("session_reaction_tally", { p_session_ids: ids });
+    if (error || !Array.isArray(data)) { console.error("[reactions] tally read failed — keeping last-known:", error); return; }
+    // counts only: session_id + up + down are the only fields read — nothing else in the reply is ever kept or shown
+    setTally({ asked: new Set(ids), by: Object.fromEntries(data.map((r) => [r.session_id, { up: Number(r.up) || 0, down: Number(r.down) || 0 }])) });
+  };
+  useEffect(() => { loadTally(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [finishedKey, isLeader(role)]);
+  async function vote(s, value) {
+    if (voteBusy || myVotes[s.id] === value) return;
+    setVoteBusy(s.id); setVoteErr((m) => { const c = { ...m }; delete c[s.id]; return c; });
+    const { error } = await supabase.rpc("set_session_reaction", { p_session_id: s.id, p_value: value });
+    setVoteBusy(null);
+    if (error) { setVoteErr((m) => ({ ...m, [s.id]: reactErr(error) })); return; }
+    setMyVotes((m) => ({ ...m, [s.id]: value }));
+    loadTally();
+  }
   const [auditRows, setAuditRows] = useState(null);         // training_session_audit (leadership-readable), newest first; null = not loaded
   const [histOpenId, setHistOpenId] = useState(null);       // the row whose "Corrections (N)" history is open
   const [stationBy, setStationBy] = useState({});           // R1: sessionId -> drill_window_presence rows (fetched at Complete)
@@ -25502,6 +25551,34 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   // ============================ MEMBER VIEW (presentational reskin) ============================
   // Reuses existing reads only (sessions/plan/members/monthSessions, dueInfo helpers). No queries,
   // no attendance logic, no MonthCalendar internals touched. Leader return below is unchanged.
+  /* E1/E3 U2 — the reactions line for a finished session (both views). Someone on its roll: a changeable 👍 / 👎 (their own vote
+     lit), open for 14 days after the date, then disabled with "Voting closed". Leadership (is_leader — the leader view's rows): the
+     anonymous tally — counts only, a quiet "Not enough votes yet" under 3, nothing at all until the batched read lands. */
+  const renderReact = (s) => {
+    const onRoll = (s.attendance || []).includes(meId);
+    const mine = myVotes[s.id], closed = reactClosed(s), err = voteErr[s.id];
+    const t = isLeader(role) && tally && tally.asked.has(s.id) ? (tally.by[s.id] || null) : undefined;   // undefined = not shown; null = under 3
+    const vBtn = (v, glyph, label) => (
+      <button type="button" data-testid={v === 1 ? "react-up" : "react-down"} aria-label={label} aria-pressed={mine === v} disabled={closed || voteBusy === s.id}
+        onClick={() => vote(s, v)}
+        style={{ fontSize: 13, lineHeight: 1, padding: "4px 9px", borderRadius: 7, fontFamily: "inherit", border: `1px solid ${mine === v ? FIRE.amberText : FIRE.lineNoir}`,
+          background: mine === v ? "rgba(232,170,60,.12)" : FIRE.card2Noir, color: FIRE.textSecondary, opacity: closed && mine !== v ? 0.45 : 1, cursor: closed ? "default" : "pointer" }}>{glyph}</button>
+    );
+    return (
+      <div data-testid="react-row" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 5 }}>
+        {onRoll && (<>
+          <span style={{ fontSize: 11.5, color: FIRE.textMuted }}>{closed && mine ? "Your vote" : "How was it?"}</span>
+          {vBtn(1, "👍", "Thumbs up")}{vBtn(-1, "👎", "Thumbs down")}
+          {closed && <span data-testid="react-closed" style={{ fontSize: 11, color: FIRE.textMuted }}>Voting closed</span>}
+        </>)}
+        {t !== undefined && (t
+          ? <span data-testid="react-tally" title="Anonymous — counts only" style={{ fontSize: 11.5, color: FIRE.textSecondary, ...FS.num }}>👍 {t.up} · 👎 {t.down}</span>
+          : <span data-testid="react-tally-few" style={{ fontSize: 11, color: FIRE.textMuted, fontStyle: "italic" }}>Not enough votes yet</span>)}
+        {err && <span role="alert" data-testid="react-err" style={{ fontSize: 11.5, color: FIRE.amberText }}><b>{err.title}.</b> {err.text}</span>}
+      </div>
+    );
+  };
+
   if (memberView) {
     const DISPLAY = "'Oswald', system-ui, sans-serif";
     const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
@@ -25656,6 +25733,24 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
             </div>
           )}
         </div>
+
+        {/* E1/E3 U2 — HOW WAS IT: finished sessions I was on the roll for, last 30 days, newest first (votes open 14 days). */}
+        {(() => {
+          const mineRecent = sessions.filter((s) => s.done && !s.cancelled && (s.attendance || []).includes(meId) && (t0 - sessDate(s)) / 86400000 <= 30)
+            .sort((a, b) => sessDate(b) - sessDate(a)).slice(0, 5);
+          return mineRecent.length > 0 && (
+            <div data-testid="react-card" style={card}>
+              <CardHead icon={MessageSquare} title="How was training?" right={<span style={{ fontSize: 11, color: FIRE.textMuted }}>Anonymous · leaders see totals only</span>} />
+              {mineRecent.map((s, i) => (
+                <div key={s.id} id={`mr-${s.id}`} style={{ padding: "9px 2px", borderBottom: i === mineRecent.length - 1 ? "none" : `1px solid ${FIRE.lineNoir}` }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>{s.title}</div>
+                  <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...num }}>{fmtSess(s)}</div>
+                  {renderReact(s)}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* 3 — CATCH UP: latest three, then Show all. Review notes only where a real plan exists; otherwise the
             session itself (its day on the calendar). No fake catch-up content. */}
@@ -26037,6 +26132,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                       </span>
                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[s.m].slice(0, 3)} {s.d}{s.y !== today.getFullYear() ? `, ${s.y}` : ""}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                       {s.cancelled && <div data-testid="row-cancel-reason" style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Cancelled{cancelReasonOf(s.id) ? ` — ${cancelReasonOf(s.id)}` : ""}</div>}
+                      {s.done && !s.cancelled && (att.includes(meId) || isLeader(role)) && renderReact(s)}
                       {(canManage || isLeader(role)) && pendingFor(s.id) && (() => { const pr = pendingFor(s.id); return (
                         <div data-testid="row-pending" style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           {pr.kind === "cancel" ? "Cancellation" : "Restore"} pending — waiting on a second sign-off ({pr.initiator_name} asked)
