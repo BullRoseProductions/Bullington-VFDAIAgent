@@ -19,6 +19,9 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "575a362";   // live main when this was drafted (industrial-noir-52 — cron honesty)
+// Structural fences PINNED to the reviewed range (released as industrial-noir-53): base 575a362 .. reviewed c69070d — "vs the
+// base" / "the working tree" would go red once later work lands. The handler checks run on the current code.
+const REV = "c69070d";
 const SECRET = "s3cret-cron-value-0123456789abcdef";
 Object.assign(process.env, { PULSE_ENABLED: "1", RESEND_API_KEY: "re-test", SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: "svc-test-key", CRON_SECRET: SECRET });
 
@@ -128,11 +131,11 @@ for (const t of ["training_sessions", "session_attendance", "certs_metrics", "ap
   ok("bad auth → still 401, no client, nothing sent", r.code === 401 && r.clients === 0 && r.sends.length === 0); }
 const { digestOutcome } = await import(pathToFileURL(join(root, "shared/cron-outcome.js")).href);
 ok("rule: members-read is its own step, ahead of metrics-read", JSON.stringify(digestOutcome({ membersError: "x", metricsError: "y" }).failed) === '["members-read","metrics-read"]');
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean).sort();
+const changed = execSync(`git diff --name-only ${BASE} ${REV}`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
 const allowed = ["api/digest.js", "claude/B4C_DigestMembersDecouple_Draft.md", "docs/review/cron_honesty_test.mjs", "docs/review/digest_members_decouple_test.mjs", "shared/cron-outcome.js"];
 ok("changed: only api/digest.js + shared/cron-outcome.js (+ this test, the one cron_honesty assertion it moves, notes)", changed.every((f) => allowed.includes(f)) && changed.includes("api/digest.js"), JSON.stringify(changed));
-const untouched = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim() === "";
+const untouched = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim() === "";
 ok("api/_cron.js, api/pulse.js, vercel.json untouched; no SQL", ["api/_cron.js", "api/pulse.js", "vercel.json", "sql"].every(untouched));
-const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
+ok(`verified untouched at ${REV}: App.jsx 132 · digest 32 · assistant 14`, tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
