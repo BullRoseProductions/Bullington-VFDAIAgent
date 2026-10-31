@@ -1,0 +1,64 @@
+PASS  pins reproduce: all 15 captured functions (md5 of pg_get_functiondef) + their ACLs, created from the LIVE text
+PASS  pins reproduce: training_sessions + session_attendance — 17 constraints + 5 triggers deparse exactly as live
+PASS  pins reproduce: the migration's own PREFLIGHT passes on the mock (trigger + constraint defs, both column lists, every function md5)  — PINS-OK
+PASS  the mock ledger is non-trivial: 3 attested rows in Alpha, the 120-minute drill capped at 90  — 3 rows, 2 capped
+PASS  Slice R applies (preflight + the in-transaction ledger / rows / table / RLS / privileges / bodies / ACL proof pass) and returns its state row
+PASS  state row: the table exactly (columns, constraints), RLS on, one own-row SELECT policy, authenticated SELECT only, anon none, 0 rows, both RPCs SECURITY DEFINER + not anon  — {"rls":true,"rows":0,"iso_md5":"705c9a9b5532d28824f5e50e74d6059f","fn_count":21,"guard_md5":"c1af95df40d551b75998cde0a8f290f7","privileges":{"anon":"(none)","authenticated":"SELECT"},"correct_md5":"8c00066509e9dca338dc3662f55e1211","attested_md5":"aff25333771cd38c1f473bcde5e1e96e","table_columns":"id:uuid:NO:gen_random_uuid(),department_id:uuid:NO:,session_id:uuid:NO:,member_id:uuid:NO:,value:int2:NO:,created_at:timestamptz:NO:now(),updated_at:timestamptz:NO:now()","total_policies":2,"policies_on_table":[{"cmd":"SELECT","name":"members read own reaction","qual":"(member_id = my_member_id())","check":null,"roles":"{authenticated}"}],"table_constraints":"c:value::;f:department_id:departments:c;f:member_id:members:c;f:session_id:training_sessions:c;p:id::;u:session_id,member_id::","verified_presence":1,"set_session_reaction":{"acl":"{postgres=X/postgres,authenticated=X/postgres,service_role
+PASS  re-run refuses (already applied)  — PREFLIGHT: training_session_reactions, set_session_reaction, session_reaction_tally or the reactions
+PASS  S0 table + RLS on + exactly the one own-row SELECT policy; authenticated SELECT only, anon nothing; both RPCs SECURITY DEFINER, anon cannot execute
+PASS  R1 a member votes 1 and reads back their own row — no one else's
+PASS  R2 re-vote -1 updates the same row (one row, value -1) — no duplicate
+PASS  R3 4 votes on session A: the real DA's raw SELECT returns 0 rows of anyone else's (only their own), while the tally returns up 2 · down 2
+PASS  R4 a 2-vote session returns NO tally row (≥ 3 enforced in the DB); the 4-vote session in the same call does
+PASS  R5 a member not on the roll → NOT_PRESENT, nothing written
+PASS  R6 a session dated 15 days ago → CLOSED; 14 days ago → accepted
+PASS  R7 refused: not finalized · value 0 · value 2 · NULL · unknown session (RPC); value 0 written raw → the CHECK
+PASS  R8 a member's raw INSERT / UPDATE / DELETE on the table → permission denied (the RPC is the only write path)
+PASS  R9 removed from the roll via Correct → that vote stops counting (up 2 · down 1); one more removed → 2 counted → NO row (the votes themselves stay)
+PASS  R10 a non-leader calling the tally → NOT_ALLOWED
+PASS  R11 a reopened session refuses new votes (NOT_FINALIZED) and keeps the existing two
+12 passed, 0 failed, 0 skipped
+PASS  RETEST: 12 passed, 0 failed, 0 skipped — S0 + R1…R11  — 12 passed, 0 failed, 0 skipped
+PASS  RETEST left nothing behind (rolled back): 0 reactions, the sessions / roll / audit as before
+PASS  another department: its DA sees up 3 for its own session; Alpha's DA gets NO row for it; an Alpha member's vote on it → NOT_FOUND; Alpha's DA reads 0 raw rows  — ok:[{"session_id":"40000000-0000-0000-0000-00000000000b","up":3,"down":0}] · ok:[] · NOT_FOUND: no such session in your department. · ok:[{"n":0}]
+PASS  a cancelled (finalized) session → CANCELLED  — CANCELLED: this session was cancelled.
+PASS  anon: reading the table, voting and the tally → permission denied  — permission denied for table training_session_react · permission denied for function set_session_reactio · permission denied for function session_reaction_ta
+PASS  ROLLBACK refuses while the table holds a vote (they'd be lost)  — ROLLBACK: training_session_reactions holds 3 vote(s) — dropping it would lose them. Refusing.
+PASS  ROLLBACK (empty table): drops the two RPCs + the table; every other function / policy, the triggers + constraints, the ledger functions back on their pins
+PASS  ROLLBACK refuses a second time (not applied)
+PASS  re-apply after rollback passes
+PASS  post-apply drift (the tally threshold quietly lowered to 2) → RETEST FAILs  — FAIL  R4 B has 2 votes; tally rows B 1, A 1 | FAIL  R9 after one removal up 2 down 1; after two 1 rows; stored votes 4
+PASS  post-apply drift (a leadership read policy added on the table) → RETEST FAILs  — FAIL  S0 the slice is not in place as intended | FAIL  R3 rows on A 4; DA sees 3 others / 1 own; tally up 2 down 2
+PASS  post-apply drift (INSERT granted to authenticated + an insert policy) → RETEST FAILs  — FAIL  S0 the slice is not in place as intended | FAIL  R8 2 of 3 raw writes refused
+PASS  post-apply drift (the vote's roll check removed) → RETEST FAILs  — FAIL  R5 accepted | FAIL  R9 after one removal up 2 down 1; after two 0 rows; stored votes 5
+PASS  preflight refuses: the lock guard drifted (not the post-T c1af95df)  — PREFLIGHT: tg_training_session_lock_guard() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: correct_training_session drifted (not the post-T 8c000665)  — PREFLIGHT: correct_training_session(p_session_id uuid, p_changes jsonb, p_add uuid[], p_remove uuid[], p_reason text) dr
+PASS  preflight refuses: attested_training drifted (the ledger)  — PREFLIGHT: attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone) drifted from t
+PASS  preflight refuses: is_leader drifted  — PREFLIGHT: is_leader() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: my_member_id drifted  — PREFLIGHT: my_member_id() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: the attendance membership-window trigger function drifted  — PREFLIGHT: tg_session_attendance_membership_window() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: a session_attendance trigger dropped  — PREFLIGHT: a training_sessions / session_attendance trigger changed. Refusing.
+PASS  preflight refuses: a session_attendance constraint changed  — PREFLIGHT: a training_sessions / session_attendance constraint changed. Refusing.
+PASS  preflight refuses: a policy changed  — PREFLIGHT: a public policy changed since the capture. Refusing.
+PASS  preflight refuses: the session_attendance columns changed  — PREFLIGHT: the training_sessions / session_attendance columns changed since the capture. Refusing.
+PASS  preflight refuses: already applied (the table exists)  — PREFLIGHT: training_session_reactions, set_session_reaction, session_reaction_tally or the reactions policy already exis
+PASS  preflight refuses: already applied (a function exists)  — PREFLIGHT: training_session_reactions, set_session_reaction, session_reaction_tally or the reactions policy already exis
+PASS  proof catches + rolls back: it also moves the ledger (attested_training cap 90 → 120)  — Post-condition failed: the credited-hours ledger moved for department(s) 00000000-0000-0000-0000-00000000000a. Rolling back.
+PASS  proof catches + rolls back: it changes a roll row  — Post-condition failed: a training_sessions / session_attendance row changed. Rolling back.
+PASS  proof catches + rolls back: it adds a write (INSERT) policy on the table  — Post-condition failed: the reactions table RLS is not exactly ON + the one own-row SELECT policy (no write policy, no leadership r
+PASS  proof catches + rolls back: it adds a leadership read policy  — Post-condition failed: the reactions table RLS is not exactly ON + the one own-row SELECT policy (no write policy, no leadership r
+PASS  proof catches + rolls back: it leaves RLS off  — Post-condition failed: the reactions table RLS is not exactly ON + the one own-row SELECT policy (no write policy, no leadership r
+PASS  proof catches + rolls back: it grants INSERT to authenticated  — Post-condition failed: reactions table privileges — authenticated must hold SELECT only, anon and PUBLIC nothing. Rolling back.
+PASS  proof catches + rolls back: it grants SELECT to anon  — Post-condition failed: reactions table privileges — authenticated must hold SELECT only, anon and PUBLIC nothing. Rolling back.
+PASS  proof catches + rolls back: it grants UPDATE (value) column-level to authenticated  — Post-condition failed: reactions table privileges — authenticated must hold SELECT only, anon and PUBLIC nothing. Rolling back.
+PASS  proof catches + rolls back: a member FK without ON DELETE CASCADE  — Post-condition failed: the reactions table constraints are not exactly pk + unique (session, member) + 3 cascading FKs + the value
+PASS  proof catches + rolls back: the unique (session, member) missing  — Post-condition failed: the reactions table constraints are not exactly pk + unique (session, member) + 3 cascading FKs + the value
+PASS  proof catches + rolls back: the vote RPC not SECURITY DEFINER  — Post-condition failed: set_session_reaction is not the generated body / SECURITY DEFINER / search_path=public / authenticated + se
+PASS  proof catches + rolls back: the tally granted to anon  — Post-condition failed: session_reaction_tally is not the generated body / STABLE SECURITY DEFINER / search_path=public / authentic
+PASS  proof catches + rolls back: the tally threshold edited to 2 (not the generated body)  — Post-condition failed: session_reaction_tally is not the generated body / STABLE SECURITY DEFINER / search_path=public / authentic
+PASS  proof catches + rolls back: a vote seeded into the new table  — Post-condition failed: the reactions table is not empty, has a trigger, or a view reads it. Rolling back.
+PASS  proof catches + rolls back: a view reading the table  — Post-condition failed: the reactions table is not empty, has a trigger, or a view reads it. Rolling back.
+PASS  proof catches + rolls back: it also changes another function (is_leader)  — Post-condition failed: another public function changed. Rolling back.
+PASS  proof catches + rolls back: it also adds a policy elsewhere  — Post-condition failed: another policy changed, or the policy count is not +1. Rolling back.
+
+49 passed, 0 failed
