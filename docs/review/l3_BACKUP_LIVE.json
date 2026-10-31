@@ -1,0 +1,48 @@
+{
+  "d2a_md5": "f04e8dffd94cad6bc21dd0b7ec786e21",
+  "read_at": "2026-10-31 04:16:48.151319+00",
+  "d2a_rows": [
+    {
+      "lat": "32.517875",
+      "lng": "-98.044255",
+      "radius_m": "50",
+      "station_id": "098b694b-35b5-4721-91eb-f8102733aaf3",
+      "captured_at": "2026-08-27 05:29:20.319228+00",
+      "geofence_enabled": "true"
+    },
+    {
+      "lat": "32.492551",
+      "lng": "-97.778922",
+      "radius_m": "400",
+      "station_id": "997ab6d4-b7a1-495d-8c1c-b5fd55781b56",
+      "captured_at": "2026-08-27 05:29:20.319228+00",
+      "geofence_enabled": "false"
+    },
+    {
+      "lat": null,
+      "lng": null,
+      "radius_m": "150",
+      "station_id": "a0e2363c-cf2c-4229-94a4-e279e5addcc2",
+      "captured_at": "2026-08-27 05:29:20.319228+00",
+      "geofence_enabled": "false"
+    },
+    {
+      "lat": null,
+      "lng": null,
+      "radius_m": "150",
+      "station_id": "b8bab945-f201-47fd-90ea-df3b918b3888",
+      "captured_at": "2026-08-27 05:29:20.319228+00",
+      "geofence_enabled": "false"
+    },
+    {
+      "lat": null,
+      "lng": null,
+      "radius_m": "150",
+      "station_id": "c07322cd-3e9e-4cc3-8e95-84c47505004b",
+      "captured_at": "2026-08-27 05:29:20.319228+00",
+      "geofence_enabled": "false"
+    }
+  ],
+  "profiles_md5": "d41d8cd98f00b204e9800998ecf8427e",
+  "profiles_rows": []
+}

@@ -1,0 +1,42 @@
+PASS  THE BACKUP REPRODUCES LIVE: the generated re-create (captured DDL + every backed-up row) passes its own post-condition — shape = the capture, content md5s = live's
+PASS  …the _d2a content md5 in the mock is live's exactly (f04e8dff) — 5 rows, 3 with NULL coordinates, byte-for-byte
+PASS  …profiles' four constraints deparse exactly as live (pk + FKs → auth.users CASCADE / members / departments SET NULL)  — [{"conname":"profiles_department_id_fkey","d":"FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL"},{"conname":"profiles_id_fkey","d":"FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"},{"conname":"profiles_member_id_fkey","d":"FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL"},{"conname":"profiles_pkey","d":"PRIMARY KEY (id)"}]
+PASS  pins reproduce: the migration's own PREFLIGHT passes on the mock (zero references, both tables' exact shape + content, the sets)  — PINS-OK
+PASS  L-3 applies (preflight + the in-transaction relations / sets / every-other-table rows / auth.users / verified proof pass)
+PASS  state row: both tables absent; relations −2; the sets as before  — {"fn_count":2,"auth_users":2,"fn_set_md5":"177c8120e3efe3725de571c6f9b5049e","policy_count":1,"policy_set_md5":"b4b1c1fe16cc297e03b0afda56cadd94","trigger_set_md5":"f87eb8b47b76f289f3dcb4fd63df63ad","profiles_present":false,"public_relations":4,"relation_list_md5":"5e2abffcbbc00b2797f743b2a67c5581","verified_presence":1,"d2a_resync_backup_present":false}
+PASS  …and every other table untouched (members md5 before = after)
+PASS  re-run refuses (already gone)  — PREFLIGHT: public.profiles or public._d2a_resync_backup is already gone — L-3 looks applied. Refusin
+PASS  S0 both tables gone; relations = the capture minus the two; the function / policy / trigger sets unchanged
+PASS  R1 reversible: the captured DDL + the backup re-create both tables exactly (shape, constraints, RLS, privileges) with content md5s = the backup
+PASS  R2 re-created, they are as unreachable as before: no anon grant, no policy (RLS denies authenticated on profiles), no grant on _d2a
+3 passed, 0 failed, 0 skipped
+PASS  RETEST: 3 passed, 0 failed — S0 gone + R1 the re-create reproduces both tables exactly + R2 still unreachable  — 3 passed, 0 failed, 0 skipped
+PASS  RETEST left nothing behind: the tables are still gone after its SENTINEL
+PASS  ROLLBACK: both tables re-created exactly (shape + content md5 = the backup = live) — the drop is reversible
+PASS  ROLLBACK refuses a second time (the tables exist)
+PASS  re-apply after rollback passes
+PASS  the standalone backup script (sql/l3_backup_rows.sql) restores the rows into re-created empty tables; its own check returns true / true  —   [{"tz":"UTC","profiles_restored":true,"d2a_restored":true}]
+PASS  preflight refuses: a public function references profiles  — PREFLIGHT: a function body (any schema) references a table on the drop list (uses_profiles()) — it comes off the list. Refusing.
+PASS  preflight refuses: a function in ANOTHER schema references _d2a_resync_backup  — PREFLIGHT: a function body (any schema) references a table on the drop list (auth.peek()) — it comes off the list. Refusing.
+PASS  preflight refuses: a policy on another table references profiles  — PREFLIGHT: a policy expression references a table on the drop list (public.members.via profiles) — it comes off the list. Refusing.
+PASS  preflight refuses: a view reads profiles  — PREFLIGHT: a view / matview definition references a table on the drop list (v_profiles) — it comes off the list. Refusing.
+PASS  preflight refuses: a rule mentions _d2a_resync_backup  — PREFLIGHT: a rule references a table on the drop list (public.audit_log.log_rule) — it comes off the list. Refusing.
+PASS  preflight refuses: a foreign key points at profiles  — PREFLIGHT: a foreign key pointing at it references a table on the drop list (prefs.prefs_profile_id_fkey) — it comes off the list. Refusing.
+PASS  preflight refuses: a trigger is put on profiles  — PREFLIGHT: a trigger / policy on it references a table on the drop list (p_noop) — it comes off the list. Refusing.
+PASS  preflight refuses: a policy is put on _d2a_resync_backup  — PREFLIGHT: a trigger / policy on it references a table on the drop list (peek) — it comes off the list. Refusing.
+PASS  preflight refuses: a row appears in profiles (content ≠ the backup)  — PREFLIGHT: public.profiles no longer matches the committed backup (sql/l3_backup_rows.sql) — re-capture before dropping. Refusing.
+PASS  preflight refuses: a _d2a row changed (content ≠ the backup)  — PREFLIGHT: public._d2a_resync_backup no longer matches the committed backup (sql/l3_backup_rows.sql) — re-capture before dropping. Refusing.
+PASS  preflight refuses: a column added to profiles  — PREFLIGHT: public.profiles is not the captured table (columns / constraints / indexes / comment / RLS / policies / triggers / privileges). R
+PASS  preflight refuses: _d2a granted to authenticated  — PREFLIGHT: public._d2a_resync_backup is not the captured table (columns / constraints / indexes / comment / RLS / policies / triggers / priv
+PASS  preflight refuses: already applied (a table gone)  — PREFLIGHT: public.profiles or public._d2a_resync_backup is already gone — L-3 looks applied. Refusing.
+PASS  proof catches + rolls back: it also drops a third table  — Post-condition failed: the relations are not exactly the capture minus the two. Rolling back.
+PASS  proof catches + rolls back: it changes a row in another table  — Post-condition failed: rows changed in members (or a table appeared / vanished). Rolling back.
+PASS  proof catches + rolls back: it deletes a station_presence row  — Post-condition failed: rows changed in station_presence (or a table appeared / vanished). Rolling back.
+PASS  proof catches + rolls back: it flips verified presence  — Post-condition failed: rows changed in station_presence (or a table appeared / vanished). Rolling back.
+PASS  proof catches + rolls back: it creates a function  — Post-condition failed: a function changed. Rolling back.
+PASS  proof catches + rolls back: it drops a policy  — Post-condition failed: a policy changed. Rolling back.
+PASS  proof catches + rolls back: it adds a trigger  — Post-condition failed: a trigger changed. Rolling back.
+PASS  proof catches + rolls back: it deletes an auth user  — Post-condition failed: auth.users changed. Rolling back.
+PASS  proof catches + rolls back: it drops with CASCADE and takes a dependent along (a view created first)  — Post-condition failed: the relations are not exactly the capture minus the two. Rolling back.
+
+36 passed, 0 failed

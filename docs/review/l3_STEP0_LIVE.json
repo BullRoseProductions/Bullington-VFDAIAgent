@@ -1,0 +1,205 @@
+{
+  "rows": {
+    "profiles": 0,
+    "_d2a_captured_at": {
+      "max": "2026-08-27 05:29:20.319228+00",
+      "min": "2026-08-27 05:29:20.319228+00"
+    },
+    "_d2a_resync_backup": 5,
+    "profiles_created_at": {
+      "max": null,
+      "min": null
+    },
+    "profiles_member_id_set": 0,
+    "profiles_member_id_resolves": 0
+  },
+  "counts": {
+    "fns": 231,
+    "policies": 182,
+    "verified": 1028,
+    "public_relations": 93
+  },
+  "tables": {
+    "profiles": {
+      "acl": "{postgres=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+      "rls": true,
+      "kind": "r",
+      "owner": "postgres",
+      "stats": {
+        "idx_scan": 39,
+        "seq_scan": 67,
+        "n_tup_del": 0,
+        "n_tup_ins": 0,
+        "n_tup_upd": 0,
+        "n_live_tup": 0,
+        "last_idx_scan": "2026-10-09 02:22:14.002814+00",
+        "last_seq_scan": "2026-10-27 16:23:52.729327+00",
+        "last_autovacuum": null,
+        "last_autoanalyze": null
+      },
+      "fks_in": null,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "department_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "member_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "access",
+          "type": "text",
+          "default": "'Member'::text",
+          "not_null": true
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "comment": "Bridges a real login (auth.users) to a department and a roster member.",
+      "indexes": {
+        "profiles_pkey": "CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)"
+      },
+      "policies": null,
+      "triggers": null,
+      "force_rls": false,
+      "reachable": {
+        "anon": {
+          "DELETE": false,
+          "INSERT": false,
+          "SELECT": false,
+          "UPDATE": false
+        },
+        "authenticated": {
+          "DELETE": true,
+          "INSERT": true,
+          "SELECT": true,
+          "UPDATE": true
+        }
+      },
+      "dependents": [
+        "toast table pg_toast.pg_toast_17589 [i]"
+      ],
+      "constraints": {
+        "profiles_pkey": "PRIMARY KEY (id)",
+        "profiles_id_fkey": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE",
+        "profiles_member_id_fkey": "FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL",
+        "profiles_department_id_fkey": "FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL"
+      },
+      "publications": null
+    },
+    "_d2a_resync_backup": {
+      "acl": "{postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres}",
+      "rls": true,
+      "kind": "r",
+      "owner": "postgres",
+      "stats": {
+        "idx_scan": 5,
+        "seq_scan": 4,
+        "n_tup_del": 0,
+        "n_tup_ins": 5,
+        "n_tup_upd": 0,
+        "n_live_tup": 5,
+        "last_idx_scan": "2026-08-27 05:29:20.400763+00",
+        "last_seq_scan": "2026-10-27 16:22:14.042057+00",
+        "last_autovacuum": null,
+        "last_autoanalyze": null
+      },
+      "fks_in": null,
+      "columns": [
+        {
+          "name": "station_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "lat",
+          "type": "double precision",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "lng",
+          "type": "double precision",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "radius_m",
+          "type": "integer",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "geofence_enabled",
+          "type": "boolean",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "captured_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "comment": "Pre-D2a values of the DEFAULT stations geo columns, captured before the resync in sql/phaseD2a_per_station_fences.sql. Exists solely so section 1 can be undone. Not read by the app.",
+      "indexes": {
+        "_d2a_resync_backup_pkey": "CREATE UNIQUE INDEX _d2a_resync_backup_pkey ON public._d2a_resync_backup USING btree (station_id)"
+      },
+      "policies": null,
+      "triggers": null,
+      "force_rls": false,
+      "reachable": {
+        "anon": {
+          "DELETE": false,
+          "INSERT": false,
+          "SELECT": false,
+          "UPDATE": false
+        },
+        "authenticated": {
+          "DELETE": false,
+          "INSERT": false,
+          "SELECT": false,
+          "UPDATE": false
+        }
+      },
+      "dependents": null,
+      "constraints": {
+        "_d2a_resync_backup_pkey": "PRIMARY KEY (station_id)"
+      },
+      "publications": null
+    }
+  },
+  "read_at": "2026-10-31 04:15:33.74223+00",
+  "ref_cron": null,
+  "ref_rules": null,
+  "ref_views": null,
+  "stats_reset": "2026-05-22 15:13:20.515541+00",
+  "ref_policies": null,
+  "ref_functions": null,
+  "auth_users_triggers": null,
+  "ref_function_snippets": null,
+  "ref_triggers_anywhere": null
+}
