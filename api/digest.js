@@ -36,6 +36,7 @@ import { apparatusCounts } from "../shared/apparatus-status.js";
 import { deptAttendance } from "../shared/attendance.js";
 import { isListedMember, isCountedMember } from "../shared/members.js";
 import { requireCron } from "./_cron.js";
+import { digestOutcome } from "../shared/cron-outcome.js";   // cron honesty: a failed run answers 5xx
 
 const DEFAULT_TO = "ashlea@b4thecall.com";
 const TEST_TO = (process.env.DIGEST_TEST_TO || DEFAULT_TO).split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
@@ -613,7 +614,12 @@ export default async function handler(req, res) {
       }),
     ]);
   } catch (e) {
-    return res.status(502).json({ ok: false, error: String(e?.message || e) });   // a failed READ is never an empty digest
+    // A failed READ is never an empty digest. CRON HONESTY: the database's message goes to the LOG; the response
+    // names the failed step only (it used to echo the raw message — and nothing logged it, so the 2026-10-26 502's
+    // cause was unrecoverable).
+    const o = digestOutcome({ detectionError: String(e?.message || e) });
+    console.error(`[digest] FAILED ${o.status} steps=${o.failed.join(",")}`, String(e?.message || e));
+    return res.status(o.status).json({ ok: false, failed: o.failed });
   }
 
   // Group by department — the only thing standing in for RLS now.
@@ -838,6 +844,17 @@ export default async function handler(req, res) {
     } catch (e) {
       results.push({ name, counts, metrics, dutiesWeek, sentTo: null, error: String(e?.message || e), ...(notified ? { notified } : {}) });   // one bad send never hides the rest
     }
+  }
+  /* CRON HONESTY (shared/cron-outcome.js — the rule, incl. the partial-send case, is written out there). Any failed
+     step answers 5xx so Vercel's cron monitoring sees it; the details go to the log; the response names the failed
+     steps, how many departments were mailed, and which were NOT (names only). A clean run returns exactly as before. */
+  const outcome = digestOutcome({ metricsError: mi.error, dutiesError: du.error, isoErrors, results, pushEnabled: PUSH_ENABLED });
+  if (outcome.status !== 200) {
+    console.error(`[digest] FAILED ${outcome.status} steps=${outcome.failed.join(",")}`, JSON.stringify({
+      metricsError: mi.error, dutiesError: du.error, isoErrors, notSent: outcome.notSent,
+      sendErrors: results.filter((r) => r.error).map((r) => ({ name: r.name, error: r.error })),
+      notifyErrors: results.filter((r) => r.notified && (r.notified.error || r.notified.push?.error)).map((r) => ({ name: r.name, error: r.notified.error || r.notified.push.error })) }));
+    return res.status(outcome.status).json({ ok: false, failed: outcome.failed, sent: outcome.sent, notSent: outcome.notSent, ...(isDry ? { dryRun: true } : {}) });
   }
   return res.status(200).json({
     ...(isDry ? { dryRun: true, note: "Nothing was emailed and no notifications were written." } : {}),

@@ -26,6 +26,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { requireCron } from "./_cron.js";
+import { pulseOutcome } from "../shared/cron-outcome.js";   // cron honesty: a failed run answers 5xx
 // The WRITER only. sendPush stays unimported — this slice must remain incapable of sending.
 // insertNotifications already owns the upsert + read-back dance (ignoreDuplicates returns no
 // representation, so "what was actually new" has to be read back by created_at); duplicating
@@ -971,13 +972,27 @@ export default async function handler(req, res) {
   };
 
   // Prove the service-role connection works now rather than discovering it in slice 3 mid-detection.
+  // A HEAD request carries no error body, so error.message is often "" — the HTTP status is what names the cause
+  // (401 = the key, 5xx = the database), so it goes in the LOG. Never in the response.
+  let dbError = null;
   try {
-    const { error } = await sb.from("notifications").select("id", { count: "exact", head: true }).limit(1);
-    report.db = error ? `unreachable: ${error.message}` : "ok";
+    const { error, status } = await sb.from("notifications").select("id", { count: "exact", head: true }).limit(1);
+    if (error) dbError = `status ${status ?? "?"}${error.message ? ` ${error.message}` : ""}${error.code ? ` (${error.code})` : ""}`;
   } catch (e) {
-    report.db = `unreachable: ${String(e?.message || e)}`;
+    dbError = String(e?.message || e);
   }
+  report.db = dbError ? `unreachable: ${dbError}` : "ok";
 
   console.log(`[pulse] done scope=${scope} dry=${isDry} deliverable=${deliverable.length} db=${report.db}`);
+
+  /* CRON HONESTY (shared/cron-outcome.js). A run whose work failed answers 5xx so Vercel's cron monitoring sees it;
+     the details go to the log, and the response names only the failed steps. A clean run returns the report exactly
+     as before. */
+  const outcome = pulseOutcome({ dbError, detectErrors, muteErrors, writeError, pushErrors, pushEnabled: PUSH_ENABLED });
+  if (outcome.status !== 200) {
+    console.error(`[pulse] FAILED ${outcome.status} steps=${outcome.failed.join(",")}`, JSON.stringify({
+      db: report.db, detectErrors, writeError, pushErrors, muteErrors: muteErrors.length }));
+    return res.status(outcome.status).json({ ok: false, failed: outcome.failed, done: { written, pushed } });
+  }
   return res.status(200).json(report);
 }
