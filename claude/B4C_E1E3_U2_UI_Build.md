@@ -1,5 +1,16 @@
 # B4C — E1/E3 Slice U2 (reactions UI) — built, for review. NOT promoted.
 
+> **Amended (gate ruling 2, `B4C_E1E3_U2_UI_ReviewRecord`): trainings only.**
+> - A new `reactable(s)` = finished, not cancelled, `!s.isMeeting`, `audience !== "board"`. It gates all three places:
+>   - the member card's filter;
+>   - the leader-row condition;
+>   - the tally batch (excluded sessions are never asked for).
+> - Leadership-audience **trainings** still count. The client's `isMeeting()` would have dropped them too, so the predicate is
+>   explicit.
+> - The DB stays permissive; no surface offers the control.
+> - **Results:** test **42/0**. Against the pre-amendment code the amended test fails 10. Suite 43 files, 1151/0; verified
+>   132/108.
+
 **Branch:** `feat/e1e3-u2-ui`, off live `origin/main` `f65886a` (industrial-noir-50). **Client only: `src/App.jsx`, +96 / −0.**
 **Depends on:** Slice R, live 2026-10-31. There's no DB change.
 **Design:** the Step 0 §3–4 plus `B4C_E1E3_SliceR_DB_ReviewRecord` plus the gate's U2 directive.
@@ -46,8 +57,7 @@ The Training screen has two views (`memberView = !isLeader(role) && !isTrainingO
 ## Calls for the gate
 1. **The member card's 30-day / 5-row scope.** Votes close at 14 days. The extra 16 days show recent closed ones (your vote
    lit, disabled) so "Voting closed" is visible rather than the row just vanishing. Easy to trim to 14.
-2. **Meetings aren't excluded.** The DB lets anyone on a finished session's roll vote, including an "everyone" meeting. If you
-   want trainings only, add `!isMeeting(s)` in the two spots (one line each).
+2. ~~Meetings aren't excluded.~~ **Ruled: trainings only.** Meetings and board sessions are excluded (see the amendment above).
 3. **A training officer who is a plain Member** (leader view, but not `is_leader()`) can vote on their rows and sees no tally.
    That's correct per the DB gate, but noting it.
 

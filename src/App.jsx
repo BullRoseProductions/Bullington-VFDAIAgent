@@ -23726,6 +23726,9 @@ function checkActual(start, end, setup) {
 /* E1/E3 U2 — reactions (Slice R). A vote is open until 14 days after the session's date, counted in America/Chicago — the same
    rule set_session_reaction enforces (it stays the authority; CLOSED from it is shown kindly). The DB's refusals are "CODE: …". */
 const REACT_WINDOW_DAYS = 14;
+// Trainings only (gate ruling 2, U2 review): a finished, not-cancelled session that is neither a meeting nor board-only. The DB
+// stays permissive; no surface offers the control (or asks for the tally) on anything else.
+const reactable = (s) => !!s && s.done && !s.cancelled && !s.isMeeting && s.audience !== "board";
 function reactClosed(s, now = new Date()) {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(now);   // YYYY-MM-DD
   const [ty, tm, td] = today.split("-").map(Number);
@@ -24946,7 +24949,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     setMyVotes(Object.fromEntries(data.map((r) => [r.session_id, r.value])));
   };
   useEffect(() => { if (meId) loadMyVotes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [meId]);
-  const finishedIds = (sessions || []).filter((x) => x.done && !x.cancelled).map((x) => x.id).sort();
+  const finishedIds = (sessions || []).filter(reactable).map((x) => x.id).sort();
   const finishedKey = finishedIds.join(",");
   const loadTally = async () => {
     if (!isLeader(role) || !finishedIds.length) return;
@@ -25736,7 +25739,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
 
         {/* E1/E3 U2 — HOW WAS IT: finished sessions I was on the roll for, last 30 days, newest first (votes open 14 days). */}
         {(() => {
-          const mineRecent = sessions.filter((s) => s.done && !s.cancelled && (s.attendance || []).includes(meId) && (t0 - sessDate(s)) / 86400000 <= 30)
+          const mineRecent = sessions.filter((s) => reactable(s) && (s.attendance || []).includes(meId) && (t0 - sessDate(s)) / 86400000 <= 30)
             .sort((a, b) => sessDate(b) - sessDate(a)).slice(0, 5);
           return mineRecent.length > 0 && (
             <div data-testid="react-card" style={card}>
@@ -26132,7 +26135,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                       </span>
                       <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 2, ...Lnum }}>{TRAIN_MONTHS[s.m].slice(0, 3)} {s.d}{s.y !== today.getFullYear() ? `, ${s.y}` : ""}{s.startTime ? ` · ${fmtTime(s.startTime)}` : ""}{s.planId ? ` · part of ${plan.find((p) => String(p.id) === String(s.planId))?.name || "a category"}` : " · one-off (no category)"}{s.done ? ` · ${attCount}/${expCount} attended` : ""}</div>
                       {s.cancelled && <div data-testid="row-cancel-reason" style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>Cancelled{cancelReasonOf(s.id) ? ` — ${cancelReasonOf(s.id)}` : ""}</div>}
-                      {s.done && !s.cancelled && (att.includes(meId) || isLeader(role)) && renderReact(s)}
+                      {reactable(s) && (att.includes(meId) || isLeader(role)) && renderReact(s)}
                       {(canManage || isLeader(role)) && pendingFor(s.id) && (() => { const pr = pendingFor(s.id); return (
                         <div data-testid="row-pending" style={{ fontSize: 11.5, color: FIRE.amberText, marginTop: 3, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           {pr.kind === "cancel" ? "Cancellation" : "Restore"} pending — waiting on a second sign-off ({pr.initiator_name} asked)

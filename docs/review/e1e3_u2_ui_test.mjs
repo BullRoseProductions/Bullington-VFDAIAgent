@@ -5,7 +5,8 @@
 //      their own earlier vote read back from training_session_reactions (own-row RLS)
 //   2. the 14-day window (America/Chicago): day 14 open, day 15 disabled + "Voting closed"; the DB's CLOSED said kindly
 //      (a plain member votes from the member view's "How was training?" card; a leader from the leader view's list rows)
-//   3. not on the roll / upcoming / cancelled: no control (both views)
+//   3. not on the roll / upcoming / cancelled — and (gate ruling 2) a finished MEETING or BOARD session even on the caller's
+//      roll: no control, no tally (both views); the tally batch never asks for them
 //   4. leadership: ONE batched session_reaction_tally call (session ids only); "👍 N · 👎 M" at ≥ 3; a quiet "Not enough votes
 //      yet" below (never a zero); no member id or name on any reactions line even from a hostile reply; a failed read shows nothing
 //   5. the source: only Slice R's two new RPC names; the tally keeps only session_id/up/down; one own-vote read, no table write;
@@ -81,9 +82,11 @@ const SESS = () => [
   sess("dx", "Vent drill", 2, { attendance: ["m-2", "m-3"] }),                   // m-1 NOT on the roll
   sess("du", "Upcoming", -3, { done: false, attendance: [] }),                  // not finished
   sess("dk", "Cancelled one", 4, { done: false, cancelled: true, status: "cancelled", attendance: [] }),
+  sess("dm", "Business meeting", 3, { isMeeting: true }),                       // gate ruling 2: a meeting — m-1 on its roll, no reactions
+  sess("db", "Board session", 3, { audience: "board", attendance: ["m-1", "m-ada"] }),   // …nor a board session
 ];
 const MY_VOTES = [{ session_id: "dc", value: 1 }];
-const TALLY = { dv: { up: 2, down: 1 }, dc: { up: 7, down: 1 } };              // under 3 counted votes = NO row (d14, d15, dx)
+const TALLY = { dv: { up: 2, down: 1 }, dc: { up: 7, down: 1 }, dm: { up: 5, down: 0 }, db: { up: 4, down: 0 } };   // dm/db must never be asked for              // under 3 counted votes = NO row (d14, d15, dx)
 const CATS = [{ id: "c1", name: "Hose Ops", cadence: "Monthly", color: "#C0392B", lastISO: null }];
 const MEMBERS = [{ id: "m-ada", name: "Ada DA", status: "Active", access: ["Department Admin"] }, { id: "m-oli", name: "Oli Officer", status: "Active", access: ["Officer"] },
   { id: "m-1", name: "Ann One", status: "Active", access: ["Member"] }, { id: "m-2", name: "Ben Two", status: "Active", access: ["Member"] }, { id: "m-3", name: "Cal Three", status: "Active", access: ["Member"] }];
@@ -171,6 +174,8 @@ const rpcs = (n) => globalThis.__sb.calls.filter((c) => c.n === n);
 { const { unmount } = await mount(["Member"], "m-1");
   ok("member view: a finished session I was NOT at (dx), an upcoming one (du), a cancelled one (dk) — no row, no control",
     !mrow("dx") && !mrow("du") && !mrow("dk") && host.querySelectorAll('[data-testid="react-row"]').length === 4);
+  ok("TRAININGS ONLY (member view): a finished MEETING and a finished BOARD session I was on the roll for — no card row, no control",
+    !mrow("dm") && !mrow("db") && !/Business meeting|Board session/.test(norm(host.querySelector('[data-testid="react-card"]')?.textContent)));
   unmount(); }
 { const { unmount } = await mount(["Department Admin"], "m-ada");   // the leader view's list rows
   let row = await show("dx");
@@ -179,15 +184,20 @@ const rpcs = (n) => globalThis.__sb.calls.filter((c) => c.n === n);
   ok("leader view: an upcoming session has no reactions line", !q(row, "react-row"));
   row = await show("dk");
   ok("leader view: a cancelled session has no reactions line", !row || !q(row, "react-row"));
+  row = await show("dm");
+  ok("TRAININGS ONLY (leader view): a finished meeting — no reactions line, no tally", !!row && !q(row, "react-row") && !q(row, "react-tally") && !q(row, "react-tally-few"));
+  row = await show("db");
+  ok("TRAININGS ONLY (leader view): a finished board session — no reactions line, no tally", !!row && !q(row, "react-row"));
   unmount(); }
 
 // 4 — leadership: ONE batched tally call; counts at ≥ 3, a quiet "Not enough votes yet" below; no ids, no names
 for (const [who, role, meId] of [["Department Admin (not on these rolls)", ["Department Admin"], "m-ada"], ["Officer", ["Officer"], "m-oli"]]) {
   const { unmount } = await mount(role, meId);
   const t = rpcs("session_reaction_tally");
-  const want = SESS().filter((x) => x.done && !x.cancelled).map((x) => x.id).sort();
-  ok(`${who}: ONE session_reaction_tally call for every finished session — args {p_session_ids} only, session ids only`,
-    t.length === 1 && JSON.stringify(Object.keys(t[0].args)) === '["p_session_ids"]' && JSON.stringify(t[0].args.p_session_ids) === JSON.stringify(want), JSON.stringify(t));
+  const want = SESS().filter((x) => x.done && !x.cancelled && !x.isMeeting && x.audience !== "board").map((x) => x.id).sort();
+  ok(`${who}: ONE session_reaction_tally call for every finished TRAINING — args {p_session_ids} only, session ids only; the meeting + board session never asked`,
+    t.length === 1 && JSON.stringify(Object.keys(t[0].args)) === '["p_session_ids"]' && JSON.stringify(t[0].args.p_session_ids) === JSON.stringify(want)
+    && JSON.stringify(want) === '["d14","d15","dc","dv","dx"]', JSON.stringify(t));
   let row = await show("dv");
   ok(`${who}: ≥ 3 votes → "👍 2 · 👎 1"`, norm(q(row, "react-tally")?.textContent) === "👍 2 · 👎 1" && !q(row, "react-tally-few"), norm(q(row, "react-row")?.textContent));
   ok(`${who}: not on the roll → the tally but no vote buttons`, !q(row, "react-up"));
@@ -202,6 +212,7 @@ for (const [who, role, meId] of [["Department Admin (not on these rolls)", ["Dep
 { const { unmount } = await mount(["Department Admin"], "m-1");   // a DA who was on the roll
   const row = await show("dv");
   ok("a leader who attended sees both: their own vote control AND the tally", !!q(row, "react-up") && norm(q(row, "react-tally")?.textContent) === "👍 2 · 👎 1");
+  ok("…but on the meeting and the board session they were on the roll for: no reactions line at all", !q(await show("dm"), "react-row") && !q(await show("db"), "react-row"));
   await click(q(row, "react-up")); await tick();
   ok("…voting refreshes the tally — again ONE batched call", rpcs("set_session_reaction").length === 1 && rpcs("session_reaction_tally").length === 2 && JSON.stringify(rpcs("session_reaction_tally")[1].args.p_session_ids) === '["d14","d15","dc","dv","dx"]');
   unmount(); }
