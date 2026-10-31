@@ -40,14 +40,17 @@ export function pulseOutcome({ dbError = null, detectErrors = [], muteErrors = [
  *    Admin who didn't get their weekly digest is the job failing for them, and the digest is weekly, so nothing
  *    retries. The body names the departments that did NOT get it (names only), plus the sent count, so a re-send
  *    can be targeted. Vercel crons don't retry, so a 5xx never causes a duplicate send.
+ *  - the member list failed to read → 500 "members-read": nobody to send to, so every department is in `skipped`.
  *  - a degraded read (metrics / duties / hours) → 500 "metrics-read" / "duties-read" / "iso-hours". The emails still
- *    went out with "—" tiles (unchanged behaviour); the run is reported failed because the DB failed.
+ *    went out with "—" tiles; the run is reported failed because the DB failed. (Since the member list was split out
+ *    of the metrics read, "still went out" is true — before that, a metric failure also blanked the recipients.)
  *  - a department's notification rows or push failed → 500 "notify" / "push" / "push-config".
  *  - NOT failures: a department deliberately skipped (no active DA email — config, already listed in `skipped`), a
  *    quiet week, per-device FCM rejections (delivery outcomes, counted in push.failed), and a dry run's unsent mail. */
-export function digestOutcome({ detectionError = null, metricsError = null, dutiesError = null, isoErrors = [], results = [], pushEnabled = false } = {}) {
+export function digestOutcome({ detectionError = null, membersError = null, metricsError = null, dutiesError = null, isoErrors = [], results = [], pushEnabled = false } = {}) {
   if (detectionError) return { status: 502, failed: ["detection-read"], sent: 0, notSent: [] };
   const failed = [];
+  if (membersError) failed.push("members-read");
   if (metricsError) failed.push("metrics-read");
   if (dutiesError) failed.push("duties-read");
   if (isoErrors.length) failed.push("iso-hours");
