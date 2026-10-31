@@ -2593,7 +2593,7 @@ export default function App() {
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
-      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting, status"),
+      supabase.from("training_sessions").select("id, plan_id, title, date, start_time, duration_min, done, signin_open, series_id, audience, counts_toward_attendance, is_offsite, location_lat, location_lng, location_radius_m, location_label, is_meeting, status, actual_start, actual_end, setup_min"),
       supabase.from("session_attendance").select("session_id, member_id, checked_in_at"),
       supabase.from("session_plans").select("id, title, storage_path, ai_text, source, session_id").order("created_at", { ascending: false }),
     ]);
@@ -2628,7 +2628,7 @@ export default function App() {
         const ae = byS[r.id] || { attendance: [], times: {} };
         const plans = plansByS[r.id] || [];
         return { id: r.id, status: r.status || "scheduled", cancelled: r.status === "cancelled",   // Slice 7: a cancelled session is a tombstone, never live
-          planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
+          planId: r.plan_id, seriesId: r.series_id, title: r.title, y: yy, m: (mm || 1) - 1, d: dd, startTime: r.start_time || null, durationMin: r.duration_min ?? null, actualStart: r.actual_start || null, actualEnd: r.actual_end || null, setupMin: r.setup_min ?? null, done: !!r.done, signinOpen: !!r.signin_open, audience: r.audience || "everyone", countsAttendance: r.counts_toward_attendance !== false, isMeeting: !!r.is_meeting, attendance: ae.attendance, times: ae.times, plans, plan: plans[0] || null,
           // off-site location: null lat/lng = at the station (every existing drill, and the default)
           isOffsite: !!r.is_offsite, locLat: r.location_lat ?? null, locLng: r.location_lng ?? null, locRadius: r.location_radius_m ?? null, locLabel: r.location_label || "" };   // audience: 'everyone' | 'leadership' (default everyone); countsAttendance: false = optional (excluded from rate); plans[] = all; plan = newest (backward-compat alias)
       })
@@ -23634,17 +23634,20 @@ function sessionCorrectionDiff(s, c) {
   const before = { title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), start_time: (s.startTime || "").slice(0, 5) || null,
     duration_min: s.durationMin ?? null, audience: s.audience || "everyone", plan_id: s.planId || null,
     counts_toward_attendance: s.countsAttendance !== false, is_meeting: (s.audience || "everyone") === "everyone" && !!s.isMeeting,
-    is_offsite: !!s.isOffsite, location_label: s.isOffsite ? (s.locLabel || null) : null };
+    is_offsite: !!s.isOffsite, location_label: s.isOffsite ? (s.locLabel || null) : null,
+    actual_start: (s.actualStart || "").slice(0, 5) || null, actual_end: (s.actualEnd || "").slice(0, 5) || null, setup_min: s.setupMin ?? null };
   const after = { title: (c.title || "").trim(), date: c.date, start_time: c.startTime || null,
     duration_min: c.durationMin === "" || c.durationMin == null ? null : Number(c.durationMin), audience: c.audience, plan_id: c.planId || null,
     counts_toward_attendance: !!c.countsAttendance, is_meeting: c.audience === "everyone" && !!c.isMeeting,
-    is_offsite: !!c.isOffsite, location_label: c.isOffsite ? ((c.offLabel || "").trim() || null) : null };
+    is_offsite: !!c.isOffsite, location_label: c.isOffsite ? ((c.offLabel || "").trim() || null) : null,
+    actual_start: c.actualStart || null, actual_end: c.actualEnd || null, setup_min: c.setupMin === "" || c.setupMin == null ? null : Number(c.setupMin) };
   const changes = {};
   for (const k of Object.keys(after)) if (JSON.stringify(after[k]) !== JSON.stringify(before[k])) changes[k] = after[k];
   return changes;
 }
 const S6_FIELDS = { title: "Title", date: "Date", start_time: "Start time", duration_min: "Length (min)", audience: "Audience", plan_id: "Category",
-  counts_toward_attendance: "Counts toward attendance", is_meeting: "Meeting", is_offsite: "Off-site", location_label: "Location", location: "Coordinates", done: "Finalized", status: "Status" };
+  counts_toward_attendance: "Counts toward attendance", is_meeting: "Meeting", is_offsite: "Off-site", location_label: "Location", location: "Coordinates", done: "Finalized", status: "Status",
+  actual_start: "Actual start", actual_end: "Actual end", setup_min: "Setup (min)" };
 const S6_ACTIONS = { correct: "Corrected", reopen: "Reopened", finalize: "Finalized", cancel: "Cancelled", restore: "Restored" };
 // Slice 7 — the tombstone pill on a cancelled session (leader list + member Up-next).
 function CancelledPill() {
@@ -23691,6 +23694,41 @@ const sessDate = (s) => new Date(s.y, s.m, s.d);   // date-only — drives sorti
 // Optional wall-clock start time. Accepts "HH:MM" or "HH:MM:SS"; "" when unset.
 const fmtTime = (t) => { if (!t) return ""; const d = new Date(`1970-01-01T${t}`); return isNaN(d) ? "" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); };
 const fmtSess = (s) => sessDate(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + (s.startTime ? ` · ${fmtTime(s.startTime)}` : "");
+/* E1/E3 U1 — a session's ACTUAL window (Slice T: actual_start / actual_end / setup_min). Times are "HH:MM", whole minutes; an
+   end at or before the start ran past midnight (+24 h) — the same span finalize_training_session / correct_training_session /
+   the training_sessions_actual_length CHECK compute, so the preview is the length the DB will store. The DB stays the
+   authority: checkActual only turns its refusals (both or neither, whole minutes, end ≠ start, setup 0–600) into friendly
+   words before the call. */
+const actHM = (t) => { const x = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(String(t || "").trim()); return x && +x[1] < 24 && +x[2] < 60 ? { mins: +x[1] * 60 + +x[2], sec: +(x[3] || 0) } : null; };
+const actHHMM = (mins) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+function actualSpan(a, b) { const x = actHM(a), y = actHM(b); if (!x || !y || x.mins === y.mins) return null; const d = y.mins - x.mins; return d < 0 ? d + 1440 : d; }
+const fmtSpan = (n) => (n == null ? "" : n < 60 ? `${n}m` : `${Math.floor(n / 60)}h${n % 60 ? ` ${n % 60}m` : ""}`);
+function fmtWindow(a, b) {
+  const x = actHM(a), y = actHM(b); if (!x || !y) return "";
+  const part = (mins) => { const h = Math.floor(mins / 60); return { t: `${h % 12 || 12}:${String(mins % 60).padStart(2, "0")}`, ap: h < 12 ? "AM" : "PM" }; };
+  const p = part(x.mins), q = part(y.mins), nextDay = y.mins <= x.mins;
+  return (p.ap === q.ap && !nextDay ? `${p.t}–${q.t} ${q.ap}` : `${p.t} ${p.ap}–${q.t} ${q.ap}`) + (nextDay ? " (next day)" : "");
+}
+function checkActual(start, end, setup) {
+  const a = String(start || "").trim(), b = String(end || "").trim(), su = String(setup ?? "").trim();
+  if (!a !== !b) return { err: { title: "Give both times", text: "Enter the actual start and end together — or leave both blank." } };
+  let out = { start: null, end: null, span: null };
+  if (a) {
+    const x = actHM(a), y = actHM(b);
+    if (!x || !y) return { err: { title: "Check the times", text: "Enter the start and end as times, like 7:00 PM." } };
+    if (x.sec || y.sec) return { err: { title: "Check the times", text: "Times are whole minutes — no seconds." } };
+    if (x.mins === y.mins) return { err: { title: "Check the times", text: "The end has to be different from the start." } };
+    out = { start: actHHMM(x.mins), end: actHHMM(y.mins), span: actualSpan(a, b) };
+  }
+  if (su !== "" && (!/^\d+$/.test(su) || Number(su) > 600)) return { err: { title: "Check the setup time", text: "Setup is whole minutes, 0–600." } };
+  return { ...out, setup: su === "" ? null : Number(su) };
+}
+/* The attached plan's estimate — the "Total time: N min" line both writers put in a plan's text (attach_drill_plan_to_session
+   and the client's serializer). Display only; never a length. */
+function planEstimate(s) {
+  for (const p of s.plans || []) { const m = /^Total time: (\d+) min$/m.exec(p.ai_text || ""); if (m) return Number(m[1]); }
+  return null;
+}
 // Display ordering: by date, then start time (unset time sorts first among same-day).
 const sessSort = (a, b) => (sessDate(a) - sessDate(b)) || String(a.startTime || "").localeCompare(String(b.startTime || ""));
 function CheckinConfirm({ S, result, members, meId, go }) {
@@ -24156,7 +24194,7 @@ function DrillPlanEditForm({ S, p, categories, busy, onSave, onCancel, saveLabel
         <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl("Title")}<input style={FS.input} value={f.title} onChange={up("title")} /></label>
         <label style={S.field}>{lbl("Category")}<select style={FS.input} value={f.category} onChange={up("category")}><option value="">No category</option>
           {[...new Set([...(categories || []).map((x) => x.name), ...(f.category ? [f.category] : [])])].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
-        <label style={S.field}>{lbl("Duration (minutes)")}<input style={FS.input} inputMode="numeric" value={f.duration} onChange={up("duration")} /></label>
+        <label style={S.field}>{lbl("Estimated length (minutes)")}<input style={FS.input} inputMode="numeric" value={f.duration} onChange={up("duration")} /></label>
         <label style={S.field}>{lbl("Who it's for")}<input style={FS.input} value={f.audience} onChange={up("audience")} placeholder="e.g. Mixed crew · 8 members" /></label>
         {area("summary", "Summary", 60)}
         {area("objectives", "Objectives — one per line")}
@@ -24363,7 +24401,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   }
   async function saveEdit(p, v) {
     if (!v.title.trim()) { notify({ kind: "error", title: "A plan needs a title" }); return; }
-    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Duration must be a positive number of minutes" }); return; }
+    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Estimated length must be a positive number of minutes" }); return; }
     const r = await act("edit", "set_drill_plan", { p_id: p.id, p_title: v.title.trim(), p_category: v.category || null, p_duration_min: v.duration_min, p_audience: v.audience.trim() || null, p_content: v.content, p_source: p.source }, "Plan updated.");
     if (!r.error) setEditing(false);
   }
@@ -24371,7 +24409,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   // 'manual', a draft awaiting review like any other. It then opens selected, ready to Edit / Approve / Schedule / Attach.
   async function saveNew(v) {
     if (!v.title.trim()) { notify({ kind: "error", title: "A plan needs a title" }); return; }
-    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Duration must be a positive number of minutes" }); return; }
+    if (v.duration_min != null && !(v.duration_min > 0)) { notify({ kind: "error", title: "Estimated length must be a positive number of minutes" }); return; }
     const r = await act("create", "set_drill_plan", { p_id: null, p_title: v.title.trim(), p_category: v.category || null, p_duration_min: v.duration_min, p_audience: v.audience.trim() || null, p_content: v.content, p_source: "manual" }, "Saved — it's in your library as a draft, awaiting review.");
     if (!r.error) { setCreating(false); if (r.data?.id) select(r.data.id); }
   }
@@ -24413,7 +24451,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
               {field("Topic / drill", <input ref={topicRef} style={FS.input} value={form.topic} onChange={up("topic")} placeholder="e.g. Tanker shuttle for a rural water supply" />, true)}
               {field("Describe your goals (focus & notes)", <textarea style={{ ...FS.input, minHeight: 56, resize: "vertical" }} value={form.focus} onChange={up("focus")} placeholder="props available, specific objectives, what to emphasize or avoid…" />, true)}
               {field("Type", <select style={FS.input} value={form.type} onChange={up("type")}>{TP_TYPES.map((t) => <option key={t}>{t}</option>)}</select>)}
-              {field("Duration", <select style={FS.input} value={form.duration} onChange={up("duration")}>{TP_DURATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
+              {field("Estimated length", <select style={FS.input} value={form.duration} onChange={up("duration")}>{TP_DURATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
               {field("Category", <select style={FS.input} value={form.category} onChange={up("category")}><option value="">No category</option>{(categories || []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}</select>)}
               {field("Members expected", <input style={FS.input} inputMode="numeric" value={form.members} onChange={up("members")} placeholder="8" />)}
               {field("Skill level", <select style={FS.input} value={form.level} onChange={up("level")}>{TP_LEVELS.map((t) => <option key={t}>{t}</option>)}</select>)}
@@ -24876,6 +24914,9 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [corrReason, setCorrReason] = useState("");
   const [corrErr, setCorrErr] = useState(null);             // { title, text } — the RPC's own sentence, inline
   const [corrBusy, setCorrBusy] = useState(false);
+  // E1/E3 U1 — the close-out's "Actual time" (per session): { start, end, setup, lenOnly, len } as typed; finalize reads it.
+  const [actDraft, setActDraft] = useState({});
+  const [actErr, setActErr] = useState({});                 // { [sessionId]: { title, text } } — inline, before any dialog
   const [auditRows, setAuditRows] = useState(null);         // training_session_audit (leadership-readable), newest first; null = not loaded
   const [histOpenId, setHistOpenId] = useState(null);       // the row whose "Corrections (N)" history is open
   const [stationBy, setStationBy] = useState({});           // R1: sessionId -> drill_window_presence rows (fetched at Complete)
@@ -25161,6 +25202,31 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
        warning about it would train officers to click through the warning that matters. Some drills
        genuinely have nobody, so this stays a confirm rather than a block: still one click to
        proceed, never by accident. */
+    /* E1/E3 U1 — the actual window, from the close-out's "Actual time". An End (or a setup time) typed = finalize WITH the times
+       through the times overload {p_session_id, p_actual_start, p_actual_end, p_setup_min} — the length is derived server-side.
+       Nothing typed (the start is only the scheduled time, pre-filled), or "I only know the length" = the length-only path below,
+       exactly as before ({p_session_id, p_duration_min}). Checked here first so a slip is a friendly line, not a refusal. */
+    const ad = actDraft[s.id] || {};
+    const fail = (e) => { setActErr((m) => ({ ...m, [s.id]: e })); };
+    let act = null, preLen = null;
+    if (!ad.lenOnly) {
+      const start = ad.start ?? (s.startTime || "").slice(0, 5), end = ad.end ?? "", setup = ad.setup ?? "";
+      if (String(end).trim() || String(setup).trim()) {
+        const c = checkActual(start, end, setup);
+        if (c.err) { fail(c.err); return; }
+        if (c.start == null) { fail({ title: "Give the start and end", text: "Setup is recorded with the actual times — enter when it started and ended, or clear the setup." }); return; }
+        if (s.durationMin != null && s.durationMin !== c.span) {
+          fail({ title: "This drill already has a length", text: `${tpDur(s.durationMin)} is recorded for it (set before it ran), and ${fmtWindow(c.start, c.end)} is ${fmtSpan(c.span)}. Finalize with “I only know the length”, then enter the actual times with Correct — the length follows the times.` });
+          return;
+        }
+        act = c;
+      }
+    } else if (s.durationMin == null && String(ad.len ?? "").trim() !== "") {
+      const raw = String(ad.len).trim(), n = Number(raw);
+      if (!/^\d+$/.test(raw) || n < 1 || n > 1440) { fail({ title: "Check the length", text: "Enter whole minutes, 1–1440 — or leave it blank." }); return; }
+      preLen = n;
+    }
+    setActErr((m) => { const c = { ...m }; delete c[s.id]; return c; });
     const presentCount = (s.attendance || []).length;
     // Slice 6 R3 — not a second nag: one soft line inside the existing confirm, only when fewer are on the roll than were
     // on station during the drill (the roll closing incomplete — the real failure), never on a merely small drill.
@@ -25171,11 +25237,12 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     } else {
       // Display only: the roll the officer is about to lock, read from the session + the members already loaded.
       const presentNames = (s.attendance || []).map((id) => members.find((m) => m.id === id)?.name).filter(Boolean);
-      const lenLabel = s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "Not set yet";
+      const lenLabel = act ? fmtSpan(act.span) : s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : preLen ? `${(preLen / 60).toFixed(1)} hrs` : "Not set yet";
       const sumTile = (k, v) => <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 9, background: FIRE.insetNoir, border: `1px solid ${FIRE.lineNoir}`, textAlign: "left" }}><div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: FIRE.textMuted }}>{k}</div><div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, ...FS.num }}>{v}</div></div>;
       const lockBody = (
         <div>
           <div style={{ display: "flex", gap: 8, margin: "4px 0 10px" }}>{sumTile("Length", lenLabel)}{sumTile("Present", presentCount)}</div>
+          {act && <p data-testid="lock-window" style={{ fontSize: 12.5, color: FIRE.textSecondary, margin: "0 0 8px", ...FS.num }}>{fmtWindow(act.start, act.end)}{act.setup != null ? ` · setup ${act.setup} min` : ""}</p>}
           {presentNames.length > 0 && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 10 }}>
               {presentNames.slice(0, 12).map((n) => <span key={n} style={{ fontSize: 11.5, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}
@@ -25200,8 +25267,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
        over a missing length would be the tail wagging the dog, and a REQUIRED field would just
        collect guesses, which is worse than nothing once the number becomes hours on a report.
        Asked only while it is still blank, so re-finalizing never nags. */
-    let dur = s.durationMin ?? null;
-    if (dur == null) {
+    let dur = s.durationMin ?? preLen ?? null;
+    if (dur == null && !act) {
       const answer = await noirPrompt({ title: `How long was “${s.title}”?`, body: "This gives everyone marked present their training hours (recorded, not credited toward ISO/LOSAP). Leave it blank or skip — you can add it later.", label: "Length in minutes", placeholder: "e.g. 180", multiline: false, inputMode: "numeric", confirmLabel: "Save length", cancelLabel: "Skip" });
       const nMin = answer == null ? null : parseInt(String(answer).trim(), 10);
       if (Number.isFinite(nMin) && nMin >= 1 && nMin <= 1440) dur = nMin;
@@ -25212,8 +25279,11 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     /* Slice 6 (C4) — finalize through finalize_training_session: the same done + FIRST length, now logged; the category's
        "last trained" (R4: the drill's date, only with a non-empty roll) is set server-side, so the client no longer
        stamps today's date into training_plans. A length is only sent when none is recorded (a different one is a Correct). */
-    const { error } = await supabase.rpc("finalize_training_session", { p_session_id: s.id, p_duration_min: s.durationMin == null ? dur : null });
+    const { error } = act
+      ? await supabase.rpc("finalize_training_session", { p_session_id: s.id, p_actual_start: act.start, p_actual_end: act.end, p_setup_min: act.setup })
+      : await supabase.rpc("finalize_training_session", { p_session_id: s.id, p_duration_min: s.durationMin == null ? dur : null });
     if (error) { const e = s6Err(error); notify({ kind: "error", title: "Couldn't finalize the session", text: e.code ? e.text : "Something went wrong saving that. Please try again.", details: error.message }); return; }
+    setActDraft((m) => { const c = { ...m }; delete c[s.id]; return c; });
     loadSessions();
     loadPlans();
     loadAudit();
@@ -25296,7 +25366,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     setCorrectingId(s.id); setEditingSessionId(null); setCorrErr(null); setCorrReason("");
     setCorr({ title: s.title || "", date: toISO(new Date(s.y, s.m, s.d)), startTime: (s.startTime || "").slice(0, 5), durationMin: s.durationMin ?? "",
       planId: s.planId || "", audience: s.audience || "everyone", countsAttendance: s.countsAttendance !== false, isMeeting: !!s.isMeeting,
-      isOffsite: !!s.isOffsite, offLabel: s.locLabel || "", roll: new Set(s.attendance || []) });
+      isOffsite: !!s.isOffsite, offLabel: s.locLabel || "", roll: new Set(s.attendance || []),
+      actualStart: (s.actualStart || "").slice(0, 5), actualEnd: (s.actualEnd || "").slice(0, 5), setupMin: s.setupMin ?? "" });
     setCur({ y: s.y, m: s.m }); setListFilter("month");   // make sure its row is on screen (the no-length notice can point anywhere)
     setTimeout(() => document.getElementById(`ts-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
@@ -25307,11 +25378,22 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
     const reason = corrReason.trim();
     if (!Object.keys(changes).length && !add.length && !remove.length) { setCorrErr({ title: "Nothing changed", text: "Change a detail or the roll first." }); return; }
     if ("title" in changes && !changes.title) { setCorrErr({ title: "Check the details", text: "A session needs a title." }); return; }
+    if ("actual_start" in changes || "actual_end" in changes || "setup_min" in changes) {
+      const c = checkActual(corr.actualStart, corr.actualEnd, corr.setupMin);
+      if (c.err) { setCorrErr(c.err); return; }
+    }
     if (reason.length < 10) { setCorrErr({ title: "A reason is required", text: "Say why (at least 10 characters) — it's kept on the session's corrections log." }); return; }
     setCorrBusy(true); setCorrErr(null);
     const { error } = await supabase.rpc("correct_training_session", { p_session_id: s.id, p_changes: changes, p_add: add, p_remove: remove, p_reason: reason });
     setCorrBusy(false);
-    if (error) { setCorrErr(s6Err(error)); return; }
+    if (error) {
+      const e = s6Err(error), n = /length comes from the actual start and end \((\d+) minutes\)/.exec(e.text || "");
+      // Slice T: with an actual start + end the DB derives the length and refuses a different one — say so in plain words
+      setCorrErr(e.code === "BAD_VALUE" && n
+        ? { code: e.code, title: "The length comes from the actual times", text: `This session has an actual start and end, so its length is worked out from them (${fmtSpan(Number(n[1]))}). To change the length, change the start or end — or clear both times to type a length.` }
+        : e);
+      return;
+    }
     notify({ kind: "success", title: "Correction saved", text: `“${changes.title || s.title}” was corrected — it's on the session's corrections log.` });
     setCorrectingId(null); setCorr(null);
     loadSessions(); loadPlans(); loadAudit();
@@ -26047,6 +26129,10 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                         <label style={{ ...Lfield, minWidth: 140 }}><span style={LfieldLabel}>Date</span><input type="date" style={Linput} value={corr.date} onChange={(e) => setCorr((b) => ({ ...b, date: e.target.value }))} /></label>
                         <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start time (optional)</span><input type="time" style={Linput} value={corr.startTime} onChange={(e) => setCorr((b) => ({ ...b, startTime: e.target.value }))} /></label>
                         <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={corr.durationMin} onChange={(e) => setCorr((b) => ({ ...b, durationMin: e.target.value }))} /></label>
+                        <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Actual start</span><input data-testid="corr-act-start" type="time" style={Linput} value={corr.actualStart} onChange={(e) => setCorr((b) => ({ ...b, actualStart: e.target.value }))} /></label>
+                        <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Actual end</span><input data-testid="corr-act-end" type="time" style={Linput} value={corr.actualEnd} onChange={(e) => setCorr((b) => ({ ...b, actualEnd: e.target.value }))} /></label>
+                        <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Setup (min, optional)</span><input data-testid="corr-setup" type="number" min="0" max="600" step="5" placeholder="e.g. 20" style={Linput} value={corr.setupMin} onChange={(e) => setCorr((b) => ({ ...b, setupMin: e.target.value }))} /></label>
+                        {actualSpan(corr.actualStart, corr.actualEnd) != null && <span data-testid="corr-act-preview" style={{ fontSize: 12, color: FIRE.textSecondary, paddingBottom: 9, ...Lnum }}>{fmtWindow(corr.actualStart, corr.actualEnd)} · {fmtSpan(actualSpan(corr.actualStart, corr.actualEnd))} — the length follows the times</span>}
                         <label style={{ ...Lfield, minWidth: 150 }}><span style={LfieldLabel}>Category</span><select style={Linput} value={corr.planId} onChange={(e) => setCorr((b) => ({ ...b, planId: e.target.value }))}><option value="">One-off</option>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
                         <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
                           <select style={Linput} value={corr.audience} onChange={(e) => setCorr((b) => ({ ...b, audience: e.target.value }))}><option value="everyone">Everyone</option><option value="leadership">Leadership only</option><option value="board">Board only</option></select></label>
@@ -26077,6 +26163,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                       {(auditRows || []).filter((a) => a.session_id === s.id).map((a) => {
                         const nm = (id) => members.find((m) => m.id === id)?.name || "a former member";
                         const val = (k, v) => v == null || v === "" ? "—" : k === "plan_id" ? (plan.find((p) => String(p.id) === String(v))?.name || "a removed category")
+                          : k === "actual_start" || k === "actual_end" ? fmtTime(v)
                           : typeof v === "boolean" ? (v ? "Yes" : "No") : typeof v === "object" ? "set" : String(v);
                         const ch = Object.entries(a.changes || {});
                         return (
@@ -26143,7 +26230,15 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                             ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.greenText }}><Lock size={13} /> Locked</span>
                             : <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.redText }}>Not locked yet</span>}
                           <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}><b style={{ color: FIRE.textPrimary }}>{attCount}</b> of {expCount} present{expCount - attCount > 0 ? ` · ${expCount - attCount} absent` : ""}</span>
-                          <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Length <b style={{ color: FIRE.textPrimary }}>{s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "not set"}</b></span>
+                          {s.actualStart && s.actualEnd ? (() => {
+                            // E1/E3 U1 — side by side: the plan's estimate · the actual window + its length · setup (display only)
+                            const est = planEstimate(s), sp = actualSpan(s.actualStart, s.actualEnd);
+                            return (<>
+                              {est != null && <span data-testid="sum-estimated" style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Estimated <b style={{ color: FIRE.textPrimary }}>~{tpDur(est)}</b></span>}
+                              <span data-testid="sum-actual" style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Actual <b style={{ color: FIRE.textPrimary }}>{fmtWindow(s.actualStart, s.actualEnd)} · {fmtSpan(sp)}</b></span>
+                              {s.setupMin != null && <span data-testid="sum-setup" style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Setup <b style={{ color: FIRE.textPrimary }}>{s.setupMin} min</b></span>}
+                            </>);
+                          })() : <span style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Length <b style={{ color: FIRE.textPrimary }}>{s.durationMin ? `${(s.durationMin / 60).toFixed(1)} hrs` : "not set"}</b></span>}
                         </div>
                       )}
                       <div style={{ fontSize: 12, color: FIRE.textMuted2, marginBottom: 8 }}>{canManage ? (s.done ? "This session is complete — attendance is locked. Reopen to make changes." : "Tap a name to mark who attended, then finalize.") : "Who attended this session."}</div>
@@ -26181,6 +26276,38 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                                 {r.member_name}{on ? " · already on the roll" : ""}
                               </label>); })}
                             {pick.length > 0 && <button style={{ ...Lbtn, marginTop: 8 }} onClick={() => addToRoll(s, pick)}><Users size={14} color={LbtnIcon} /> Mark {pick.length} present</button>}
+                          </div>
+                        );
+                      })()}
+                      {canManage && !s.done && (() => {
+                        /* E1/E3 U1 — "Actual time": when it really started and ended (Start pre-filled from the scheduled time), a
+                           live "7:00–10:26 PM · 3h 26m" preview, an optional setup time; or "I only know the length" — the
+                           length-only finalize, as before. Read by finalizeSession; nothing is written until Finalize. */
+                        const ad = actDraft[s.id] || {};
+                        const start = ad.start ?? (s.startTime || "").slice(0, 5), end = ad.end ?? "", setup = ad.setup ?? "";
+                        const span = actualSpan(start, end);
+                        const put = (patch) => { setActDraft((m) => ({ ...m, [s.id]: { ...(m[s.id] || {}), ...patch } })); setActErr((m) => { const c = { ...m }; delete c[s.id]; return c; }); };
+                        const linkBtn = { background: "none", border: "none", padding: 0, cursor: "pointer", color: FIRE.amberText, fontSize: 12, fontWeight: 600, textDecoration: "underline", fontFamily: "inherit" };
+                        return (
+                          <div data-testid="actual-time" style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${FIRE.lineNoir}` }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: FIRE.textMuted, marginBottom: 8 }}>Actual time</div>
+                            {ad.lenOnly ? (
+                              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                                {s.durationMin != null
+                                  ? <span data-testid="act-len-recorded" style={{ fontSize: 12.5, color: FIRE.textSecondary, ...Lnum }}>Length <b style={{ color: FIRE.textPrimary }}>{tpDur(s.durationMin)}</b> is already recorded.</span>
+                                  : <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input data-testid="act-len" type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={ad.len ?? ""} onChange={(e) => put({ len: e.target.value })} /></label>}
+                                <button type="button" style={linkBtn} onClick={() => put({ lenOnly: false })}>Enter the start and end instead</button>
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                                <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Start</span><input data-testid="act-start" type="time" style={Linput} value={start} onChange={(e) => put({ start: e.target.value })} /></label>
+                                <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>End</span><input data-testid="act-end" type="time" style={Linput} value={end} onChange={(e) => put({ end: e.target.value })} /></label>
+                                <label style={{ ...Lfield, minWidth: 110 }}><span style={LfieldLabel}>Setup (min, optional)</span><input data-testid="act-setup" type="number" min="0" max="600" step="5" placeholder="e.g. 20" style={Linput} value={setup} onChange={(e) => put({ setup: e.target.value })} /></label>
+                                <span data-testid="act-preview" style={{ fontSize: 12.5, color: span != null ? FIRE.textPrimary : FIRE.textMuted, paddingBottom: 9, ...Lnum }}>{span != null ? `${fmtWindow(start, end)} · ${fmtSpan(span)}` : "Enter when it actually started and ended."}</span>
+                                <button type="button" style={{ ...linkBtn, paddingBottom: 9 }} onClick={() => put({ lenOnly: true })}>I only know the length</button>
+                              </div>
+                            )}
+                            {actErr[s.id] && <div role="alert" data-testid="act-err" style={{ ...NOIR_ERR, marginTop: 10 }}><b>{actErr[s.id].title}.</b> {actErr[s.id].text}</div>}
                           </div>
                         );
                       })()}
