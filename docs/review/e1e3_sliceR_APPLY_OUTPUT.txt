@@ -1,0 +1,36 @@
+E1/E3 Slice R (training reactions, DB) — APPLIED TO PRODUCTION 2026-10-31
+Gate PASS on feat/e1e3-slice-r-db @ 8873395. Applied on Ashlea's explicit go. One window, Notify held (api/notify-session.js absent).
+
+Editor content was SHA-256-checked against the file before each Run:
+  DRAFT  sql/e1e3_sliceR_session_reactions_DRAFT.sql   sha256 e0b9feab796b…  34,837 bytes
+  RETEST sql/e1e3_sliceR_session_reactions_RETEST.sql  sha256 8b3ba47261da…  20,093 bytes
+(No destructive-operations dialog this time: the migration only creates objects, it doesn't drop any.)
+
+== STATE ROW (DRAFT tail) ==
+{"rls":true,"rows":0,"iso_md5":"705c9a9b5532d28824f5e50e74d6059f","fn_count":231,"guard_md5":"c1af95df40d551b75998cde0a8f290f7","privileges":{"anon":"(none)","authenticated":"SELECT"},"correct_md5":"8c00066509e9dca338dc3662f55e1211","attested_md5":"aff25333771cd38c1f473bcde5e1e96e","table_columns":"id:uuid:NO:gen_random_uuid(),department_id:uuid:NO:,session_id:uuid:NO:,member_id:uuid:NO:,value:int2:NO:,created_at:timestamptz:NO:now(),updated_at:timestamptz:NO:now()","total_policies":182,"policies_on_table":[{"cmd":"SELECT","name":"members read own reaction","qual":"(member_id = my_member_id())","check":null,"roles":"{authenticated}"}],"table_constraints":"c:value::;f:department_id:departments:c;f:member_id:members:c;f:session_id:training_sessions:c;p:id::;u:session_id,member_id::","verified_presence":1026,"set_session_reaction":{"acl":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}","md5":"6c6004eba7ac8bfb9d00d6ab4d8338c1","secdef":true,"anon_exec":false},"session_reaction_tally":{"acl":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}","md5":"4ae1d747b47f559bfb2a23c7dc5c9b39","secdef":true,"volatile":"s","anon_exec":false}}
+
+Checks:
+  set_session_reaction   6c6004eb… = md5 of the generated CREATE text (the live pg_get_functiondef matches the draft byte for byte)
+  session_reaction_tally 4ae1d747… = md5 of the generated CREATE text (the same)
+  guard c1af95df / correct 8c000665 / attested_training aff25333 / dept_iso_hours_for 705c9a9b — unchanged (post-Slice-T pins)
+  fn_count 229 → 231 (+2); total_policies 181 → 182 (+1); rows 0
+  verified_presence 1025 at capture (2026-10-31 00:35 UTC) → 1026: organic. The migration compares verified presence before and after inside its own transaction.
+
+== RETEST (rolled back via SENTINEL) — 12 passed, 0 failed, 0 skipped ==
+S0  PASS  table + RLS on + exactly the one own-row SELECT policy; authenticated SELECT only, anon nothing; both RPCs SECURITY DEFINER, anon cannot execute
+R1  PASS  a member votes 1 and reads back their own row — no one else's
+R2  PASS  re-vote -1 updates the same row (one row, value -1) — no duplicate
+R3  PASS  4 votes on session A: the real DA's raw SELECT returns 0 rows of anyone else's (only their own), while the tally returns up 2 · down 2
+R4  PASS  a 2-vote session returns NO tally row (≥ 3 enforced in the DB); the 4-vote session in the same call does
+R5  PASS  a member not on the roll → NOT_PRESENT, nothing written
+R6  PASS  a session dated 15 days ago → CLOSED; 14 days ago → accepted
+R7  PASS  refused: not finalized · value 0 · value 2 · NULL · unknown session (RPC); value 0 written raw → the CHECK
+R8  PASS  a member's raw INSERT / UPDATE / DELETE on the table → permission denied (the RPC is the only write path)
+R9  PASS  removed from the roll via Correct → that vote stops counting (up 2 · down 1); one more removed → 2 counted → NO row (the votes themselves stay)
+R10 PASS  a non-leader calling the tally → NOT_ALLOWED
+R11 PASS  a reopened session refuses new votes (NOT_FINALIZED) and keeps the existing two
+
+== POST-RETEST LEFTOVER CHECK (read-only) ==
+reactions 0 · retest_sessions 0 · retest_audit_rows 0 · sessions 177 · roll_rows 444  (177 / 444 at capture)
+
+No other production SQL was run apart from the read-only captures, this apply, the rolled-back RETEST and the read-only leftover check.
