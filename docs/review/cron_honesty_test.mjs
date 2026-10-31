@@ -147,8 +147,10 @@ const leaks = (body) => /svc-test|status 401|42501|permission|refused|exploded|I
   ok("digest: every send failing → 500 \"send\", sent 0, both named", r.code === 500 && r.body.sent === 0 && r.body.notSent.length === 2);
   r = await call(R.digest, { setup: (S) => { S.fail.training_sessions = "statement timeout"; } });
   const mb = await call(R.digestBase, { setup: (S) => { S.fail.training_sessions = "statement timeout"; } });
-  ok("digest: a failed metrics read → exactly main's sends (unchanged behaviour — see the notes: today that's NONE, members blank with it) but now 500 \"metrics-read\" instead of main's 200",
-    r.code === 500 && JSON.stringify(r.body.failed) === '["metrics-read"]' && JSON.stringify(r.sends) === JSON.stringify(mb.sends) && mb.code === 200 && !leaks(r.body), `${JSON.stringify(r.body)} · main ${mb.code}, sends ${mb.sends.length}`);
+  // Updated with the digest-members decoupling (feat/digest-members-decouple): the member list is read on its own, so a failed
+  // metrics read no longer blanks the recipients — both admins are mailed (main at 09f7755 mailed nobody). Still 500.
+  ok("digest: a failed metrics read → 500 \"metrics-read\" (main answered 200) — and since the decoupling the emails still go (main sent none)",
+    r.code === 500 && JSON.stringify(r.body.failed) === '["metrics-read"]' && r.sends.length === 2 && mb.sends.length === 0 && mb.code === 200 && !leaks(r.body), `${JSON.stringify(r.body)} · main ${mb.code}, sends ${mb.sends.length}`);
   r = await call(R.digest, { auth: "Bearer wrong" });
   ok("digest: bad auth → still 401, no client, nothing sent", r.code === 401 && r.clients === 0 && r.sends.length === 0);
 }

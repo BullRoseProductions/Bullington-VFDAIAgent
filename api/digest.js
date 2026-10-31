@@ -645,10 +645,25 @@ export default async function handler(req, res) {
   // summary degrades to "—" and the digest still goes out; it never blocks the items that need attention.
   // station_presence is read DIRECTLY: the service-role key already bypasses RLS, so no RPC is needed —
   // the app's RPCs exist only because a browser client has to be walled off by my_department_id().
-  let mi = { members: [], sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], joins: [], separatedIds: new Set(), error: null };
+  /* THE MEMBER LIST IS READ ON ITS OWN, not inside the tolerant metrics block below. It is not a metric: it is who
+     the email goes TO (deptAdminEmails), who the notification rows are for, and every per-department denominator.
+     It used to sit in the same Promise.all as the metric reads, so ANY metric read failing (a training_sessions
+     timeout, say) blanked mi.members, every department lost its recipients, and NO digest went out — the opposite of
+     the "degrades to —, still goes out" the block below promises. Now a metric failure only dashes its tiles; a
+     member-read failure is its own, honestly fatal step (nobody to send to → "members-read", every department listed
+     in `skipped` with the reason). */
+  let membersError = null;
+  let memberRows = [];
+  try {
+    const { data, error } = await sb.from("members").select("id, department_id, access, email, status, joined");
+    if (error) throw new Error(error.message);
+    memberRows = data || [];
+  } catch (e) {
+    membersError = String(e?.message || e);
+  }
+  let mi = { members: memberRows, sessions: [], attendance: [], certRows: [], apparatus: [], shifts: [], joins: [], separatedIds: new Set(), error: null };
   try {
     const rs = await Promise.all([
-      sb.from("members").select("id, department_id, access, email, status, joined"),
       sb.from("training_sessions").select("id, department_id, date, done, audience, counts_toward_attendance, is_meeting, status"),
       sb.from("session_attendance").select("session_id, member_id"),
       sb.from("certs").select("department_id, member_id, exp, no_expiry, cert_types(never_expires, department_id)"),
@@ -667,7 +682,7 @@ export default async function handler(req, res) {
     ]);
     const bad = rs.find((r) => r.error);
     if (bad) throw new Error(bad.error.message);
-    const [m, s, a, c, ap, sp] = rs.map((r) => r.data || []);
+    const [s, a, c, ap, sp] = rs.map((r) => r.data || []);
     // JOIN DATES for the attendance cutoff (WS-4b). member_private directly, because the app's `celebrations` view is
     // `WHERE department_id = my_department_id()` — empty for this service-role caller. ONLY the three columns the
     // cutoff needs (never birthday). Read on its own and TOLERANT: a failure here falls back to the `joined` year
@@ -676,7 +691,7 @@ export default async function handler(req, res) {
     // SEPARATION (WS-4c, B-4): the server's rule — a member_separation row exists. member_id ONLY (never terminated_on). Tolerant
     // like the join dates: a failed read means nobody is known separated (the old behaviour), not a blank email.
     const sr = await sb.from("member_separation").select("member_id");
-    mi = { members: m, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, joins: jr.error ? [] : (jr.data || []),
+    mi = { members: memberRows, sessions: s, attendance: a, certRows: c, apparatus: ap, shifts: sp, joins: jr.error ? [] : (jr.data || []),
            separatedIds: new Set(sr.error ? [] : (sr.data || []).map((r) => r.member_id)), error: null };
   } catch (e) {
     mi.error = String(e?.message || e);   // surfaced in the response so a silent all-"—" digest is diagnosable
@@ -826,7 +841,7 @@ export default async function handler(req, res) {
 
     const recipients = isTestSend ? [to] : deptAdminEmails(mi.members, deptId);
     if (!recipients.length) {
-      skipped.push({ name, reason: mi.error ? `member read failed: ${mi.error}` : "no active Department Admin with an email address" });
+      skipped.push({ name, reason: membersError ? `member read failed: ${membersError}` : "no active Department Admin with an email address" });
       continue;
     }
     const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend });
@@ -848,10 +863,10 @@ export default async function handler(req, res) {
   /* CRON HONESTY (shared/cron-outcome.js — the rule, incl. the partial-send case, is written out there). Any failed
      step answers 5xx so Vercel's cron monitoring sees it; the details go to the log; the response names the failed
      steps, how many departments were mailed, and which were NOT (names only). A clean run returns exactly as before. */
-  const outcome = digestOutcome({ metricsError: mi.error, dutiesError: du.error, isoErrors, results, pushEnabled: PUSH_ENABLED });
+  const outcome = digestOutcome({ membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, results, pushEnabled: PUSH_ENABLED });
   if (outcome.status !== 200) {
     console.error(`[digest] FAILED ${outcome.status} steps=${outcome.failed.join(",")}`, JSON.stringify({
-      metricsError: mi.error, dutiesError: du.error, isoErrors, notSent: outcome.notSent,
+      membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, notSent: outcome.notSent,
       sendErrors: results.filter((r) => r.error).map((r) => ({ name: r.name, error: r.error })),
       notifyErrors: results.filter((r) => r.notified && (r.notified.error || r.notified.push?.error)).map((r) => ({ name: r.name, error: r.notified.error || r.notified.push.error })) }));
     return res.status(outcome.status).json({ ok: false, failed: outcome.failed, sent: outcome.sent, notSent: outcome.notSent, ...(isDry ? { dryRun: true } : {}) });
@@ -863,6 +878,7 @@ export default async function handler(req, res) {
     ...(du.error ? { dutiesError: du.error } : {}),
     ...(skipped.length ? { skipped } : {}),
     ...(mi.error ? { metricsError: mi.error } : {}),
+    ...(membersError ? { membersError } : {}),
     // Same reason mi.error is surfaced: a department showing "—" for station hours is otherwise
     // indistinguishable from one that genuinely had none, and nobody would know to look.
     ...(isoErrors.length ? { isoHoursErrors: isoErrors } : {}),
