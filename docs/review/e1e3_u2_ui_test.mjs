@@ -222,18 +222,20 @@ for (const [who, role, meId] of [["Department Admin (not on these rolls)", ["Dep
   unmount(); }
 
 // 5 — the source
-const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "f65886a";   // live origin/main when U2 was built (industrial-noir-50)
-const base = execSync(`git show ${BASE}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+// Structural fences PINNED to U2's reviewed range (released as industrial-noir-51): base f65886a .. reviewed 9826fe9 — "vs the
+// base" / "the current file" would go red once later work lands. The screen checks above run on the current code.
+const BASE = "f65886a", REV = "9826fe9";
+const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const src = appAt(REV), base = appAt(BASE);
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
 const added = [...rpcSet(src)].filter((n) => !rpcSet(base).has(n)).sort();
 ok("the only new RPC names are Slice R's two: set_session_reaction + session_reaction_tally", JSON.stringify(added) === '["session_reaction_tally","set_session_reaction"]', JSON.stringify(added));
 ok("the tally path keeps only session_id / up / down from each row", /data\.map\(\(r\) => \[r\.session_id, \{ up: Number\(r\.up\) \|\| 0, down: Number\(r\.down\) \|\| 0 \}\]\)/.test(src) && !/member_id/.test(src.slice(src.indexOf("const loadTally"), src.indexOf("async function vote("))));
 ok("the only reactions table read is the own-vote select (session_id, value)", (src.match(/from\("training_session_reactions"\)/g) || []).length === 1 && src.includes('from("training_session_reactions").select("session_id, value")') && !/from\("training_session_reactions"\)\.(insert|update|upsert|delete)/.test(src));
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared sql vercel.json package.json`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok(`client only: vs ${BASE} the only runtime change is src/App.jsx`, JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const changed = execSync(`git diff --name-only ${BASE} ${REV} -- src api shared sql vercel.json package.json`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok(`client only: in the reviewed range ${BASE}..${REV} the only runtime change is src/App.jsx`, JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const tok = (s, flags) => (s.match(new RegExp("verifie" + "d", flags)) || []).length;
-ok("verified untouched: App.jsx 132 (108 raw), same as the base", tok(src, "gi") === 132 && tok(src, "g") === 108 && tok(base, "gi") === 132, `${tok(src, "gi")}/${tok(src, "g")}`);
+ok(`verified untouched at ${REV}: App.jsx 132 (108 raw), same as the base`, tok(src, "gi") === 132 && tok(src, "g") === 108 && tok(base, "gi") === 132, `${tok(src, "gi")}/${tok(src, "g")}`);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
