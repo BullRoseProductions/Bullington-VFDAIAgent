@@ -23,6 +23,9 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "09f7755";   // live main when this was drafted (industrial-noir-51)
+// Structural fences PINNED to the reviewed range (released as industrial-noir-52): base 09f7755 .. reviewed e7ced15 — "vs the
+// base" / "the working tree" would go red once later work lands. The handler checks run on the current code.
+const REV = "e7ced15";
 const SECRET = "s3cret-cron-value-0123456789abcdef";
 Object.assign(process.env, { PULSE_ENABLED: "1", RESEND_API_KEY: "re-test", SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: "svc-test-key", CRON_SECRET: SECRET });
 
@@ -159,12 +162,12 @@ ok("rule: push 'skipped' (no FCM creds) is a failure only when push is ON", puls
 ok("rule: digest partial — sent counts the mailed, notSent names the failed, a 5xx even with one success", JSON.stringify(digestOutcome({ results: [{ name: "A", sentTo: ["a"] }, { name: "B", error: "x" }] })) === '{"status":500,"failed":["send"],"sent":1,"notSent":["B"]}');
 ok("rule: digest detection-read → 502 alone (nothing else is evaluated)", JSON.stringify(digestOutcome({ detectionError: "x", metricsError: "y" })) === '{"status":502,"failed":["detection-read"],"sent":0,"notSent":[]}');
 ok("rule: digest dry-run results never count as unsent; a deliberately skipped department is not a failure", digestOutcome({ results: [{ name: "A", dryRun: true, sentTo: null }] }).status === 200);
-const diffNames = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim();
-ok("api/_cron.js (requireCron, the pinned L-1 gate) byte-identical to main", diffNames("api/_cron.js") === "");
+const diffNames = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim();
+ok(`api/_cron.js (requireCron, the pinned L-1 gate) byte-identical across ${BASE}..${REV}`, diffNames("api/_cron.js") === "");
 ok("vercel.json byte-identical (crons unchanged); no SQL", diffNames("vercel.json") === "" && diffNames("sql") === "");
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").concat(execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n")).filter(Boolean).sort();
+const changed = execSync(`git diff --name-only ${BASE} ${REV}`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
 const allowed = ["api/digest.js", "api/pulse.js", "claude/B4C_CronHonesty_Draft.md", "docs/review/cron_honesty_test.mjs", "shared/cron-outcome.js"];
 ok("the files changed are exactly: api/pulse.js, api/digest.js, shared/cron-outcome.js, this test, the notes", changed.every((f) => allowed.includes(f)) && changed.includes("api/pulse.js") && changed.includes("api/digest.js"), JSON.stringify(changed));
-const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
-ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
+ok(`verified untouched at ${REV}: App.jsx 132 · digest 32 · assistant 14`, tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
