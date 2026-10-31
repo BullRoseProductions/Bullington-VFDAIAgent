@@ -1,0 +1,49 @@
+PASS  pins reproduce: all 17 captured functions (md5 of pg_get_functiondef) + their ACLs, created from the LIVE text
+PASS  pins reproduce: training_sessions + session_attendance — 17 constraints + 5 triggers deparse exactly as live
+PASS  pins reproduce: the migration's own PREFLIGHT passes on the mock (trigger + constraint defs, both column lists, every function md5)  — PINS-OK
+PASS  the mock ledger is non-trivial: 3 attested rows in Alpha, the 120-minute drill capped at 90  — 3 rows, 2 capped
+PASS  T2 applies (preflight + the in-transaction ledger / rows / body / ACL / overloads / others proof pass) and returns its state row
+PASS  state row: the times finalize = the T2 body (md5 = md5 of the DRAFT's own CREATE text), the length refusal gone, the times + setup refusals kept, both overloads 0 defaults, the five pins unchanged  — {"iso_md5":"705c9a9b5532d28824f5e50e74d6059f","fn_count":21,"guard_md5":"c1af95df40d551b75998cde0a8f290f7","correct_md5":"8c00066509e9dca338dc3662f55e1211","attested_md5":"aff25333771cd38c1f473bcde5e1e96e","total_policies":1,"verified_presence":1,"times_finalize_acl":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}","times_finalize_md5":"f3ef2eb69c220812a9863ff3f5c431e3","finalize_named_args":"p_session_id,p_duration_min (defaults 0) | p_session_id,p_actual_start,p_actual_end,p_setup_min (defaults 0)","length_refusal_gone":true,"length_only_finalize_md5":"3f31142bae70c8fd2001c4fb657f4efa","times_and_setup_refusals_kept":true}
+      T2 body md5 f3ef2eb69c220812a9863ff3f5c431e3
+PASS  re-run refuses (already applied)  — PREFLIGHT: the times finalize is already the T2 body — T2 looks applied. Refusing.
+PASS  S0 the times finalize is the T2 body (md5 f3ef2eb6): no length refusal, the times + setup refusals kept; both overloads unchanged; the length-only finalize / guard / correct / ledger on their pins
+PASS  U1 plan-scheduled session (estimate 120) finalized 19:00–22:26 → duration_min 206 replaces 120; the finalize audit logs duration_min 120 → 206
+PASS  U2 the ledger credits that session min(90, 206) = 90 min from date + start_time (the replaced length; the ledger itself unchanged)
+PASS  U7 the correction flag U1 lifted is cleared — in the same transaction a raw change to that session → LOCKED_SESSION (owner too)
+PASS  U3 reopened: re-finalize with different times → USE_CORRECT (existing actual times — still a Correct); the same times re-finalize
+PASS  U4 reopened: re-finalize with setup 30 over 20 → USE_CORRECT (existing setup — still a Correct)
+PASS  U5 length-only finalize unchanged: estimate 120 + 90 → USE_CORRECT; NULL keeps 120; no length + 45 → 45 (no times)
+PASS  U6 the times finalize still refuses end = start · a time missing · setup 700 (BAD_VALUE)
+8 passed, 0 failed, 0 skipped
+PASS  RETEST: 8 passed, 0 failed, 0 skipped — S0 + U1…U7  — 8 passed, 0 failed, 0 skipped
+PASS  RETEST left nothing behind (rolled back)
+PASS  ROLLBACK: the times finalize back on the captured b702ad77 (ACL, overloads, every other function, count)
+PASS  ROLLBACK refuses a second time (not applied)
+PASS  after ROLLBACK the RETEST fails exactly where T2 matters (S0 + U1: the estimate blocks the times again — USE_CORRECT)  — FAIL  S0 T2 is not in place as intended | FAIL  U1 USE_CORRECT: this drill already has a length — change it with Correct. — done f, duration 120, audit (none) | FAIL  U2 0 ledger rows as expected | FA
+PASS  re-apply after rollback passes
+PASS  DOCUMENTED (gate call): a REOPENED length-only drill (60, recorded at its first finalize) re-finalized with times → 206 replaces 60, logged 60 → 206 — as the ruling reads; not refused  — ok:[{"reopen_training_session":{"roster":1,"audit_id":"56a9e · ok:[{"finalize_training_session":{"present":1,"audit_id":"4035debc-3505-4508-9cd · {"done":true,"duration_min":206} · {"done":{"new":true,"old":false},"actual_end":{"new":"22:26:00","old":null},"actual_start":{"new":"19:00:00","old":null},"duration_min":{"new":206,"old":60}}
+PASS  post-apply drift (the pre-T2 body put back) → RETEST FAILs  — FAIL  S0 T2 is not in place as intended | FAIL  U1 USE_CORRECT: this drill already has a length — change it with Correct. — done f, duration 120, audit (none) | FAIL  U2 0 ledger rows as expected | FAIL  the RETEST block
+PASS  post-apply drift (the correction flag left on after the UPDATE) → RETEST FAILs  — FAIL  S0 T2 is not in place as intended | FAIL  U7 the flag leaked: raw update accepted, flag = on
+PASS  post-apply drift (the existing-times refusal removed too) → RETEST FAILs  — FAIL  S0 T2 is not in place as intended | FAIL  U3 different times after a reopen: accepted
+PASS  preflight refuses: the times finalize drifted (not b702ad77)  — PREFLIGHT: finalize_training_session(p_session_id uuid, p_actual_start time without time zone, p_actual_end time without
+PASS  preflight refuses: the length-only finalize drifted  — PREFLIGHT: finalize_training_session(p_session_id uuid, p_duration_min integer) drifted from the capture (or is gone). R
+PASS  preflight refuses: the lock guard drifted  — PREFLIGHT: tg_training_session_lock_guard() drifted from the capture (or is gone). Refusing.
+PASS  preflight refuses: correct_training_session drifted  — PREFLIGHT: correct_training_session(p_session_id uuid, p_changes jsonb, p_add uuid[], p_remove uuid[], p_reason text) dr
+PASS  preflight refuses: attested_training drifted (the ledger)  — PREFLIGHT: attested_training(p_dept uuid, p_from timestamp with time zone, p_to timestamp with time zone) drifted from t
+PASS  preflight refuses: a training_sessions trigger dropped  — PREFLIGHT: a training_sessions / session_attendance trigger changed. Refusing.
+PASS  preflight refuses: a session_attendance constraint changed  — PREFLIGHT: a training_sessions / session_attendance constraint changed. Refusing.
+PASS  preflight refuses: a policy changed  — PREFLIGHT: a public policy changed since the capture. Refusing.
+PASS  preflight refuses: the training_sessions columns changed  — PREFLIGHT: the training_sessions / session_attendance columns changed since the capture. Refusing.
+PASS  preflight refuses: already applied (the T2 body is in place)  — PREFLIGHT: the times finalize is already the T2 body — T2 looks applied. Refusing.
+PASS  proof catches + rolls back: it also moves the ledger (attested_training cap 90 → 120)  — Post-condition failed: the credited-hours ledger moved for department(s) 00000000-0000-0000-0000-00000000000a. Rolling back.
+PASS  proof catches + rolls back: it also changes the length-only finalize  — Post-condition failed: the guard / correct / the length-only finalize / attested_training / dept_iso_hours_for changed. Rolling ba
+PASS  proof catches + rolls back: it also changes another function (is_leader)  — Post-condition failed: another public function changed. Rolling back.
+PASS  proof catches + rolls back: the length refusal left in (not the T2 body)  — Post-condition failed: the times finalize is not exactly the T2 body (md5 f3ef2eb69c220812a9863ff3f5c431e3) / SECURITY DEFINER / i
+PASS  proof catches + rolls back: the existing-times refusal dropped as well  — Post-condition failed: the times finalize is not exactly the T2 body (md5 f3ef2eb69c220812a9863ff3f5c431e3) / SECURITY DEFINER / i
+PASS  proof catches + rolls back: EXECUTE granted to anon  — Post-condition failed: the times finalize is not exactly the T2 body (md5 f3ef2eb69c220812a9863ff3f5c431e3) / SECURITY DEFINER / i
+PASS  proof catches + rolls back: a DEFAULT put on p_setup_min  — Post-condition failed: the times finalize is not exactly the T2 body (md5 f3ef2eb69c220812a9863ff3f5c431e3) / SECURITY DEFINER / i
+PASS  proof catches + rolls back: a session row changed (guard bypassed)  — Post-condition failed: a training_sessions / session_attendance row changed. Rolling back.
+PASS  proof catches + rolls back: an extra function created  — Post-condition failed: another public function changed. Rolling back.
+PASS  proof catches + rolls back: a policy added  — Post-condition failed: a policy, trigger or constraint changed. Rolling back.
+
+37 passed, 0 failed
