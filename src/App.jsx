@@ -25203,7 +25203,8 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
        genuinely have nobody, so this stays a confirm rather than a block: still one click to
        proceed, never by accident. */
     /* E1/E3 U1 — the actual window, from the close-out's "Actual time". An End (or a setup time) typed = finalize WITH the times
-       through the times overload {p_session_id, p_actual_start, p_actual_end, p_setup_min} — the length is derived server-side.
+       through the times overload {p_session_id, p_actual_start, p_actual_end, p_setup_min} — the length is derived server-side
+       and (T2) replaces a length set before it ran, e.g. a plan's estimate pre-filled at scheduling.
        Nothing typed (the start is only the scheduled time, pre-filled), or "I only know the length" = the length-only path below,
        exactly as before ({p_session_id, p_duration_min}). Checked here first so a slip is a friendly line, not a refusal. */
     const ad = actDraft[s.id] || {};
@@ -25215,11 +25216,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
         const c = checkActual(start, end, setup);
         if (c.err) { fail(c.err); return; }
         if (c.start == null) { fail({ title: "Give the start and end", text: "Setup is recorded with the actual times — enter when it started and ended, or clear the setup." }); return; }
-        if (s.durationMin != null && s.durationMin !== c.span) {
-          fail({ title: "This drill already has a length", text: `${tpDur(s.durationMin)} is recorded for it (set before it ran), and ${fmtWindow(c.start, c.end)} is ${fmtSpan(c.span)}. Finalize with “I only know the length”, then enter the actual times with Correct — the length follows the times.` });
-          return;
-        }
-        act = c;
+        act = c;   // T2: a length set before it ran (e.g. a plan's estimate) is replaced by the span — the DB logs old → new
       }
     } else if (s.durationMin == null && String(ad.len ?? "").trim() !== "") {
       const raw = String(ad.len).trim(), n = Number(raw);
@@ -25242,7 +25239,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
       const lockBody = (
         <div>
           <div style={{ display: "flex", gap: 8, margin: "4px 0 10px" }}>{sumTile("Length", lenLabel)}{sumTile("Present", presentCount)}</div>
-          {act && <p data-testid="lock-window" style={{ fontSize: 12.5, color: FIRE.textSecondary, margin: "0 0 8px", ...FS.num }}>{fmtWindow(act.start, act.end)}{act.setup != null ? ` · setup ${act.setup} min` : ""}</p>}
+          {act && <p data-testid="lock-window" style={{ fontSize: 12.5, color: FIRE.textSecondary, margin: "0 0 8px", ...FS.num }}>{fmtWindow(act.start, act.end)}{act.setup != null ? ` · setup ${act.setup} min` : ""}{s.durationMin != null && s.durationMin !== act.span ? ` · replaces the ${tpDur(s.durationMin)} set before it ran` : ""}</p>}
           {presentNames.length > 0 && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 10 }}>
               {presentNames.slice(0, 12).map((n) => <span key={n} style={{ fontSize: 11.5, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}

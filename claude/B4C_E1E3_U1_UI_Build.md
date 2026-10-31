@@ -1,5 +1,17 @@
 # B4C — E1/E3 Slice U1 (training time UI) — built, for review. NOT promoted.
 
+> **Amended (T2):** Ashlea ruled on flag 1 of `B4C_E1E3_U1_UI_ReviewRecord` — at finalize the actual times replace a
+> pre-finalize (estimated) length. The DB side is **T2** (`feat/e1e3-t2-db` @ `5045fad`, a draft; it applies on Ashlea's go).
+> **U1 promotes after T2 is live.**
+> - **Dropped:** the client's "This drill already has a length" pre-catch. A plan-scheduled drill now finalizes with times
+>   straight through the times overload.
+> - **Added:** the lock confirm's window line says "· replaces the 2 hrs set before it ran" when it does. The DB logs
+>   duration_min old → new.
+> - **Rebased:** onto live `origin/main`, which is still `1fc6059` (no-op).
+> - **Results:** test **46/0**; suite **42 files, 1109 PASS, 0 FAIL**; verified 132/108; Notify held.
+> - **Until T2 is live, don't promote U1.** On today's DB that finalize gets USE_CORRECT, then LOCKED_SESSION. It surfaces
+>   via the existing notify, but the drill wouldn't finalize with times.
+
 **Branch:** `feat/e1e3-u1-ui`, off live `origin/main` `1fc6059`. **Client only: `src/App.jsx`.**
 **Depends on:** Slice T, live 2026-10-30 (and R, live 2026-10-31, which U1 doesn't touch).
 **Design:** the Step 0 §4 (`claude/B4C_E1E3_TrainingTime_Reactions_Step0.md`) plus the gate's U1 directive.
@@ -27,7 +39,7 @@
     - end ≠ start;
     - setup is whole minutes 0–600;
     - setup without times;
-    - a **different length already recorded** (see the first call below).
+    - ~~a different length already recorded~~: **removed in the T2 amendment**. The span replaces it server-side.
   - The DB stays the authority: any refusal still surfaces through the existing `s6Err` notify.
 - **Past session** (the roll's summary line), for a session **with** times:
   - **Estimated ~2 hrs** (the attached plan) · **Actual 7:00–10:26 PM · 3h 26m** · **Setup 20 min**, side by side.
@@ -47,7 +59,7 @@
   live and readable under the same policy.
 
 ## Calls for the gate
-1. **⚑ A drill that already has a length can't be finalized with different times.** The DB answers `USE_CORRECT`,
+1. **[RESOLVED by T2.]** **⚑ A drill that already has a length can't be finalized with different times.** The DB answers `USE_CORRECT`,
    which is Slice T's addendum ruling.
    - **This will be common.** "Schedule with this plan" pre-fills the session's **Length** from the plan's estimate
      (`schedulePrefill → sDur`). So those sessions carry the *estimate* in `duration_min` before they run.

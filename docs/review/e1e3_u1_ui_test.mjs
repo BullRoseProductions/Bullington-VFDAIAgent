@@ -4,8 +4,8 @@
 //   1. the close-out's "Actual time": Start pre-filled from the schedule, the live preview math (incl. past midnight, noon, <1 h)
 //   2. finalize WITH times → finalize_training_session({p_session_id, p_actual_start, p_actual_end, p_setup_min}) — exactly
 //      that argument set (PostgREST picks the overload by it), the length never sent; past midnight sent as-is
-//   3. the friendly client-side checks (both or neither, end ≠ start, setup 0–600, setup needs times, a different recorded
-//      length) — nothing sent, no dialog
+//   3. the friendly client-side checks (both or neither, end ≠ start, setup 0–600, setup needs times) — nothing sent, no dialog;
+//      T2: a plan-scheduled drill (an estimate as its length) finalizes with times straight through
 //   4. the fallback — the existing length-only path, the old {p_session_id, p_duration_min} shape (prompt / typed / recorded)
 //   5. the past session: Estimated (the plan) · Actual window + length · Setup; a length-only session unchanged
 //   6. Correct: the three fields + preview; the DB's "length comes from the times" refusal in plain words; client checks;
@@ -173,13 +173,20 @@ for (const [what, fill, re] of [
   ok(`refused before the call — ${what}: an inline line, no confirm, no RPC`, re.test(norm(q("st", "act-err")?.textContent)) && globalThis.__confirms.length === 0 && rpcs("finalize_training_session").length === 0, norm(q("st", "act-err")?.textContent));
   unmount();
 }
+// T2 — a plan-scheduled drill carries the plan's ESTIMATE as its length (120); finalize-with-times goes straight through and the
+// span replaces it server-side (finalize_training_session logs duration_min 120 → 206). No client pre-catch any more.
 { const { unmount } = await mount([sess("sr", "Ladders", { durationMin: 120 })]);
   await closeout("sr"); await setVal(q("sr", "act-end"), "22:26"); await finalize("sr");
-  ok("a drill that already has a different length (set before it ran): a plain line pointing at the fallback + Correct — not the DB's USE_CORRECT",
-    /This drill already has a length\. 2 hrs is recorded/.test(norm(q("sr", "act-err")?.textContent)) && /Correct/.test(q("sr", "act-err")?.textContent) && rpcs("finalize_training_session").length === 0, norm(q("sr", "act-err")?.textContent));
-  await setVal(q("sr", "act-start"), "19:00"); await setVal(q("sr", "act-end"), "21:00"); await finalize("sr");
-  const f = rpcs("finalize_training_session");
-  ok("…but times that MATCH the recorded length go through the times overload", f.length === 1 && f[0].args.p_actual_end === "21:00" && !q("sr", "act-err"), JSON.stringify(f));
+  const f = rpcs("finalize_training_session"), body = norm(textOf(globalThis.__confirms.at(-1)?.body));
+  ok("T2: a plan-scheduled drill (estimate 120) finalized 19:00–22:26 goes STRAIGHT THROUGH — the times overload, no inline refusal, no prompt",
+    f.length === 1 && keys(f[0].args) === '["p_actual_end","p_actual_start","p_session_id","p_setup_min"]' && f[0].args.p_actual_start === "19:00" && f[0].args.p_actual_end === "22:26"
+    && !q("sr", "act-err") && globalThis.__prompts.length === 0, JSON.stringify(f));
+  ok("…the lock confirm shows the actual length (3h 26m) and says it replaces the 2 hrs set before it ran", /Length 3h 26m/.test(body) && /replaces the 2 hrs set before it ran/.test(body), body.slice(0, 200));
+  ok("…and the client no longer carries the \"already has a length\" pre-catch", !readFileSync(join(root, "src/App.jsx"), "utf8").includes("This drill already has a length"));
+  unmount(); }
+{ const { unmount } = await mount([sess("sr", "Ladders", { durationMin: 120 })]);
+  await closeout("sr"); await setVal(q("sr", "act-end"), "21:00"); await finalize("sr");
+  ok("times that match the estimate: no \"replaces\" note", rpcs("finalize_training_session").length === 1 && !/replaces/.test(norm(textOf(globalThis.__confirms.at(-1)?.body))));
   unmount(); }
 
 // 4 — the fallback: the existing length-only path, the old {p_session_id, p_duration_min} shape
