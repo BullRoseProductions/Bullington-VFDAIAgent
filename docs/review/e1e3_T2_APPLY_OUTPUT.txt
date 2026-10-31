@@ -1,0 +1,29 @@
+E1/E3 T2 (at finalize, actual times replace a pre-finalize estimate) — APPLIED TO PRODUCTION 2026-10-31
+Gate PASS (B4C_E1E3_T2_DB_ReviewRecord) on feat/e1e3-t2-db @ 5045fad. Applied on Ashlea's go. One window, Notify held (api/notify-session.js absent).
+
+Editor content was SHA-256-checked against the file before each Run:
+  DRAFT  sql/e1e3_T2_times_replace_estimate_DRAFT.sql   sha256 c412fcb14236…  33,579 bytes
+  RETEST sql/e1e3_T2_times_replace_estimate_RETEST.sql  sha256 2f5cdaa64011…  15,739 bytes
+
+== STATE ROW (DRAFT tail) ==
+{"iso_md5":"705c9a9b5532d28824f5e50e74d6059f","fn_count":231,"guard_md5":"c1af95df40d551b75998cde0a8f290f7","correct_md5":"8c00066509e9dca338dc3662f55e1211","attested_md5":"aff25333771cd38c1f473bcde5e1e96e","total_policies":182,"verified_presence":1026,"times_finalize_acl":"{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}","times_finalize_md5":"f3ef2eb69c220812a9863ff3f5c431e3","finalize_named_args":"p_session_id,p_duration_min (defaults 0) | p_session_id,p_actual_start,p_actual_end,p_setup_min (defaults 0)","length_refusal_gone":true,"length_only_finalize_md5":"3f31142bae70c8fd2001c4fb657f4efa","times_and_setup_refusals_kept":true}
+
+Checks:
+  times finalize b702ad77 → f3ef2eb6 (= the generated text; the dry run computed the same md5)
+  length-only finalize 3f31142b / guard c1af95df / correct 8c000665 / attested aff25333 / iso 705c9a9b — unchanged
+  fn_count 231 (unchanged); policies 182 (unchanged); verified 1026 (= the capture)
+
+== RETEST (rolled back via SENTINEL) — 8 passed, 0 failed, 0 skipped ==
+S0  PASS  the times finalize is the T2 body (md5 f3ef2eb6): no length refusal, the times + setup refusals kept; both overloads unchanged; the length-only finalize / guard / correct / ledger on their pins
+U1  PASS  plan-scheduled session (estimate 120) finalized 19:00–22:26 → duration_min 206 replaces 120; the finalize audit logs duration_min 120 → 206
+U2  PASS  the ledger credits that session min(90, 206) = 90 min from date + start_time (the replaced length; the ledger itself unchanged)
+U7  PASS  the correction flag U1 lifted is cleared — in the same transaction a raw change to that session → LOCKED_SESSION (owner too)
+U3  PASS  reopened: re-finalize with different times → USE_CORRECT (existing actual times — still a Correct); the same times re-finalize
+U4  PASS  reopened: re-finalize with setup 30 over 20 → USE_CORRECT (existing setup — still a Correct)
+U5  PASS  length-only finalize unchanged: estimate 120 + 90 → USE_CORRECT; NULL keeps 120; no length + 45 → 45 (no times)
+U6  PASS  the times finalize still refuses end = start · a time missing · setup 700 (BAD_VALUE)
+
+== POST-RETEST LEFTOVER CHECK (read-only) ==
+retest_sessions 0 · retest_audit_rows 0 · sessions 177 · roll_rows 444 (= the capture) · correction flag '' (unset)
+
+No other production SQL was run apart from the read-only captures, this apply, the rolled-back RETEST and the read-only leftover check.
