@@ -285,18 +285,20 @@ const save = async (p) => { await click(btn(p, /Save correction/)); await tick()
   unmount(); }
 
 // 7 — E1 relabel + the source fences
-const src = readFileSync(join(root, "src/App.jsx"), "utf8");
-const BASE = "1fc6059";   // live origin/main when U1 was built (industrial-noir-49)
-const base = execSync(`git show ${BASE}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+// Structural fences PINNED to U1's reviewed range (released as industrial-noir-50): base 1fc6059 .. reviewed d80c41c —
+// "vs the base" / "the current file" would go red once later work lands. The screen checks above run on the current code.
+const BASE = "1fc6059", REV = "d80c41c";
+const appAt = (ref) => execSync(`git show ${ref}:src/App.jsx`, { cwd: root, maxBuffer: 1 << 27 }).toString();
+const src = appAt(REV), base = appAt(BASE);
 ok("E1: the plan's duration is labelled \"Estimated length\" (builder + editor) — the same field, same RPC argument", src.includes('field("Estimated length", <select style={FS.input} value={form.duration}') && src.includes('lbl("Estimated length (minutes)")}<input style={FS.input} inputMode="numeric" value={f.duration}')
   && !src.includes('lbl("Duration (minutes)")') && !src.includes('field("Duration", '));
-const changed = execSync(`git diff --name-only ${BASE} -- src api shared sql vercel.json package.json`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-ok(`client only: vs ${BASE} the only runtime change is src/App.jsx — no SQL / API / vercel.json`, JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
+const changed = execSync(`git diff --name-only ${BASE} ${REV} -- src api shared sql vercel.json package.json`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok(`client only: in the reviewed range ${BASE}..${REV} the only runtime change is src/App.jsx — no SQL / API / vercel.json`, JSON.stringify(changed) === '["src/App.jsx"]', JSON.stringify(changed));
 const rpcSet = (s) => new Set((s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)));
 ok("no new RPC name — both finalize shapes call the existing finalize_training_session", [...rpcSet(src)].filter((n) => !rpcSet(base).has(n)).length === 0
   && src.includes('{ p_session_id: s.id, p_actual_start: act.start, p_actual_end: act.end, p_setup_min: act.setup }') && src.includes('{ p_session_id: s.id, p_duration_min: s.durationMin == null ? dur : null }'));
 const tok = (s, flags) => (s.match(new RegExp("verifie" + "d", flags)) || []).length;
-ok("verified untouched: App.jsx 132 (108 raw), same as the base", tok(src, "gi") === 132 && tok(src, "g") === 108 && tok(base, "gi") === 132, `${tok(src, "gi")}/${tok(src, "g")}`);
+ok(`verified untouched at ${REV}: App.jsx 132 (108 raw), same as the base`, tok(src, "gi") === 132 && tok(src, "g") === 108 && tok(base, "gi") === 132, `${tok(src, "gi")}/${tok(src, "g")}`);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")) && !src.includes("NotifyCrewModal"));
 await win.happyDOM?.abort?.();
 process.exit(process.exitCode || 0);
