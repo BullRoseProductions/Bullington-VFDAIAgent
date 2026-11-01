@@ -294,6 +294,47 @@ function Card({ as: Tag = "div", padding = "14px 16px", style, children, ...rest
   const face = useCardFace();
   return <Tag style={{ ...face, padding, ...style }} {...rest}>{children}</Tag>;
 }
+// A box whose table scrolls sideways INSIDE its card (never the page), with a visible cue that it does: a right-edge
+// fade while columns are hidden to the right, and at phone widths a one-line "Swipe for more →" under it. Both go away
+// when the content fits. `style` is the scroller's own style, unchanged (overflowX: auto is supplied here); only its
+// outer margins move to the wrapper so the fade can sit over the scroller's visible edge. The hint keeps its line
+// while the content overflows and just fades out at the right end, so scrolling never makes the card jump.
+const SCROLL_HINT_MQ = "(max-width: 640px)";
+function ScrollX({ style = {}, children }) {
+  const noir = React.useContext(NoirCtx);
+  const ref = useRef(null);
+  const [over, setOver] = useState(false);   // wider than its box at all
+  const [more, setMore] = useState(false);   // columns still hidden to the right
+  const [phone, setPhone] = useState(() => { try { return window.matchMedia(SCROLL_HINT_MQ).matches; } catch { return false; } });
+  const measure = () => {
+    const el = ref.current; if (!el) return;
+    const o = el.scrollWidth - el.clientWidth > 1;
+    setOver(o); setMore(o && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  // Every render: rows arriving or a filter changing the columns changes the width without resizing the box.
+  React.useLayoutEffect(measure);
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia(SCROLL_HINT_MQ); } catch { /* no matchMedia: hint stays off */ }
+    const onMq = () => setPhone(!!mq?.matches);
+    mq?.addEventListener?.("change", onMq);
+    window.addEventListener("resize", measure);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (ro && ref.current) { ro.observe(ref.current); if (ref.current.firstElementChild) ro.observe(ref.current.firstElementChild); }
+    return () => { mq?.removeEventListener?.("change", onMq); window.removeEventListener("resize", measure); ro?.disconnect(); };
+  }, []);
+  const { margin, marginTop, marginBottom, ...box } = style;
+  const r = typeof box.borderRadius === "number" ? box.borderRadius : 0;
+  const edge = noir ? "#0D1016" : FIRE.card;   // the card face behind the right edge (cardNoir's gradient midpoint)
+  return (
+    <div style={{ margin, marginTop, marginBottom }}>
+      <div style={{ position: "relative" }}>
+        <div ref={ref} onScroll={measure} style={{ ...box, overflowX: "auto" }}>{children}</div>
+        {more && <div aria-hidden="true" data-scroll-fade style={{ position: "absolute", top: 1, bottom: 1, right: 1, width: 36, pointerEvents: "none", borderRadius: `0 ${r}px ${r}px 0`, background: `linear-gradient(90deg, rgba(13,16,22,0), ${edge})` }} />}
+      </div>
+      {over && phone && <div data-scroll-hint style={{ fontSize: 11, color: FIRE.textMuted, textAlign: "right", padding: "5px 4px 0", opacity: more ? 1 : 0, transition: "opacity .2s" }}>Swipe for more →</div>}
+    </div>
+  );
+}
 // Big tabular number + label + optional sub-line. tone: green | amber | red | muted (default: primary text).
 // onClick makes it a button with the chevron; without it it's a plain box (read-only views).
 function StatTile({ label, value, sub, tone, onClick, icon: Icon }) {
@@ -13391,7 +13432,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
       {last10.length > 0 && (
         <Card padding="14px 16px" style={{ marginBottom: 12 }}>
           <CardHead icon={Users} title="Who's showing up" right={<span>member × last {last10.length} sessions</span>} />
-          <div style={{ overflowX: "auto" }}>
+          <ScrollX>
             <div style={{ minWidth: 172 + last10.length * 34 }}>
               <div style={{ display: "flex", alignItems: "flex-end", paddingLeft: 172, marginBottom: 7 }}>
                 {last10.map((s) => <span key={s.id} title={`${s.title} · ${fmtShort(s)}`} style={{ width: 34, textAlign: "center", fontSize: 9, color: FIRE.textMuted, lineHeight: 1.15 }}>{sessDate(s).toLocaleDateString("en-US", { month: "short" }).slice(0, 1)}{sessDate(s).getDate()}</span>)}
@@ -13405,7 +13446,7 @@ function RosterAttendance({ S, members, sessions, plan }) {
                 </div>
               ))}
             </div>
-          </div>
+          </ScrollX>
           <div style={{ display: "flex", gap: 16, marginTop: 14, fontSize: 11, color: FIRE.textSecondary, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, height: 14, borderRadius: 4, background: "rgba(47,168,105,.85)" }} />Present</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, height: 14, borderRadius: 4, background: "rgba(200,50,58,.8)" }} />Absent</span>
@@ -15011,7 +15052,7 @@ function CapitalPlanReport({ S, dept, back }) {
         </div>
         {/* per-year detail */}
         {groups.map((g) => (
-          <div key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+          <ScrollX key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
             <CardHead icon={Calendar} title={String(g.year)} right={<span style={{ ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</span>} style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th><th style={{ ...TH, textAlign: "right" }}>Set aside / yr</th></tr></thead>
@@ -15034,11 +15075,11 @@ function CapitalPlanReport({ S, dept, back }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollX>
         ))}
         {/* not yet planned */}
         {unplanned.length > 0 && (
-          <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+          <ScrollX style={{ ...FS.cardNoir, padding: "8px 0" }}>
             <CardHead icon={Truck} title="Not yet planned" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "0 12px 6px" }}>No planned replacement year on record.</div>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
@@ -15054,7 +15095,7 @@ function CapitalPlanReport({ S, dept, back }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollX>
         )}
         {/* DEPRECIATION — ESTIMATE, fenced off from every entered/computed dollar above. Not an appraisal. */}
         {rigs.length > 0 && (() => {
@@ -15075,7 +15116,7 @@ function CapitalPlanReport({ S, dept, back }) {
                   Straight-line to a $0 residual over each unit's service life — an estimate for planning, not an appraisal, book value or resale price, and never part of the replacement totals above. Life comes from the unit's planned replacement year when set, otherwise a default by type ({lifeText}; others {CAPITAL_DEFAULT_LIFE_FALLBACK} yrs).
                 </div>
               </div>
-              <div style={{ overflowX: "auto" }}>
+              <ScrollX>
                 <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
                   <thead><tr><th style={TH}>Apparatus</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={TH}>Service life</th><th style={{ ...TH, minWidth: 120 }}>Age of life</th><th style={{ ...TH, textAlign: "right" }}>Depreciated</th><th style={{ ...TH, textAlign: "right" }}>Est. value today</th></tr></thead>
                   <tbody>
@@ -15092,7 +15133,7 @@ function CapitalPlanReport({ S, dept, back }) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollX>
             </div>
           );
         })()}
@@ -15891,7 +15932,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         )}
       </div>
       {/* hours by member */}
-      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Users} title="Hours by member" style={{ marginBottom: 0 }} /></div>
         {rows.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
@@ -15925,7 +15966,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             </tbody>
           </table>
         )}
-      </div>
+      </ScrollX>
       {/* ISO hours — the reportable number */}
       {/* This table is NOT a second opinion on "Hours by member" above; it is the same time counted
           correctly. dept_iso_hours unions each member's verified, CLOSED intervals so a minute that is
@@ -15934,7 +15975,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           The explainer names both in plain words and labels the number neutrally, because a chief who
           spots a gap without an explanation will assume the report is broken, and a gap that was
           labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
-      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ShieldAlert} title="ISO hours — no double-counting" style={{ marginBottom: 0 }} /></div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
           Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
@@ -15976,7 +16017,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             No training hours yet. A drill counts here once a member scans the QR <b style={{ color: FIRE.textSecondary }}>on site</b> (an off-site or location-denied scan still signs them in, but earns no clock) and an officer finalizes the session.
           </div>
         )}
-      </div>
+      </ScrollX>
       {/* ---- ISO BY HOUSE (E) ----
            THE TOTAL ABOVE STAYS THE HEADLINE. This is an enhancement beneath it, never a
            replacement: dept_iso_hours is untouched and is still where the reportable number
@@ -15997,7 +16038,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
 
            SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
       {multiStation && isoByStation.length > 0 && (
-        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14, overflowX: "auto" }}>
+        <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
           <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Building2} title="ISO hours by house" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
@@ -16028,10 +16069,10 @@ function StationHoursReport({ S, role, dept, notify, back }) {
               </tr>
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       )}
       {/* shift log */}
-      <div style={{ ...FS.cardNoir, padding: "8px 0", overflowX: "auto" }}>
+      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0" }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} /></div>
         {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
             then each house, then Unassigned only when there is something in it. Chips rather than
@@ -16106,7 +16147,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             </div>
           )}
         </>)}
-      </div>
+      </ScrollX>
       </NoirSkin>
     </PageShell>
   );
@@ -16226,7 +16267,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
         </div>
       )}
       {detail ? (
-        <div style={{ ...FS.cardNoir, padding: "8px 0", marginTop: 14, overflowX: "auto" }}>
+        <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginTop: 14 }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead>
               <tr>
@@ -16250,7 +16291,7 @@ function AttendanceReport({ S, members, sessions, dept, back }) {
             </tbody>
           </table>
           <div style={{ fontSize: 11.5, color: FIRE.textMuted, padding: "8px 14px 2px" }}><span style={{ color: FIRE.green, fontWeight: 700 }}>✓</span> attended · <span style={{ color: FIRE.redText, fontWeight: 700 }}>✗</span> absent · <span style={{ fontWeight: 700 }}>—</span> not expected · <span style={{ color: FIRE.amberText }}>·L</span> leadership · <span style={{ color: FIRE.blueText }}>·B</span> board</div>
-        </div>
+        </ScrollX>
       ) : (
       <div style={{ ...FS.cardNoir, padding: "4px 16px", marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${FIRE.lineNoir}`, fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", color: FIRE.textMuted, fontWeight: 700 }}>
@@ -22201,7 +22242,7 @@ function Qualifications({ S, role, members, meId, notify }) {
           : activeTypes.length === 0 ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>No qualifications set up yet.{configurer ? " Add your department's first one under Manage qualifications below." : " A Department Admin sets them up."}</Card>
           : (<>
             <div style={{ display: "flex", gap: 14, margin: "0 2px 12px", fontSize: 10, color: FIRE.textMuted }}>{["qualified", "in_progress", "not_started"].map((k) => <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}><QualDot status={k} size={9} />{QUAL_DOT[k].label}</span>)}</div>
-            <div style={{ ...FS.cardNoir, borderRadius: 14, padding: "4px 6px 6px", marginBottom: 19, overflowX: "auto" }}>
+            <ScrollX style={{ ...FS.cardNoir, borderRadius: 14, padding: "4px 6px 6px", marginBottom: 19 }}>
               <div style={{ minWidth: 150 + activeTypes.length * 30 }}>
                 <div style={{ display: "grid", gridTemplateColumns: `minmax(130px, 1fr) repeat(${activeTypes.length}, 30px)`, alignItems: "end", padding: "10px 6px 9px", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
                   <div style={{ fontSize: 9, color: FIRE.textMuted, textTransform: "uppercase", letterSpacing: ".05em" }}>{mx.members.length} member{mx.members.length === 1 ? "" : "s"}</div>
@@ -22218,7 +22259,7 @@ function Qualifications({ S, role, members, meId, notify }) {
                   </div>
                 ))}
               </div>
-            </div>
+            </ScrollX>
             {sel && <QualDetail type={sel} mx={mx} cellOf={cellOf} meId={meId} ops={ops} appName={appName} apparatus={apparatus} onSign={signOff} onRevoke={revoke} />}
             {activeTypes.length > 1 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "-4px 0 18px" }}>{activeTypes.map((t) => <button key={t.id} onClick={() => setSelType(t.id)} style={{ ...FS.btn, padding: "4px 10px", fontSize: 11, borderColor: sel?.id === t.id ? "#6FD0E0" : undefined, color: sel?.id === t.id ? "#6FD0E0" : undefined }}>{t.name}</button>)}</div>}
             <QualSection icon={Clock} label="Recent drive log" color={FIRE.textSecondary} />
