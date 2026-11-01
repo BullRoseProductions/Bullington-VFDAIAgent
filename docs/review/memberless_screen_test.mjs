@@ -18,8 +18,9 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "7b44c65";   // live main when this was drafted (industrial-noir-56)
-// REV is the working tree until review; pin it to the reviewed commit in the promote push.
-const REV = process.env.REV || null;
+// Structural fences PINNED to the reviewed range: base 7b44c65 .. reviewed 49fddd9 — "vs the working tree" would go red once
+// later work lands. REV=<sha> (or REV="" for the working tree) overrides. The App renders run on today's code.
+const REV = process.env.REV ?? "49fddd9";
 
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
 const { Window } = hdReq("happy-dom");
