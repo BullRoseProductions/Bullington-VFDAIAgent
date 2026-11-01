@@ -14,6 +14,14 @@
 //   7. fmtPhone: one display formatter — US numbers read (817) 555-0199; anything else exactly as stored
 //   8. the giver countdown can't paint red before its first tick (null <= 10 was true)
 //   9. Station Hours + Capital cards scroll the TABLE, not the card (header / explainer stay put); no clip added
+//  FOLLOW-UP (rulings on the gate's PASS @88b559f):
+//  10. board-audience events → Board + DA + PA only; "Leadership only" → leaders only — the rule, and the calendars obey it
+//  11. the onboarding sign-off approver picker lists Active only (no Probationary); a current probationary approver is marked
+//  12. the Department page with no department chosen is the PA's department list (radar read); a tap opens that department
+//  13. Tommy's picker: "Plan (optional)" lists APPROVED drills only; picking one schedules the session WITH that existing plan
+//      via attach_drill_plan_to_session — no plan created (no drill_plans write, no pull, no AI call)
+//  14. Bret's packet buttons: an approved department copy → "Schedule this" / "Attach to a session" through the same path;
+//      a draft copy → "waiting on officer approval", no buttons
 //   fences: only src/App.jsx, src/phone.js, this test, the note; verified 132/32/14; Notify held
 import { mkdtempSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
@@ -45,14 +53,17 @@ const MOCKS = {
     const BASE_RPC = { my_member_id: ME, my_department_id: D, is_dept_admin: true, is_department_admin: true, is_leader: true, is_leadership: true, is_canmanage: true, is_canmanage_ops: true, is_project_admin: false, has_password: true, my_open_station_session: [], my_stations: [], dept_cert_types: [], my_read_sign_queue: [] };
     function q(table) {
       const f = { single: false }; const b = {};
-      for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "gte", "lte", "lt", "gt", "or", "not", "range", "filter", "match", "contains", "overlaps", "ilike", "like", "textSearch", "insert", "update", "delete", "upsert"]) b[m] = () => b;
+      for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "gte", "lte", "lt", "gt", "or", "not", "range", "filter", "match", "contains", "overlaps", "ilike", "like", "textSearch"]) b[m] = () => b;
+      for (const m of ["insert", "update", "delete", "upsert"]) b[m] = (payload) => { f.write = m; (globalThis.__writes ||= []).push({ table, op: m, payload }); return b; };
       b.single = () => { f.single = true; return b; }; b.maybeSingle = () => { f.single = true; return b; };
-      b.then = (res, rej) => { const rows = (FX().tables || {})[table] || []; return Promise.resolve(f.single ? { data: rows[0] || null, error: null } : { data: rows, error: null, count: rows.length }).then(res, rej); };
+      b.then = (res, rej) => {
+        if (f.write === "insert") { const rows = [].concat((globalThis.__writes.at(-1) || {}).payload || []).map((r, i) => ({ id: "new-" + table + "-" + i, ...r })); return Promise.resolve({ data: f.single ? rows[0] : rows, error: null }).then(res, rej); }
+        const rows = (FX().tables || {})[table] || []; return Promise.resolve(f.single ? { data: rows[0] || null, error: null } : { data: rows, error: null, count: rows.length }).then(res, rej); };
       return b;
     }
     export const supabase = {
       from: q,
-      rpc: (n) => { const all = { ...BASE_RPC, ...(FX().rpc || {}) }; return { then: (res, rej) => Promise.resolve(n in all ? { data: all[n], error: null } : { data: null, error: { message: "no fixture: " + n } }).then(res, rej) }; },
+      rpc: (n, args) => { (globalThis.__rpcs ||= []).push({ n, args }); const all = { ...BASE_RPC, ...(FX().rpc || {}) }; return { then: (res, rej) => Promise.resolve(n in all ? { data: all[n], error: null } : { data: null, error: { message: "no fixture: " + n } }).then(res, rej) }; },
       auth: { getSession: async () => ({ data: { session: { user: { id: "u1", email: "da@x.test" }, access_token: "t" } } }), getUser: async () => ({ data: { user: { id: "u1", email: "da@x.test" } } }),
               onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), signOut: async () => ({}), refreshSession: async () => ({ data: {} }) },
       storage: { from: () => ({ createSignedUrl: async () => ({ data: null, error: { message: "x" } }), getPublicUrl: () => ({ data: { publicUrl: "" } }), list: async () => ({ data: [], error: null }) }) },
@@ -67,7 +78,7 @@ const MOCKS = {
 };
 const out = join(mkdtempSync(join(tmpdir(), "b4c-pba-")), "app.mjs");
 await build({
-  stdin: { contents: `export { default as App, ResendLink, eventTimesInvalid, isPickable, pickable } from "./src/App.jsx"; export { NoirDialogHost } from "./src/NoirDialogs.jsx"; export { fmtPhone } from "./src/phone.js"; export { createRoot } from "react-dom/client"; export { act, createElement } from "react";`, resolveDir: root, loader: "js" },
+  stdin: { contents: `export { default as App, ResendLink, eventTimesInvalid, isPickable, pickable, sessionVisibleTo, DashboardCalendar, OicItemConfig, PADepartmentList, Packet, libRowToPacket } from "./src/App.jsx"; export { NoirDialogHost } from "./src/NoirDialogs.jsx"; export { fmtPhone } from "./src/phone.js"; export { createRoot } from "react-dom/client"; export { act, createElement } from "react";`, resolveDir: root, loader: "js" },
   bundle: true, format: "esm", platform: "node", outfile: out, jsx: "automatic", logLevel: "silent",
   banner: { js: 'import { createRequire as __cr } from "module"; const require = __cr(import.meta.url);' },
   loader: { ".js": "jsx", ".png": "dataurl", ".svg": "dataurl", ".jpg": "dataurl", ".css": "empty" },
@@ -79,10 +90,10 @@ await build({
     b.onResolve({ filter: /^\.\/apiBase(\.js)?$/ }, () => ({ path: "api", namespace: "fake" }));
     b.onResolve({ filter: /^qrcode\.react$/ }, () => ({ path: "qr", namespace: "fake" }));
     b.onLoad({ filter: /.*/, namespace: "fake" }, (a) => ({ contents: MOCKS[a.path], loader: "js" }));
-    b.onLoad({ filter: /src[\\/]App\.jsx$/ }, (a) => ({ contents: readFileSync(a.path, "utf8") + "\nexport { ResendLink, eventTimesInvalid, isPickable, pickable };\n", loader: "jsx" }));
+    b.onLoad({ filter: /src[\\/]App\.jsx$/ }, (a) => ({ contents: readFileSync(a.path, "utf8") + "\nexport { ResendLink, eventTimesInvalid, isPickable, pickable, sessionVisibleTo, DashboardCalendar, OicItemConfig, PADepartmentList, Packet, libRowToPacket };\n", loader: "jsx" }));
   } }],
 });
-const { App, ResendLink, eventTimesInvalid, isPickable, pickable, NoirDialogHost, fmtPhone, createRoot, act, createElement: h } = await import(pathToFileURL(out).href);
+const { App, ResendLink, eventTimesInvalid, isPickable, pickable, sessionVisibleTo, DashboardCalendar, OicItemConfig, PADepartmentList, Packet, libRowToPacket, NoirDialogHost, fmtPhone, createRoot, act, createElement: h } = await import(pathToFileURL(out).href);
 const origErr = console.error; console.error = () => {};
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
 const ME = { id: "m-me", department_id: "d-1", name: "Dana Admin", access: ["Department Admin"], status: "Active", role: "Chief", email: "da@x.test", phone: "8175550101" };
@@ -95,7 +106,7 @@ async function mount(el) {
 }
 // Land on a screen the way a person does: the sidebar. (The app-update restore point is read once per page load, so it
 // can't steer a second App in the same bundle.)
-const NAV = { expirations: "Expirations", qualifications: "Qualifications", study: "Study Session" };
+const NAV = { expirations: "Expirations", qualifications: "Qualifications", study: "Study Session", training: "Training" };
 async function screen(name, fx) {
   globalThis.__fx = fx;
   win.localStorage.clear(); win.sessionStorage.clear();
@@ -190,8 +201,9 @@ ok("2. station out-times were already client-checked (WS-4a G): out-time <= chec
   ok("6. …the row's CURRENT person stays listed even if since gone inactive (an edit never silently re-points)", ids(pickable(ms, "i")) === "a,p,i,n");
   const sites = (app.match(/pickable\(members(, [a-zA-Z.]+)?\)/g) || []).length;
   ok("6. five pickers use it: Reach-out person, action-item Owner ×2, duty Assign-to ×2", sites === 5, `${sites}`);
-  ok("6. the mentor / supervisor / approver pickers already excluded Inactive on main (unchanged)",
-    /m\.id !== member\.id && m\.status === "Active" && isAssignable\(m\)/.test(app) && /m\.status !== "Inactive" && isAssignable\(m\)/.test(app) && /\(m\.status === "Active" \|\| m\.status === "Probationary"\) && isAssignable\(m\)/.test(app)); }
+  ok("6. the mentor / supervisor pickers already excluded Inactive on main (unchanged); the approver is Active-only now (11)",
+    /m\.id !== member\.id && m\.status === "Active" && isAssignable\(m\)/.test(app) && /m\.status !== "Inactive" && isAssignable\(m\)/.test(app)
+    && /\(m\.status === "Active" \|\| m\.status === "Probationary"\) && isAssignable\(m\)/.test(show(BASE, "src/App.jsx"))); }
 
 // 7 — phones
 ok("7. fmtPhone: 8175550199 / 817.555.0199 / +1 817 555 0199 / (817)555-0199 → (817) 555-0199",
@@ -217,12 +229,111 @@ const diffArgs = REV ? `${BASE} ${REV}` : BASE;
 const added = execSync(`git diff -U0 ${diffArgs} -- src/App.jsx src/phone.js`, { cwd: root, maxBuffer: 1 << 27 }).toString().split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++") && !/^\+\s*(\/\/|\/\*|\*)/.test(l));
 ok("9. no overflow hidden / clip added anywhere in the slice", !added.some((l) => /overflow[XY]?\s*:\s*["']?(hidden|clip)/i.test(l)));
 
+// 10 — who sees restricted sessions
+{ const B = { audience: "board" }, Ld = { audience: "leadership" }, E = { audience: "everyone" };
+  const who = (s) => ["Member", "Officer", "Board Member", "Department Admin", "Project Admin"].filter((r) => sessionVisibleTo(s, [r])).join(",");
+  ok("10. a BOARD event: Board Member, Department Admin, Project Admin — not Officers, not members", who(B) === "Board Member,Department Admin,Project Admin", who(B));
+  ok("10. a LEADERSHIP-ONLY event: Officer, Board, DA, PA — never a plain member", who(Ld) === "Officer,Board Member,Department Admin,Project Admin", who(Ld));
+  ok("10. an everyone event (or no audience): all", who(E) === "Member,Officer,Board Member,Department Admin,Project Admin" && sessionVisibleTo({}, ["Member"]));
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const now = new Date(), d = (n) => ymd(new Date(now.getFullYear(), now.getMonth(), n));   // three different days this month (a day cell shows 2 chips + "+N")
+  const ts = [{ id: "t1", date: d(1), title: "Hose drill EVERYONE", audience: "everyone", status: "scheduled", session_plans: [] },
+              { id: "t2", date: d(2), title: "Budget BOARDONLY", audience: "board", status: "scheduled", session_plans: [] },
+              { id: "t3", date: d(3), title: "Officer sync LEADONLY", audience: "leadership", status: "scheduled", session_plans: [] }];
+  const cal = async (role) => { globalThis.__fx = { rpc: {}, tables: { training_sessions: ts, content_calendar: [], recruitment_events: [], funding_events: [], action_items: [] } };
+    const v = await mount(h(DashboardCalendar, { S: {}, notify: () => {}, meId: "m-me", members: [], role })); const t = v.host.textContent; await v.unmount();
+    return ["EVERYONE", "BOARDONLY", "LEADONLY"].filter((k) => t.includes(k)).join(","); };
+  const m = await cal(["Member"]), o = await cal(["Officer"]), bd = await cal(["Board Member"]), da = await cal(["Department Admin"]);
+  ok("10. the dashboard calendar obeys it: a member sees only the everyone event", m === "EVERYONE", m);
+  ok("10. …an Officer sees the leadership event but not the board one", o === "EVERYONE,LEADONLY", o);
+  ok("10. …a Board Member and a DA see all three", bd === "EVERYONE,BOARDONLY,LEADONLY" && da === "EVERYONE,BOARDONLY,LEADONLY", `${bd} / ${da}`);
+  ok("10. every DashboardCalendar is handed the viewer's role (4 dashboards); Dashboard + Training get the filtered list; record screens keep all",
+    (app.match(/<DashboardCalendar [^>]*role=\{role\}/g) || []).length === 4 && (app.match(/sessions=\{visibleSessions\}/g) || []).length === 2
+    && /<Roster [^>]*sessions=\{trainingSessions\}/.test(app) && /<Reports [^>]*sessions=\{trainingSessions\}/.test(app)); }
+
+// 11 — approver picker
+{ const ms = [{ id: "a1", name: "Alex Active", status: "Active", access: ["Officer"] }, { id: "p1", name: "Pat Probie", status: "Probationary", access: ["Member"] }, { id: "i1", name: "Ivy Inactive", status: "Inactive", access: ["Member"] }];
+  let v = await mount(h(OicItemConfig, { it: { id: "x", approver_kind: "tier", approver_role: null }, members: ms, busy: false, onSave: () => {} }));
+  const people = () => [...v.host.querySelectorAll('optgroup[label="A specific person"] option')].map((o) => o.textContent);
+  ok("11. the onboarding sign-off approver picker lists Active people only (no Probationary, no Inactive)", people().join("|") === "Alex Active", people().join("|"));
+  await v.unmount();
+  v = await mount(h(OicItemConfig, { it: { id: "x", approver_kind: "person", approver_member_id: "p1" }, members: ms, busy: false, onSave: () => {} }));
+  ok("11. …an item already naming a probationary approver keeps them listed, marked \"probationary — pick someone else\"", people().some((t) => /Pat Probie \(probationary — pick someone else\)/.test(t)), people().join("|"));
+  await v.unmount(); }
+
+// 12 — the Department page
+{ const gone = []; globalThis.__fx = { rpc: { pa_department_radar: [{ department_id: "d-z", department_name: "Zeta VFD", station: "Station 9", city: "Tolar, TX" }, { department_id: "d-a", department_name: "Alpha VFD", station: null, city: "Lipan, TX" }] }, tables: {} };
+  let v = await mount(h(PADepartmentList, { go: (s, a) => gone.push([s, a]) }));
+  const rows = [...v.host.querySelectorAll("[data-pa-dept-list] button")];
+  ok("12. no department chosen → the PA's department list (from pa_department_radar), A–Z, with station · city", rows.length === 2 && /Alpha VFD/.test(rows[0].textContent) && /Station 9 · Tolar, TX/.test(rows[1].textContent));
+  await act(async () => { rows[1].click(); });
+  ok("12. …a tap opens that department's page: go(\"department\", { id, name })", gone.length === 1 && gone[0][0] === "department" && gone[0][1].id === "d-z" && gone[0][1].name === "Zeta VFD");
+  await v.unmount();
+  globalThis.__fx = { rpc: { pa_department_radar: undefined }, tables: {} }; delete globalThis.__fx.rpc.pa_department_radar;
+  v = await mount(h(PADepartmentList, { go: () => {} }));
+  ok("12. …a failed read says so with Retry — never an empty list", /Couldn't load your departments/.test(v.host.textContent) && !!btn(v.host, /Retry/));
+  await v.unmount();
+  ok("12. DepartmentAdmin's no-target branch renders it (the dead-end card is gone)", /if \(!deptId\) return <PADepartmentList go=\{go\} \/>/.test(app) && !/Open a department from the Program overview to configure it/.test(app)); }
+
+// 13 — Tommy's picker, end to end on the real Training schedule form
+{ const plans = [{ id: "dp-ok", title: "Ladder throws", status: "approved", duration_min: 90, category: "Ladders" }, { id: "dp-draft", title: "AI hazmat draft", status: "draft", source: "ai", duration_min: 60 }];
+  globalThis.__writes = []; globalThis.__rpcs = []; globalThis.__calls = [];
+  const v = await screen("training", { rpc: { dept_drill_plans: plans, attach_drill_plan_to_session: { id: "sp-1" }, my_training_officer: true, is_training_manager: true }, tables: { members: [ME], training_plans: [], training_sessions: [] } });
+  const open = btn(v.host, /Schedule a session/);
+  ok("13. (setup) a DA on Training has \"Schedule a session\"", !!open);
+  await act(async () => { open.click(); }); await tick(8);
+  const pick = v.host.querySelector("[data-plan-picker]");
+  const opts = pick ? [...pick.querySelectorAll("option")].map((o) => o.textContent) : [];
+  ok("13. the form has \"Plan (optional)\" listing APPROVED drills only (the draft isn't offered)", !!pick && opts.join("|") === "— None —|Ladder throws · 90 min", opts.join("|"));
+  await act(async () => { pick.value = "dp-ok"; pick.dispatchEvent(new win.Event("change", { bubbles: true })); }); await tick(3);
+  ok("13. …picking it sets the existing \"With plan\" chip", /With plan: Ladder throws/.test(v.host.querySelector('[data-testid="with-plan-chip"]')?.textContent || ""));
+  await act(async () => { btn(v.host, /^\s*Add to /).click(); }); await tick(10);
+  const ins = globalThis.__writes.filter((w) => w.table === "training_sessions" && w.op === "insert");
+  const att = globalThis.__rpcs.filter((r) => r.n === "attach_drill_plan_to_session");
+  ok("13. save → the session is inserted, then attach_drill_plan_to_session({ p_plan_id: the picked plan, p_session_id: the new session })",
+    ins.length === 1 && att.length === 1 && att[0].args.p_plan_id === "dp-ok" && att[0].args.p_session_id === "new-training_sessions-0", JSON.stringify(att[0]?.args));
+  ok("13. …and NO plan is created: no drill_plans write, no pull_library_drill, no AI call",
+    !globalThis.__writes.some((w) => w.table === "drill_plans") && !globalThis.__rpcs.some((r) => /pull_library_drill|draft|create_drill/.test(r.n)) && !globalThis.__calls.some((c) => /claude|ai/i.test(c.url)));
+  await v.unmount(); }
+
+// 14 — Bret's packet buttons
+{ const pk = { id: "lib-1", libraryId: "lib-1", track: Object.keys({}).length ? "" : undefined, title: "Ladder throws", code: "L-1", time: "90 min", level: "All", sections: [] };
+  const rendered = async (copy) => { const used = []; let v;
+    try { v = await mount(h(Packet, { S: {}, packet: { ...pk, track: "fire" }, dept: {}, notify: () => {}, back: () => {}, usage: null, added: true, canAdd: true, onAdd: () => {}, copy, onUseCopy: (k, p) => used.push([k, p.id]) })); }
+    catch (e) { return { err: String(e) }; }
+    return { v, used }; };
+  const src = fnBody(app, "Packet");
+  ok("14. an APPROVED department copy shows \"Schedule this\" + \"Attach to a session\", each handing that copy on (onUseCopy)",
+    /data-testid="lib-schedule"[^>]*onClick=\{\(\) => onUseCopy\("schedule", copy\)\}/.test(src) && /data-testid="lib-attach"[^>]*onClick=\{\(\) => onUseCopy\("attach", copy\)\}/.test(src) && /copy\?\.status === "approved"/.test(src));
+  ok("14. a DRAFT copy: \"In your plans — waiting on officer approval\", no buttons", /waiting on officer approval/.test(src));
+  ok("14. the hand-off reaches the same paths: schedule → the Library prefill (goSchedule → With plan); attach → Training Plans with that plan selected + attach open",
+    /goSchedule\(\{ planId: p\.id, planTitle: p\.title, title: p\.title, duration: p\.duration_min, category: p\.category \}\)/.test(app) && /setPlansFocus\(\{ planId: p\.id, attach: true/.test(app) && /setSelId\(focus\.planId\); setAttachOpen\(!!focus\.attach\)/.test(app) && /props\.onHandoffDone\?\.\(\)/.test(app));
+  ok("14. the copy (id + status) comes from the catalog's own drill_plans read — no new read", /from\("drill_plans"\)\.select\("library_id, id, status, title, duration_min, category"\)/.test(app));
+  const pkt = libRowToPacket({ id: "lib-1", code: "L-1", track: "Fire", title: "Ladder throws", level: "All", duration_min: 90, content: {} });   // the catalog's own shape
+  const live = async (copy) => { const used = []; let v;
+    try { v = await mount(h(Packet, { S: {}, packet: pkt, dept: {}, notify: () => {}, back: () => {}, usage: null, added: true, canAdd: true, onAdd: () => {}, copy, onUseCopy: (k, p) => used.push([k, p.id]) })); }
+    catch (e) { return { err: String(e).slice(0, 120) }; }
+    return { v, used }; };
+  const A = await live({ id: "dp-9", status: "approved", title: "Ladder throws" });
+  if (A.err) ok("14. (render) the packet renders", false, A.err);
+  else {
+    const sch = A.v.host.querySelector('[data-testid="lib-schedule"]'), att = A.v.host.querySelector('[data-testid="lib-attach"]');
+    await act(async () => { sch?.click(); att?.click(); });
+    ok("14. rendered: an approved copy → both buttons; each click hands THAT copy on (schedule, then attach)", !!sch && !!att && JSON.stringify(A.used) === JSON.stringify([["schedule", "dp-9"], ["attach", "dp-9"]]) && !A.v.host.querySelector('[data-testid="lib-added"]'), JSON.stringify(A.used));
+    await A.v.unmount();
+    const D = await live({ id: "dp-8", status: "draft", title: "Ladder throws" });
+    ok("14. rendered: a draft copy → \"In your plans — waiting on officer approval\", no Schedule / Attach", !D.err && /waiting on officer approval/.test(D.v.host.querySelector('[data-testid="lib-added"]')?.textContent || "") && !D.v.host.querySelector('[data-testid="lib-schedule"]') && !D.v.host.querySelector('[data-testid="lib-attach"]'));
+    if (!D.err) await D.v.unmount();
+  }
+  void rendered; }
+
 // fences
 const changed = execSync(`git diff --name-only ${diffArgs}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const untracked = REV ? [] : execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const allowed = new Set(["src/App.jsx", "src/phone.js", "docs/review/polish_batch_a_test.mjs", "claude/B4C_PolishBatchA_Draft.md"]);
+// + the two earlier slice tests whose assertions the rulings deliberately changed (the drill_plans read's columns; the approver picker)
+const allowed = new Set(["src/App.jsx", "src/phone.js", "docs/review/polish_batch_a_test.mjs", "claude/B4C_PolishBatchA_Draft.md", "docs/review/library_s1_ui_test.mjs", "docs/review/onboarding_item_config_ui_test.mjs"]);
 const stray = [...changed, ...untracked.filter((p) => /^(src|api|shared|sql|docs\/review|ios|android|index\.html|vercel\.json)/.test(p))].filter((p) => !allowed.has(p));
-ok("fences: only src/App.jsx, src/phone.js, this test and the note (no SQL, api, shared, native, vercel.json)", stray.length === 0, JSON.stringify(stray));
+ok("fences: only src/App.jsx, src/phone.js, this test, the note + the two re-ruled slice tests (no SQL, api, shared, native, vercel.json)", stray.length === 0, JSON.stringify(stray));
 const tok = (p) => (show(REV, p).match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14, `${tok("src/App.jsx")}/${tok("api/digest.js")}/${tok("api/assistant.js")}`);
 ok("Notify held: api/notify-session.js absent", REV ? !execSync(`git ls-tree --name-only ${REV} api/`, { cwd: root }).toString().includes("notify-session.js") : !existsSync(join(root, "api/notify-session.js")));

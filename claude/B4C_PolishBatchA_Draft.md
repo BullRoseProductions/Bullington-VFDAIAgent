@@ -76,3 +76,29 @@ No SQL, api, shared, native or `vercel.json` changes. **No data written:** the h
   - fences, counts 132/32/14, Notify held.
 - **Mutations caught:** dropping the confirm, reverting `<=`, un-filtering one picker, un-formatting a phone.
 - **The test cannot prove layout.** The table-scoped scrolling was checked in real Chrome with the `docs/review/phone_layout_sweep/` harness and a temporary Station Hours fixture that was reverted and not committed.
+
+## Follow-up (rulings on the gate's PASS @88b559f): built
+| Ruling | What changed |
+|---|---|
+| **Board-audience events → Board + DA + PA only** | `sessionVisibleTo(s, role)`: a board event shows to Board Member, Department Admin and Project Admin, **not** Officers. It is applied where sessions reach calendars and upcoming lists: the Dashboard and Training get `visibleSessions`, and every `DashboardCalendar` filters its own training read by the viewer's role. All 4 dashboards pass `role`. It keys on the app's `role`, so "View as" previews it. |
+| **"Leadership only" hidden from plain members** | The same helper: a leadership event shows to leadership (PA / DA / Board / Officer) and never to a plain member. |
+| (both) | **Display only.** `training_sessions` stays department-readable under RLS, the same as minutes. The record screens (Roster, Minutes, Reports, Board stats) still receive every session; Training's writes are all functional updates on the full list, so nothing hidden is dropped from state. `rollFor` (who's on the roll) is unchanged. |
+| **Probationary out of the onboarding approver picker** | The sign-off approver ("A specific person") is now **Active only**. An item already naming a probationary approver keeps them listed, marked "(probationary — pick someone else)". The probation and qualification-drive supervisor pickers are unchanged; the ruling named approvers. |
+| **The Department page** | With no department chosen it is now the PA's **department list**. It uses the same `pa_department_radar` read as the Program overview, sorts A–Z, and shows station · city. A tap opens that department's page via `go("department", {id, name})`. A failed read shows Retry and is never shown as an empty list. |
+| **Tommy's picker** | The schedule form gets **"Plan (optional)"**, listing the department's **approved** drill plans (`dept_drill_plans`, read the first time the form opens). Picking one only sets the existing **With plan** chip and fills a blank length. On save, the existing `attachWithPlan` → `attach_drill_plan_to_session` runs. No plan is created and there's no AI call; "Draft a new plan" is untouched. |
+| **Bret's packet buttons** | The catalog's existing `drill_plans` read now also returns the department copy's `id, status, title, duration_min, category`; it is the same query with more columns. **Approved copy:** "Schedule this" (Training's schedule form through the same With-plan prefill as "Schedule with this plan") and "Attach to a session" (Training Plans with that plan selected and its attach panel open). **Draft copy:** "In your plans — waiting on officer approval", with no buttons. The hand-off is applied once and then cleared, so coming back to Training doesn't replay it. |
+
+**Proof:** `polish_batch_a_test.mjs` is now **59/59**; 24 new checks pin the follow-up:
+- **10:** the visibility table per role; the real `DashboardCalendar` rendered as Member / Officer / Board / DA shows exactly the allowed events; source checks that all 4 dashboards pass `role` and that the record screens keep the full list.
+- **11:** the real `OicItemConfig` lists Active only, and a current probationary approver is marked.
+- **12:** the real `PADepartmentList` sorts and shows station · city; a tap calls `go`; a failed read shows Retry.
+- **13:** the **real Training screen end to end**. The picker offers only the approved plan; picking it sets the chip; Save inserts the session and calls `attach_drill_plan_to_session` with that plan and the new session's id, with no `drill_plans` write, no pull and no AI call.
+- **14:** the real `Packet` with an approved copy shows both buttons, each handing that copy on; with a draft copy, it shows the waiting note and neither button.
+
+**Mutations caught:** letting Officers see board events, offering draft plans, and re-allowing Probationary approvers each turn the matching checks red.
+
+**Two earlier slice tests re-ruled, assertions only:**
+- `library_s1_ui_test`: the `drill_plans` read now also returns the copy's id and status.
+- `onboarding_item_config_ui_test`: the approver picker is Active-only.
+
+Both were changed deliberately by the rulings; each edit carries a comment saying so. Suite: 57 files, 1,444 passed, 0 failed.

@@ -455,6 +455,13 @@ import { isRestrictedEvent, isOptionalEvent, countsTowardRate, expectedAfterJoin
 const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : s?.audience === "leadership" ? isLeader(m?.access)
   : true;
+/* WHO SEES a restricted session on the calendars and upcoming lists (polish batch A rulings): a BOARD event → Board Members
+   + DA + PA only (not Officers); a LEADERSHIP-ONLY event → leadership (PA / DA / Board / Officer), never a plain member.
+   Keyed on the app's `role` (so "View as" previews it). DISPLAY ONLY — training_sessions is department-readable under RLS
+   (like minutes); the record screens (Reports, Minutes, attendance) keep their own rules. rollFor above stays the roll. */
+const sessionVisibleTo = (s, role) => s?.audience === "board" ? (isBoard(role) || isDeptAdmin(role))
+  : s?.audience === "leadership" ? isLeader(role)
+  : true;
 // Provenance pill for minutes that a human brought in (ai_outputs.source='imported') — so a human-authored
 // document is NEVER shown as if Claude drafted it. Shown wherever imported minutes appear.
 const IMPORTED_BADGE = { fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.amberText, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" };
@@ -509,21 +516,22 @@ function useLibraryCatalog() {
   const [rows, setRows] = useState([]);
   const [usage, setUsage] = useState({});
   const [pulled, setPulled] = useState(() => new Set());
+  const [copies, setCopies] = useState({});   // library_id → this department's copy { id, status, title, duration_min, category }
   const [err, setErr] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const load = () => Promise.all([
     supabase.from("library_drills").select(LIB_COLS).order("published_at", { ascending: false }),
     supabase.rpc("library_drill_usage"),
-    supabase.from("drill_plans").select("library_id").not("library_id", "is", null),
+    supabase.from("drill_plans").select("library_id, id, status, title, duration_min, category").not("library_id", "is", null),
   ]).then(([c, u, p]) => {
     if (c.error || !Array.isArray(c.data)) { console.error("[library] catalog read failed — keeping last-known:", c.error); setErr(true); return; }
     setRows(c.data); setErr(false); setLoaded(true);
     if (!u.error && Array.isArray(u.data)) setUsage(Object.fromEntries(u.data.map((x) => [x.library_id, { held: x.held || 0, departments: x.departments || 0 }])));
-    if (!p.error && Array.isArray(p.data)) setPulled(new Set(p.data.map((x) => x.library_id)));
+    if (!p.error && Array.isArray(p.data)) { setPulled(new Set(p.data.map((x) => x.library_id))); setCopies(Object.fromEntries(p.data.map((x) => [x.library_id, x]))); }
   });
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const items = useMemo(() => rows.map(libRowToPacket), [rows]);
-  return { items, usage, pulled, err, loaded, reload: load, markPulled: (id) => setPulled((s) => new Set([...s, id])) };
+  return { items, usage, pulled, copies, err, loaded, reload: load, markPulled: (id) => setPulled((s) => new Set([...s, id])) };
 }
 const libUsageText = (u) => (u && u.held > 0 ? `Held ${u.held} time${u.held === 1 ? "" : "s"} in ${u.departments} department${u.departments === 1 ? "" : "s"}` : "");
 
@@ -2674,6 +2682,12 @@ export default function App() {
     return true;
   }
   const [trainingSessions, setTrainingSessions] = useState([]);
+  // Bret's packet buttons: "Schedule this" / "Attach to a session" hand the department's APPROVED copy to Training, which
+  // opens its schedule form with the plan (the same "With plan" path) or Training Plans with that plan's attach panel open.
+  const [trainingHandoff, setTrainingHandoff] = useState(null);   // { kind: "schedule" | "attach", plan, nonce }
+  // The calendars and upcoming lists (Dashboard, Training) show only the sessions this viewer may see — board / leadership-
+  // only events per sessionVisibleTo. Identity for DA / PA. Record screens (Roster, Minutes, Reports) still get them all.
+  const visibleSessions = useMemo(() => trainingSessions.filter((s) => sessionVisibleTo(s, role)), [trainingSessions, role]);
   const [sessionsErr, setSessionsErr] = useState(false);
   const loadSessions = async () => {
     const [{ data: srows, error: sErr }, { data: arows }, { data: prows }] = await Promise.all([
@@ -3278,12 +3292,12 @@ export default function App() {
           marginRight: `calc(${ASK_PANEL_W}px + max(0px, calc((100% - ${ASK_PANEL_W}px - 1080px) / 2)))`,
         } : {}) }}>
           <ErrorBoundary key={screen}>
-          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={trainingSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
+          {screen === "dashboard" && <Dashboard S={S} role={role} members={members} library={library} openPacket={openPacket} go={go} meId={myMemberId} sessions={visibleSessions} notify={notify} dept={dept} isEqMgr={isEqMgr} />}
           {screen === "notifications" && <NotificationCenter S={S} meId={myMemberId} back={() => go("dashboard")} />}
           {/* ONE library (L0/L1): the "library" screen (no sidebar entry since the fold — deep links, go("library"), packet-back) opens Training on its Library tab — the same view as the tab.
               keyed by screen so moving between Training and the library alias lands on the right tab. */}
-          {(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"} S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={trainingSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)}
-            lib={lib} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} />}
+          {(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"} S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={visibleSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)}
+            lib={lib} handoff={trainingHandoff} onHandoffDone={() => setTrainingHandoff(null)} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
@@ -3295,7 +3309,9 @@ export default function App() {
           {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} onAccept={acceptHandoff} onDecline={declineHandoff} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")}
             usage={lib.usage[packet.libraryId]} added={lib.pulled.has(packet.libraryId)}
-            canAdd={hasAny(role, ["Department Admin"]) || !!isTrainingOfficer} onAdd={() => addLibraryDrill(packet.libraryId)} />}
+            canAdd={hasAny(role, ["Department Admin"]) || !!isTrainingOfficer} onAdd={() => addLibraryDrill(packet.libraryId)}
+            copy={lib.copies[packet.libraryId]}
+            onUseCopy={(kind, plan) => { setTrainingHandoff({ kind, plan, nonce: Date.now() + Math.random() }); setScreen("training"); }} />}
           {screen === "readsign" && <ReadSign notify={notify} onCountChange={() => rsQueue.reload()} />}
           {screen === "documents" && <Documents S={S} role={role} notify={notify} members={members} dept={dept} uploaderName={members.find((m) => m.id === myMemberId)?.name || authEmail || "Unknown"} />}
           {screen === "resources" && <YourSix S={S} role={role} meId={myMemberId} members={members} notify={notify} />}
@@ -3327,7 +3343,7 @@ export default function App() {
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} setMembers={setMembers} meId={myMemberId} notify={notify} />}
           {screen === "admin" && <Admin S={S} feedback={feedback} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
-          {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} />}
+          {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} go={go} />}
           </ErrorBoundary>
         </main>
       </div>
@@ -4212,7 +4228,7 @@ function BoardDashboard({ S, role, members, go, meId, sessions, notify, dept }) 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} role={role} withImportanceMode />
         </div>
       </div>
       </NoirSkin>
@@ -4365,7 +4381,7 @@ function DeptAdminDashboard({ S, role, members, go, meId, sessions, notify, dept
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} role={role} withImportanceMode />
         </div>
       </div>
       <PersonalView S={S} me={me} meId={meId} sessions={sessions} notify={notify} go={go} dept={dept} showUpcomingTraining={false} />
@@ -4687,7 +4703,7 @@ function OfficerDashboard({ S, role, members, go, meId, sessions, notify, dept }
       <div className="dash-cal-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.7fr", gap: 12, marginTop: 12, marginBottom: 6 }}>
         <Announcements role={role} members={members} meId={meId} notify={notify} />
         <div className="dash-cal" style={{ minWidth: 0 }}>
-          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} withImportanceMode />
+          <DashboardCalendar S={S} notify={notify} meId={meId} members={members} role={role} withImportanceMode />
         </div>
       </div>
       <InsightCards insights={insights} go={go} role={role} notify={notify} onResolved={reloadFailures} />
@@ -5337,7 +5353,7 @@ function MemberDashboard({ S, role, members, go, meId, sessions, notify, dept, i
         <Announcements role={role} members={members} meId={meId} notify={notify} style={{ flex: "1 1 240px" }} />
         <div style={{ flex: "2 1 340px", minWidth: 0 }}>
           <Card padding={16}>
-            <DashboardCalendar S={S} notify={notify} meId={meId} members={members} />
+            <DashboardCalendar S={S} notify={notify} meId={meId} members={members} role={role} />
           </Card>
         </div>
       </div>
@@ -5451,7 +5467,7 @@ function RunCard({ S, p, onClick, usage, added }) {
 }
 
 /* ---------------- Packet ---------------- */
-function Packet({ S, packet, dept, notify, back, usage, added, canAdd, onAdd }) {
+function Packet({ S, packet, dept, notify, back, usage, added, canAdd, onAdd, copy, onUseCopy }) {
   const T = TRACKS[packet.track];
   // Training Library slice 1: "Add to my plans" (training managers) → pull_library_drill → a draft in Training Plans.
   const [adding, setAdding] = useState(false);
@@ -5493,8 +5509,16 @@ function Packet({ S, packet, dept, notify, back, usage, added, canAdd, onAdd }) 
           <h1 style={{ ...S.packetTitle, color: FIRE.textPrimary }}>{packet.title}</h1>
           <div style={S.metaRow}><Meta Icon={Clock} text={packet.time} dark /><Meta Icon={Users} text={packet.level} dark />{libUsageText(usage) && <Meta Icon={CheckCircle2} text={libUsageText(usage)} dark />}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* Bret: once the department's copy is APPROVED the packet can be used from here — "Schedule this" (the schedule
+                form with the plan, the existing With-plan path) / "Attach to a session" (Training Plans, its attach panel). A
+                draft copy can't be attached yet, so it says what it's waiting on. */}
+            {canAdd && added && copy?.status === "approved" && onUseCopy && (<>
+              <button data-testid="lib-schedule" style={FS.btnPrimary} onClick={() => onUseCopy("schedule", copy)}><CalendarCheck size={16} /> Schedule this</button>
+              <button data-testid="lib-attach" style={FS.btn} onClick={() => onUseCopy("attach", copy)}><Calendar size={16} color={FIRE.btnIcon} /> Attach to a session</button>
+            </>)}
             {canAdd && (added
-              ? <span data-testid="lib-added" style={{ ...FS.btn, cursor: "default", color: FIRE.greenText }}><CheckCircle2 size={16} /> In your plans</span>
+              ? (copy?.status === "approved" && onUseCopy ? null
+                : <span data-testid="lib-added" style={{ ...FS.btn, cursor: "default", color: FIRE.greenText }}><CheckCircle2 size={16} /> In your plans{copy && copy.status !== "approved" ? <span style={{ color: FIRE.textMuted, fontWeight: 500 }}> — waiting on officer approval</span> : null}</span>)
               : <button data-testid="lib-add" style={{ ...FS.btnPrimary, opacity: adding ? 0.7 : 1 }} onClick={add} disabled={adding}>{adding ? <Loader2 size={16} className="spin" /> : <Plus size={16} />} Add to my plans</button>)}
             <button style={{ ...(canAdd ? FS.btn : FS.btnPrimary), opacity: printing ? 0.7 : 1 }} onClick={downloadPacket} disabled={printing}>{printing ? <><Loader2 size={16} className="spin" /> Preparing…</> : <><Download size={16} /> Download packet (PDF)</>}</button>
           </div>
@@ -8458,7 +8482,7 @@ function EventsCalendar({ S, role, notify, members }) {
 const SOURCE_COLORS = { social: FIRE.red, training: FIRE.catBlue, recruit: FIRE.catGreen, funding: FIRE.catAmber, actionitem: FIRE.catViolet };
 const SOURCE_RANK = { training: 0, actionitem: 1, funding: 2, recruit: 3, social: 4 };   // action items rank just below Training
 const SOURCE_TIER = { training: "bar", actionitem: "bar", funding: "pill", recruit: "pill", social: "dot" };
-function DashboardCalendar({ S, notify, withImportanceMode, meId, members }) {
+function DashboardCalendar({ S, notify, withImportanceMode, meId, members, role }) {
   const today = new Date();
   const ev = useEventNeeds();   // FE-C: needs + sign-ups → coverage on event chips + Sign up in the event detail
   const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() });
@@ -8498,7 +8522,7 @@ function DashboardCalendar({ S, notify, withImportanceMode, meId, members }) {
           plans: (r.session_plans || [])
             .slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))   // newest-first, matching Training's loadSessions
             .map((p) => ({ id: p.id, title: p.title, storage_path: p.storage_path, ai_text: p.ai_text, source: p.source, session_id: r.id, kind: p.storage_path ? "file" : "ai" })),
-        })),
+        })).filter((it) => sessionVisibleTo(it, role)),   // board → Board/DA/PA; leadership-only → leaders (polish batch A)
         ...mapRows(recruit, "recruit", (r) => r.title, (r) => ({ title: r.title, evKey: `community-${r.id}`, date: r.date })),
         ...mapRows(funding, "funding", (r) => r.title, (r) => ({ title: r.title, evKey: `fundraiser-${r.id}`, date: r.date })),
         ...actionRows,
@@ -22945,7 +22969,9 @@ async function oicSign(memberId, itemId, docChecked, notify) {
 /* DA / PA config, in Edit checklist, for a manual non-mentor item: the document check + who signs it off (one picker
    that resolves to a command tier OR a named member — the RPC refuses both at once). Saved via the RPC only. */
 function OicItemConfig({ it, members, busy, onSave }) {
-  const active = (members || []).filter((m) => (m.status === "Active" || m.status === "Probationary") && isAssignable(m))
+  // A sign-off approver is someone who has finished probation themselves (ruling, polish batch A): Active only — not
+  // Probationary, not Inactive. A row already naming someone who isn't Active keeps them listed, marked, until re-picked.
+  const active = (members || []).filter((m) => m.status === "Active" && isAssignable(m))
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const value = it.approver_kind === "person" ? `person:${it.approver_member_id}` : it.approver_role ? `tier:${it.approver_role}` : "default";
   const cur = it.approver_kind === "person" ? (members || []).find((m) => String(m.id) === String(it.approver_member_id)) : null;
@@ -22963,7 +22989,7 @@ function OicItemConfig({ it, members, busy, onSave }) {
         <optgroup label="A command tier">{OIC_TIERS.map((t) => <option key={t} value={`tier:${t}`}>Any {t}</option>)}</optgroup>
         <optgroup label="A specific person">
           {active.map((m) => <option key={m.id} value={`person:${m.id}`}>{m.name}</option>)}
-          {stale && <option value={value}>{cur?.name || "Former member"} (not active — pick someone else)</option>}
+          {stale && <option value={value}>{cur?.name || "Former member"} ({cur?.status === "Probationary" ? "probationary" : "not active"} — pick someone else)</option>}
         </optgroup>
       </select></label>
       <label style={lab}><input type="checkbox" checked={!!it.requires_doc} disabled={busy} onChange={(e) => save(value, e.target.checked)} /> Requires a document check</label>
@@ -24523,7 +24549,7 @@ function TrainingCategoriesCard({ S, categories, loadPlans, notify }) {
     </div>
   );
 }
-function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan, reloadNonce }) {
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan, reloadNonce, focus }) {
   const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
@@ -24539,6 +24565,8 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const [creating, setCreating] = useState(false);       // Slice 5: "Start blank" — the plan editor, empty, saving a manual draft
   const [attachOpen, setAttachOpen] = useState(false);
   const [attachSess, setAttachSess] = useState("");
+  // A packet's "Attach to a session" lands here on its department copy with the attach panel already open.
+  useEffect(() => { if (focus?.planId) { setSelId(focus.planId); setAttachOpen(!!focus.attach); } }, [focus?.nonce]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [lastAttached, setLastAttached] = useState(null);   // the session_plans row attach returned — opens in the real plan viewer
   const featRef = useRef(null), topicRef = useRef(null), libRef = useRef(null);
   const { setViewPlan, mounts } = usePlanViewer(S, notify, dept);
@@ -24940,12 +24968,23 @@ function Training(props) {
   // re-applies the same plan picked twice); scheduling it flips back to the Library.
   const [schedPrefill, setSchedPrefill] = useState(null);
   const goSchedule = (prefill) => { setSchedPrefill({ ...prefill, nonce: Date.now() + Math.random() }); setView("schedule"); };
+  // The packet's "Schedule this" / "Attach to a session" (App's trainingHandoff), applied once and then cleared so coming
+  // back to Training later doesn't replay it.
+  const [plansFocus, setPlansFocus] = useState(null);   // { planId, attach, nonce } → TrainingPlans selects it (+ opens attach)
+  useEffect(() => {
+    const h = props.handoff;
+    if (!h?.plan) return;
+    const p = h.plan;
+    if (h.kind === "attach") { setPlansFocus({ planId: p.id, attach: true, nonce: h.nonce }); goPlans(); }
+    else goSchedule({ planId: p.id, planTitle: p.title, title: p.title, duration: p.duration_min, category: p.category });
+    props.onHandoffDone?.();
+  }, [props.handoff?.nonce]);   // eslint-disable-line react-hooks/exhaustive-deps
   // The client twin of is_training_manager(): a Department Admin (NOT Project Admin — not isDeptAdmin) OR an active
   // training officer. Every training write below keys on it; running a QR sign-in does not (canRunSignin, decision 3).
   const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
     <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} schedulePrefill={schedPrefill} onScheduledReturn={() => goPlans()} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} reloadNonce={props.libAddedNonce} /></div>}
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} focus={plansFocus} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} reloadNonce={props.libAddedNonce} /></div>}
     {librarySeen && props.lib && <div style={view === "library" ? undefined : { display: "none" }}><Library S={props.S} library={props.lib.items} openPacket={props.openPacket} viewToggle={toggle}
       usage={props.lib.usage} pulled={props.lib.pulled} loaded={props.lib.loaded} err={props.lib.err} reload={props.lib.reload} /></div>}
   </>);
@@ -24972,6 +25011,18 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
   const [editSessionMode, setEditSessionMode] = useState(false);   // false = clean session rows; true = reveal per-session Edit/Remove + detach-plan. Attendance/QR/Complete/Attach stay at rest (ops).
   function toggleSessionEdit() { setEditSessionMode((v) => { if (v) setEditingSessionId(null); return !v; }); }
   const [showSess, setShowSess] = useState(false);
+  /* Tommy's picker (polish batch A): schedule WITH a plan you already have. The department's APPROVED drill plans (drafts
+     can't be attached — an officer approves first), read with the same dept_drill_plans Training Plans uses, the first time
+     the form opens. Picking one only sets withPlan — the existing "With plan" chip — so the save path is the one the
+     Library hand-off already uses (attachWithPlan → attach_drill_plan_to_session): no plan is created, no AI call. */
+  const [approvedPlans, setApprovedPlans] = useState(null);   // null = not read yet
+  useEffect(() => {
+    if (!showSess || !canManage || approvedPlans) return;
+    supabase.rpc("dept_drill_plans").then(({ data, error }) => {
+      if (error || !Array.isArray(data)) return;   // a failed read just leaves the picker hidden; "Draft a new plan" still works
+      setApprovedPlans(data.filter((p) => p.status === "approved").sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""))));
+    });
+  }, [showSess]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [openAtt, setOpenAtt] = useState(null);
   const [openSignin, setOpenSignin] = useState(null);
   const [openPlans, setOpenPlans] = useState(null);   // per-session attached-plans section: collapsed by default (calm-at-rest), expand deliberately
@@ -26214,6 +26265,16 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
                           guessed length becomes hours on an ISO/LOSAP-adjacent report. */}
                       <label style={{ ...Lfield, minWidth: 130 }}><span style={LfieldLabel}>Length (min, optional)</span><input type="number" min="1" max="1440" step="5" placeholder="e.g. 180" style={Linput} value={sDur} onChange={(e) => setSDur(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 170 }}><span style={LfieldLabel}>Training</span><select style={Linput} value={spid} onChange={(e) => setSpid(e.target.value)}>{plan.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}<option value={0}>Other / one-off…</option></select></label>
+          {approvedPlans && approvedPlans.length > 0 && <label style={{ ...Lfield, minWidth: 190 }}><span style={LfieldLabel}>Plan (optional)</span>
+            <select data-plan-picker style={Linput} value={withPlan?.id || ""} onChange={(e) => {
+              const p = approvedPlans.find((x) => String(x.id) === e.target.value);
+              setWithPlan(p ? { id: p.id, title: p.title || "this plan" } : null);
+              if (p && !String(sDur).trim() && p.duration_min > 0) setSDur(String(p.duration_min));   // only fills a blank length
+            }}>
+              <option value="">— None —</option>
+              {approvedPlans.map((p) => <option key={p.id} value={p.id}>{p.title}{p.duration_min ? ` · ${p.duration_min} min` : ""}</option>)}
+              {withPlan && !approvedPlans.some((p) => String(p.id) === String(withPlan.id)) && <option value={withPlan.id}>{withPlan.title}</option>}
+            </select></label>}
           <label style={{ ...Lfield, flex: 1, minWidth: 150 }}><span style={LfieldLabel}>Title (optional)</span><input style={Linput} value={stitle} placeholder="Defaults to the training name" onChange={(e) => setStitle(e.target.value)} /></label>
           <label style={{ ...Lfield, minWidth: 200 }}><span style={LfieldLabel}>Audience</span>
             <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${FIRE.line2Noir}` }}>
@@ -28179,7 +28240,45 @@ function ProgramDeptCard({ S, d, health, notify, refresh, go }) {
 // PA-only per-department admin page, reached from a Program-overview card via go("department", {...}).
 // Writes through the PA-scoped DB functions rather than a direct departments update: ordinary RLS
 // scopes that table to the actor's OWN department, and this configures someone else's.
-function DepartmentAdmin({ S, role, target, notify }) {
+/* The "Department" nav item opened with no department chosen was a dead end ("Open a department from the Program overview…").
+   Now it's the PA's department list — the same pa_department_radar read the Program overview makes — and a tap opens that
+   department's page, exactly as the overview's button does. A failed read says so with Retry; it is never shown as empty. */
+function PADepartmentList({ go }) {
+  const [rows, setRows] = useState(null);   // null = loading
+  const [err, setErr] = useState(null);
+  const load = () => {
+    supabase.rpc("pa_department_radar").then(({ data, error }) => {
+      if (error) { setErr(error.message || "error"); return; }
+      setErr(null); setRows(Array.isArray(data) ? data : []);
+    });
+  };
+  useEffect(() => { load(); }, []);
+  const sorted = (rows || []).slice().sort((a, b) => String(a.department_name || "").localeCompare(String(b.department_name || "")));
+  return (
+    <PageShell band watermark="DEPT" kicker="PROJECT ADMIN" title="Departments" sub="Pick a department to configure its modules, stations, roster and add-ons.">
+      <NoirSkin>
+      {err && !rows ? <Card padding={16} style={{ fontSize: 13, color: FIRE.amberText }}>Couldn't load your departments. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={load}>Retry</button></Card>
+        : rows === null ? <Card padding={16} style={{ fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
+        : sorted.length === 0 ? <Card padding={16} style={{ fontSize: 13, color: FIRE.textMuted }}>No departments yet — add one from Add Department.</Card>
+        : <div data-pa-dept-list style={{ display: "grid", gap: 10 }}>
+            {sorted.map((d) => (
+              <button key={d.department_id} type="button" onClick={() => go?.("department", { id: d.department_id, name: d.department_name })}
+                style={{ ...FS.cardNoir, display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", textAlign: "left", cursor: "pointer", color: FIRE.textPrimary, fontFamily: "inherit", width: "100%" }}>
+                <Building2 size={18} color={FIRE.btnIcon} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 14, fontWeight: 600, overflowWrap: "anywhere" }}>{d.department_name || "Unnamed department"}</span>
+                  {(d.station || d.city) && <span style={{ display: "block", fontSize: 12, color: FIRE.textMuted, marginTop: 2 }}>{[d.station, d.city].filter(Boolean).join(" · ")}</span>}
+                </span>
+                <ChevronRight size={16} color={FIRE.btnIcon} />
+              </button>
+            ))}
+            {err && <div style={{ fontSize: 12, color: FIRE.amberText }}>Couldn't refresh — showing what was last loaded.</div>}
+          </div>}
+      </NoirSkin>
+    </PageShell>
+  );
+}
+function DepartmentAdmin({ S, role, target, notify, go }) {
   const DISPLAY = "'Oswald', system-ui, sans-serif";
   const isPA = hasAny(role, ["Project Admin"]);
   const deptId = target?.id || null, deptName = target?.name || "";
@@ -28325,7 +28424,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
 
   // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
   if (!isPA) return <Card padding={24} style={{ color: FIRE.textMuted }}>This screen is available to Project Admins only.</Card>;
-  if (!deptId) return <Card padding={24} style={{ color: FIRE.textMuted }}>Open a department from the Program overview to configure it.</Card>;
+  if (!deptId) return <PADepartmentList go={go} />;   // was a dead end — now the PA's department list
 
   return (
     <PageShell kicker="PROJECT ADMIN · DEPARTMENT" title={deptName || "Department"} sub="Choose which parts of the app this department sees. Hidden modules leave everyone's navigation here — including this department's admins. This hides modules; it does not restrict data.">
