@@ -317,10 +317,12 @@ export default function NotificationCenter({ S, meId, back }) {
         {unread && <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "#E03A44" }} />}
         <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: bg, color: fg, border: `1px solid ${bd}` }}><Icon size={18} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Phone widths: an email, URL or long name must WRAP inside the row (overflowWrap: anywhere), never run under
+              the list box's overflow:hidden and get cut off. The title is its own span so the flex row can shrink it. */}
           <div style={{ fontSize: 13.5, fontWeight: 600, color: FIRE.textPrimary, display: "flex", alignItems: "center", gap: 8 }}>
-            {unread && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: DOT[n.severity] || DOT.info }} />}{n.title}
+            {unread && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: DOT[n.severity] || DOT.info }} />}<span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{n.title}</span>
           </div>
-          {n.body && <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45 }}>{n.body}</div>}
+          {n.body && <div style={{ fontSize: 12, color: FIRE.textSecondary, marginTop: 3, lineHeight: 1.45, overflowWrap: "anywhere" }}>{n.body}</div>}
           <div style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 5, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
             {pill && <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 5, padding: "2px 7px", letterSpacing: ".03em", ...PILL[pill[1]] }}>{pill[0]}</span>}
             <span>· {when(n)}{!n.read_at || dim ? "" : " · read"}</span>
@@ -338,12 +340,16 @@ export default function NotificationCenter({ S, meId, back }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {/* Phone widths: Back + the title share the first line; the actions are ONE group pushed right (marginLeft: auto),
+          so when the line can't hold them they wrap together, right-aligned — not "Mark all read" stranded under Back
+          with the cog after it. The title shrinks (minWidth: 0) and the "N new" badge never splits from its number. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         {back && <button style={BACK_BTN} onClick={back}><ArrowLeft size={13} /> Back</button>}
-        <h1 style={{ fontFamily: DISP, fontWeight: 700, fontSize: 22, margin: 0, flex: 1, color: FIRE.textPrimary, minWidth: 150 }}>
+        <h1 style={{ fontFamily: DISP, fontWeight: 700, fontSize: 22, margin: 0, flex: "1 1 auto", color: FIRE.textPrimary, minWidth: 0 }}>
           Notifications
-          {unreadMine > 0 && <span style={{ fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "#E07982", background: "rgba(200,50,58,.16)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 999, padding: "2px 9px", marginLeft: 8, verticalAlign: "middle" }}>{unreadMine} new</span>}
+          {unreadMine > 0 && <span style={{ fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "#E07982", background: "rgba(200,50,58,.16)", border: "1px solid rgba(200,50,58,.4)", borderRadius: 999, padding: "2px 9px", marginLeft: 8, verticalAlign: "middle", whiteSpace: "nowrap", display: "inline-block" }}>{unreadMine} new</span>}
         </h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", flexShrink: 0 }}>
         {unreadMine > 0 && (
           <button onClick={markAll} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#55BE87", background: "#0e1c14", border: "1px solid rgba(47,168,105,.3)", borderRadius: 9, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>
             <CheckCheck size={13} /> {busy ? "Marking…" : "Mark all read"}
@@ -355,6 +361,7 @@ export default function NotificationCenter({ S, meId, back }) {
                 style={{ width: 36, height: 36, borderRadius: 9, border: `1px solid ${FIRE.line2Noir}`, background: FIRE.card2Noir, color: FIRE.textSecondary, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
           <Settings size={15} />
         </button>
+        </div>
       </div>
 
       <div style={{ display: "inline-flex", flexWrap: "wrap", background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}`, borderRadius: 10, padding: 3, marginBottom: 18 }}>
