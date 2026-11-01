@@ -22,6 +22,15 @@ const TZ = "America/Chicago";
 const PUSH_ENABLED = process.env.PUSH_ENABLED === "1";            // same strict flag as pulse / digest
 const KIND_LABEL = { license: "License", med_card: "Med card", fit_test: "Fit test", other: "Credential", cert: "Cert", gear: "Gear" };
 
+/* L-5 (cron-honesty standard). A failure answers { ok:false, failed:[step], error } — `error` is the fixed sentence the
+   Expirations button shows (it renders out.error and nothing else), `failed` the step — and the DETAIL goes to the log:
+   route, step, the caller / department by id, the database's or FCM's own words. Never a key, never Supabase or FCM
+   prose in a body. The success body is unchanged. */
+const fail = (res, status, step, error, log, extra = {}) => {
+  console.error(`[expiration-reminders] FAILED ${step}:`, log);
+  return res.status(status).json({ ok: false, failed: [step], error, ...extra });
+};
+
 const todayYMD = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const fmtDate = (ymd) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(`${ymd}T00:00:00Z`));
 
@@ -56,7 +65,7 @@ export default async function handler(req, res) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   const missing = [!supabaseUrl && "SUPABASE_URL", !serviceKey && "SUPABASE_SERVICE_ROLE_KEY", !anonKey && "SUPABASE_ANON_KEY"].filter(Boolean);
-  if (missing.length) return res.status(500).json({ error: `Not configured here: ${missing.join(", ")}`, note: "Nothing was read or sent." });
+  if (missing.length) return fail(res, 500, "config", "Reminders aren't set up on this server.", `missing ${missing.join(", ")} (user ${user.id})`, { note: "Nothing was read or sent." });
 
   // ---- AUTHORIZATION + THE ROWS, both from the database AS THE CALLER (their JWT + the anon key) ----
   const jwt = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -65,7 +74,8 @@ export default async function handler(req, res) {
     asUser.rpc("my_department_id"), asUser.rpc("dept_expirations"),
   ]);
   if (eErr || dErr || !myDept) {
-    return res.status(403).json({ error: "Only Board, Department Admins and Officers can send expiration reminders.", detail: (eErr || dErr)?.message });
+    const why = eErr ? `dept_expirations: ${eErr.message}` : dErr ? `my_department_id: ${dErr.message}` : "my_department_id returned no department";
+    return fail(res, 403, "authorize", "Only Board, Department Admins and Officers can send expiration reminders.", `${why} (user ${user.id})`);
   }
 
   const today = todayYMD();
@@ -91,7 +101,7 @@ export default async function handler(req, res) {
 
   let inserted = { inserted: 0, rows: [] };
   try { inserted = await insertNotifications(sb, notifRows); }
-  catch (e) { return res.status(500).json({ error: "Couldn't record the reminders.", detail: String(e.message || e) }); }
+  catch (e) { return fail(res, 500, "write", "Couldn't record the reminders.", `${String(e?.message || e)} (dept ${myDept}, user ${user.id}, ${notifRows.length} rows)`); }
 
   // ---- PUSH: only the genuinely new rows, only behind PUSH_ENABLED, only to members with a registered device ----
   const push = { enabled: PUSH_ENABLED, sent: 0, failed: 0, members_with_device: 0 };
@@ -107,7 +117,9 @@ export default async function handler(req, res) {
     const sendable = inserted.rows.filter((n) => (tokensByMember.get(n.member_id) || []).length);
     if (PUSH_ENABLED && sendable.length) {
       const r = await sendPush(sb, sendable, tokensByMember);
-      Object.assign(push, { sent: r.sent || 0, failed: r.failed || 0 }, r.skipped ? { skipped: r.skipped } : {}, r.error ? { error: r.error } : {});
+      // FCM's own words (an auth / token-exchange failure) go to the log; the body names the step only.
+      if (r.error) console.error("[expiration-reminders] FAILED push:", `${r.error} (dept ${myDept}, ${sendable.length} sendable)`);
+      Object.assign(push, { sent: r.sent || 0, failed: r.failed || 0 }, r.skipped ? { skipped: r.skipped } : {}, r.error ? { error: "push" } : {});
     }
   }
 
