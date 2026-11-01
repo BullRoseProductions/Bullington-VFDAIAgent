@@ -60,7 +60,7 @@ POST `{ email }` with the caller's Bearer token. CORS uses the AI routes' allowl
   - Existing accounts get their link as before.
   - The pending-QR redirect is kept.
 
-## Tests: `docs/review/signup_invite_test.mjs`, 49/0
+## Tests: `docs/review/signup_invite_test.mjs`, 48/0
 - **The endpoint** (bundled against a recording fake supabase-js):
   - **Refusals, with no service client built and nothing sent:**
     - no token 401;

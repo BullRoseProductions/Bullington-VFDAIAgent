@@ -28385,9 +28385,9 @@ function ResendLink({ email, notify }) {
     setBusy(true);
     const { error } = await sendInvite(email);         // /api/invite: trims + lowercases; DA (own roster) or PA (a DA) path
     setBusy(false);
-    // Surface Supabase's own message rather than a friendly substitute: "For security purposes you
-    // can only request this once every 60 seconds" is something the admin can act on, and inventing
-    // our own wording for a rate limit would hide which limit was hit.
+    // The endpoint answers in step names, never Supabase's prose (cron-honesty), so sendInvite's words are
+    // what the admin sees — each one says which thing went wrong: not on the roster, not an admin, the
+    // hourly email limit, or the invite service itself (named by its step).
     if (error) { notify?.({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
     setSentTo(normalizeLoginEmail(email));
     setCooldown(RESEND_COOLDOWN);
