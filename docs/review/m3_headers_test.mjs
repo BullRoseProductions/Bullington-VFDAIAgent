@@ -15,7 +15,11 @@ import { fileURLToPath } from "url";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "9cd3762";   // main when this was drafted (industrial-noir-42)
-const V = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
+// §1–§3 PINNED to the reviewed commit (released as industrial-noir-43): they assert the REPORT-ONLY CSP, which was true from
+// 9cd3762..e86c105 until industrial-noir-55 (CSP enforce, f10383f) renamed the header on purpose — reading the working tree
+// went red the moment that landed. The enforced header is csp_enforce_test's to guard. §4 still reads today's src/ + index.html.
+const REL = "e86c105";
+const V = JSON.parse(execSync(`git show ${REL}:vercel.json`, { cwd: root }).toString());
 const MAIN = JSON.parse(execSync(`git show ${BASE}:vercel.json`, { cwd: root }).toString());
 const SUPABASE = "https://ifeptqnlucmvhlvadcpj.supabase.co";
 
