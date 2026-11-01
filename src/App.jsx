@@ -11,7 +11,7 @@ import {
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
   Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell, ShieldCheck, Activity, CreditCard,
 } from "lucide-react";
-import { FIRE } from "./theme.js";
+import { FIRE, AUTH } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
 import { mergeStationHours, rollupStationHours } from "../shared/station-hours.js";
 import { todayISOIn } from "../shared/zoned-time.js";
@@ -2333,12 +2333,37 @@ function Notification({ S, kind, title, text, details, action, onClose }) {
     </div>
   );
 }
+/* SIGNED IN, BUT ON NO ROSTER. An account with no members row at all — one of the self-signups from before signup
+   closure, or someone whose row was removed — used to land in an empty app shell. This says what is true and what to do,
+   and offers nothing else: no nav, no data, just the address they are signed in with and a way out. Shown ONLY on a
+   confirmed empty read (App: memberless); a failed or pending read never gets here. */
+function NotAttached({ email }) {
+  return (
+    <div style={AUTH.page}>
+      <style>{AUTH.css}</style>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <div style={AUTH.card} data-b4c="not-attached">
+          <img src="/b4c-logo.png" alt="B4C — Before the Call" style={AUTH.logo} />
+          <div style={AUTH.brandLine}>Before the Call</div>
+          <div style={{ ...AUTH.body, fontSize: 14.5, color: FIRE.textPrimary, margin: "0 0 12px" }}>
+            You’re signed in, but you’re not attached to a department yet. Ask your department admin to add you to the roster — they’ll use this same email.
+          </div>
+          {email && <div style={{ ...AUTH.body, margin: "0 0 18px" }}>Signed in as <b style={{ color: FIRE.textPrimary }}>{email}</b></div>}
+          <button onClick={async () => { try { await unregisterPush(); } catch { /* never block sign-out */ } await supabase.auth.signOut(); }} style={{ ...AUTH.secondary, cursor: "pointer" }}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const [role, setRole] = useState(["Member"]);
   const [realRole, setRealRole] = useState(["Member"]);
   const [authEmail, setAuthEmail] = useState(null);
   const [myMemberId, setMyMemberId] = useState(null);
   const [identityChecked, setIdentityChecked] = useState(false);
+  const [memberless, setMemberless] = useState(false);   // a CONFIRMED no-row answer for the signed-in email → NotAttached
   const rsQueue = useReadSignQueue(!!myMemberId);   // Read & Sign: drives the nav entry + badge (my_read_sign_queue)
   /* WHERE THEY WERE before an app-update reload (src/appUpdate.js) — read once, then the key is gone. A deep link in
      the URL wins (routeDeepLink below still owns routing for it), and the one-shot check-in / handoff screens are never
@@ -2456,9 +2481,10 @@ export default function App() {
   }, []);
   // Load the real member id + permission tier from the signed-in user's row (authoritative base table).
   useEffect(() => {
-    if (!authEmail) { setRealRole(["Member"]); setRole(["Member"]); setMyMemberId(null); setIdentityChecked(false); return; }
+    if (!authEmail) { setRealRole(["Member"]); setRole(["Member"]); setMyMemberId(null); setIdentityChecked(false); setMemberless(false); return; }
     let cancelled = false;
     setIdentityChecked(false);
+    setMemberless(false);
     supabase
       .from("members")
       .select("id, access")
@@ -2473,6 +2499,20 @@ export default function App() {
         setRole(safeRoles);
         setMyMemberId(ok ? data.id : null);
         setIdentityChecked(true);
+        if (ok) return;
+        /* NO ROW — OR JUST A BAD READ? .single() reports zero rows as an error, the same channel as a network failure, so
+           it can't tell. Ask once more with a plain count: ONLY a successful read that finds exactly zero rows for this
+           address means "not on any roster" (NotAttached). An error, or one email on several rows (which .single() also
+           refuses), keeps the app exactly as it was — a flaky resume must never tell a real member they don't belong.
+           Own-row RLS (email = auth.email()) makes the count the caller's own rows; a reload re-asks. */
+        supabase
+          .from("members")
+          .select("id", { count: "exact", head: true })
+          .ilike("email", authEmail)
+          .then(({ count, error: cErr }) => {
+            if (cancelled) return;
+            setMemberless(!cErr && count === 0);
+          });
       });
     return () => { cancelled = true; };
   }, [authEmail]);
@@ -3087,6 +3127,9 @@ export default function App() {
   // A restored place can name a packet the catalog no longer has (the old hard-coded ids like "fire-203", or a withdrawn
   // drill). Once the catalog has loaded, fall back to the Library instead of a blank screen.
   useEffect(() => { if (screen === "packet" && lib.loaded && !packet) setScreen("library"); }, [screen, lib.loaded, packet]);
+
+  // Signed in, confirmed on no roster: the one screen, not an empty shell (every hook above has already run).
+  if (memberless) return <NotAttached email={authEmail} />;
 
   return (
     <CertTypesCtx.Provider value={{ types: certTypes, typeMap: certTypeMap, reload: reloadCertTypes }}>
@@ -26605,11 +26648,14 @@ const FONT_STACKS = {
   "Modern sans": "'Inter','Helvetica Neue',Arial,sans-serif",
   "Classic serif": "Georgia,'Times New Roman',serif",
 };
+// A clearly-SAMPLE identity — never a real department's. It is the Brand Kit / Graphics placeholder AND the per-column
+// fallback for a department whose tagline / voice / station is unset (setBrand in App), so a real department's words
+// must never live here: they would show up on every other department's graphics and drafts.
 const DEFAULT_BRAND = {
-  name: "North Hood Country VFD", station: "Station 20",
+  name: "Sample Fire Department", station: "Station 1",
   primary: "#B11E2A", accent: "#1F4E79", font: "Condensed (bold)",
-  tagline: "Neighbors helping neighbors.",
-  voice: "Warm, plain-spoken, proud but never boastful — we talk like neighbors, not a corporation.",
+  tagline: "Serving our community.",
+  voice: "Warm, clear and plain-spoken — proud of our members, never boastful.",
   logo: null, guidelines: [],
 };
 function BrandKit({ S, role, brand, setBrand, setDept }) {
