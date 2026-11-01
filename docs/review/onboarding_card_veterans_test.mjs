@@ -18,8 +18,9 @@ import { transformSync } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "63adbb1";   // live main when this was drafted (industrial-noir-53)
-// Fences compare BASE .. REV. REV is the working tree until review; pin it to the reviewed commit in the promote push.
-const REV = process.env.REV || null;
+// Structural fences PINNED to the reviewed range: base 63adbb1 .. reviewed 5688e43 — "vs the working tree" would go red once
+// later work lands. REV=<sha> (or REV="" for the working tree) overrides. The component checks run on REV's source.
+const REV = process.env.REV ?? "5688e43";
 const src = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString()
   : execSync(`cat ${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString();
 const fnSrc = (text, name) => { const i = text.indexOf(`function ${name}(`); if (i < 0) return null; return text.slice(i, text.indexOf("\n}\n", i) + 2); };
