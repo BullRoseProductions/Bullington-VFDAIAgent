@@ -22,7 +22,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "308f906";   // live main when this was drafted (industrial-noir-59)
-const REV = process.env.REV || null;   // the working tree until review; pin it in the promote push
+const REV = process.env.REV ?? "f9e362c";   // pinned to the reviewed commit (gate PASS @f9e362c)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 
 // ---------------------------------------------------------------- 1. the real NotificationCenter
