@@ -25,8 +25,9 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "f10383f";   // live main when this was drafted (industrial-noir-55)
-// REV is the working tree until review; pin it to the reviewed commit in the promote push.
-const REV = process.env.REV || null;
+// Structural fences PINNED to the reviewed range: base f10383f .. reviewed 919b579 — "vs the working tree" would go red once
+// later work lands. REV=<sha> (or REV="" for the working tree) overrides. The behavior checks run on today's code.
+const REV = process.env.REV ?? "919b579";
 const SVC = "sb_secret_TESTKEY_never_in_a_body";
 Object.assign(process.env, { SUPABASE_URL: "https://x.supabase.test", SUPABASE_ANON_KEY: "anon-test", SUPABASE_SERVICE_ROLE_KEY: SVC, VITE_APP_URL: "https://app.b4thecall.com" });
 const outDir = mkdtempSync(join(tmpdir(), "b4c-invite-"));
