@@ -3,7 +3,7 @@ import { supabase, APP_URL, APP_ORIGIN } from "./supabaseClient";
 import { readFreshPendingScan, scanRedirectUrl } from "./pendingScan";
 // The cooldown and the sender are shared with the admin-side resend in App.jsx: all of these
 // buttons draw on ONE project-wide auth-email allowance, so the guard has to be one definition.
-import { RESEND_COOLDOWN, sendLoginLink } from "./authLinks";
+import { RESEND_COOLDOWN, sendLoginLink, isNoAccountError, NO_ACCOUNT_MESSAGE } from "./authLinks";
 import { AUTH } from "./theme.js";
 
 export default function Login() {
@@ -49,9 +49,9 @@ export default function Login() {
        ONLY when a fresh stash exists — an ordinary login is untouched. */
     const scan = readFreshPendingScan();
     const redirect = (scan && scanRedirectUrl(APP_ORIGIN, scan)) || APP_URL;
-    const { error } = await sendLoginLink(email, { redirect });
+    const { error } = await sendLoginLink(email, { redirect });   // existing accounts only — it never creates one (H-2)
     setLoading(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setErr(isNoAccountError(error) ? NO_ACCOUNT_MESSAGE : error.message); return; }
     setSent("link");
     setCooldown(RESEND_COOLDOWN);
   }

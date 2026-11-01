@@ -28,14 +28,14 @@ import NotificationCenter, { NotificationBell } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
-import { supabase, APP_URL, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
+import { supabase, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
 import { consumePendingScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { safeHref } from "./safeHref.js";   // M-2: every user-supplied link passes one scheme allowlist (http/https/mailto/tel)
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk } from "./appUpdate";
-import { RESEND_COOLDOWN, sendLoginLink, normalizeLoginEmail } from "./authLinks";
+import { RESEND_COOLDOWN, sendInvite, normalizeLoginEmail } from "./authLinks";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -11935,13 +11935,11 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
     }
     setMembers((m) => [...m, { id: data.id, name: data.name, role: data.role, access: data.access, status: data.status, phone: data.phone, email: data.email, joined: data.joined, participation: data.participation, mentorId: data.mentor_id ?? null, certs: [], notes: [] }]);
     if (sendLink) {
-      const { error: otpErr } = await supabase.auth.signInWithOtp({
-        email,                                                  // the new member's email, already trimmed+lowercased
-        options: { emailRedirectTo: APP_URL },
-      });
+      // /api/invite (H-2): the row above is on the roster now, which is exactly what the endpoint checks before it invites.
+      const { error: otpErr } = await sendInvite(email);        // the new member's email, already trimmed+lowercased
       if (otpErr) {
         notify({ kind: "error", title: "Member added — login link didn't send",
-          text: `${data.name} is on the roster, but we couldn't email their login link. They can request one at sign-in, or you can try again from their file.`,
+          text: `${data.name} is on the roster, but we couldn't email their login link: ${otpErr.message} Try again from their file with Resend.`,
           details: otpErr.message });
       } else {
         notify({ kind: "success", title: "Member added & invited",
@@ -27721,7 +27719,7 @@ function AddDepartment({ S, role, notify, go }) {
   async function sendLink() {
     if (!created) return;
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ email: created.adminEmail, options: { emailRedirectTo: APP_URL } });
+    const { error } = await sendInvite(created.adminEmail);   // /api/invite, PA path: the new department's DA (pa_department_radar)
     setBusy(false);
     if (error) { notify({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
     setLinkSent(true);
@@ -28358,8 +28356,9 @@ function DepartmentAdmin({ S, role, target, notify }) {
 /* Send someone their login link. Used by the PA's department list and by a Department Admin from a
    member's file — the same action either way, so it is the same component.
 
-   signInWithOtp DOES NOT DISTURB THE CALLER'S OWN SESSION: it emails the other person a link and
-   returns. The admin stays signed in as themselves.
+   SENDING DOES NOT DISTURB THE CALLER'S OWN SESSION: /api/invite (H-2) emails the other person an
+   invite, or a sign-in link if they already have an account, and returns. The admin stays signed in
+   as themselves.
 
    IT STAYS AVAILABLE AFTER A SEND, and that is the change this needed to be usable from the roster.
    It used to latch `sent` permanently, so the button vanished for good and a second attempt meant
@@ -28384,11 +28383,11 @@ function ResendLink({ email, notify }) {
   }, [cooldown]);
   async function send() {
     setBusy(true);
-    const { error } = await sendLoginLink(email);      // trims + lowercases; APP_URL redirect
+    const { error } = await sendInvite(email);         // /api/invite: trims + lowercases; DA (own roster) or PA (a DA) path
     setBusy(false);
-    // Surface Supabase's own message rather than a friendly substitute: "For security purposes you
-    // can only request this once every 60 seconds" is something the admin can act on, and inventing
-    // our own wording for a rate limit would hide which limit was hit.
+    // The endpoint answers in step names, never Supabase's prose (cron-honesty), so sendInvite's words are
+    // what the admin sees — each one says which thing went wrong: not on the roster, not an admin, the
+    // hourly email limit, or the invite service itself (named by its step).
     if (error) { notify?.({ kind: "error", title: "Couldn't send the link", text: error.message }); return; }
     setSentTo(normalizeLoginEmail(email));
     setCooldown(RESEND_COOLDOWN);
