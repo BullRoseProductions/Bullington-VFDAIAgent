@@ -11363,7 +11363,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
       <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Phone</span>
         <input style={FS.input} value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} placeholder="(817) 555-0100" /></label>
       <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email</span>
-        <input style={FS.input} type="email" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} placeholder="dale@harrishardware.com" /></label>
+        <input style={FS.input} type="email" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} placeholder="owner@example.com" /></label>
       <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Where it stands</span>
         <select style={FS.input} value={f.stage} onChange={(e) => setF((x) => ({ ...x, stage: e.target.value }))}>
           {DONOR_STAGES.map((s) => <option key={s.v} value={s.v}>{s.label} — {s.hint}</option>)}
@@ -27799,8 +27799,8 @@ function AddDepartment({ S, role, notify, go }) {
         <div style={{ height: 1, background: FIRE.hairline, margin: "2px 0" }} />
         <CardHead icon={UserPlus} title="First admin" />
         <div style={S.twoColForm}>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin name *</span><input style={FS.input} value={f.adminName} onChange={set("adminName")} placeholder="e.g. Scott Miller" /></label>
-          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin email *</span><input style={FS.input} type="email" value={f.adminEmail} onChange={set("adminEmail")} placeholder="scott@northhood.org" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin name *</span><input style={FS.input} value={f.adminName} onChange={set("adminName")} placeholder="e.g. Alex Rivera" /></label>
+          <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Admin email *</span><input style={FS.input} type="email" value={f.adminEmail} onChange={set("adminEmail")} placeholder="chief@example.org" /></label>
         </div>
         <div style={{ fontSize: 12, color: FIRE.textMuted, lineHeight: 1.5 }}>Created as a <strong style={{ color: FIRE.textSecondary }}>Department Admin</strong>. Their email must be unique and is how they sign in — double-check it.</div>
         <button style={{ ...FS.btnPrimary, opacity: busy ? 0.7 : 1 }} disabled={busy} onClick={create}>{busy ? <Loader2 size={16} className="spin" /> : <Plus size={16} />} Create department</button>
@@ -28324,7 +28324,7 @@ function DepartmentAdmin({ S, role, target, notify }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Name *</span>
-              <input style={FS.input} value={mbF.name} onChange={(e) => setMbF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Scott Miller" /></label>
+              <input style={FS.input} value={mbF.name} onChange={(e) => setMbF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. Alex Rivera" /></label>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Email * <span style={{ color: FIRE.textMuted, fontWeight: 400 }}>(how they sign in)</span></span>
               <input type="email" style={FS.input} value={mbF.email} onChange={(e) => setMbF((x) => ({ ...x, email: e.target.value }))} /></label>
             <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Rank (optional)</span>

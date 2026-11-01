@@ -94,7 +94,7 @@ export function rollupStationHours(shifts) {
 
    THE BUG THIS FIXES. rollupStationHours adds `standby += hrs` and `training += hrs` and reports
    credited = standby + training. Those two buckets are not disjoint: a member on station standby when
-   a drill starts is inside BOTH at once, so the drill's minutes were counted twice. Chase Thomas read
+   a drill starts is inside BOTH at once, so the drill's minutes were counted twice. Member A read
    standby 36.92 + training 1.5 = 38.42 credited for a month in which he was present 36.92 hours. That
    figure goes to a board and to ISO, and it overstated him by the length of every drill he was already
    at the station for.

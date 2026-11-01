@@ -1,6 +1,6 @@
 -- =====================================================================
 -- CLOSE THREE FORGOTTEN SHIFTS — North Hood County, out-time 9:30 PM Central, 10/15/2026. HOURS-WRITING.
--- APPLIED by hand 2026-10-16 as ashlea@bullroseproductions.com (North Hood DA). No recorded review PASS before apply.
+-- APPLIED by hand 2026-10-16 as the owner (North Hood DA). No recorded review PASS before apply.
 -- Do NOT re-run (the shifts are closed; a re-run refuses). Result on live: Member C 7:02:26 PM -> 9:30 PM = 2h27m33s ·
 -- Member D 7:39:17 PM -> 9:30 PM = 1h50m42s · Member E 7:40:30 PM -> 9:30 PM = 1h49m29s; all auto_closed false,
 -- verified unchanged (true). Member A (in 10:36:56 PM) and Member B (in 7:39:14 PM) left OPEN.

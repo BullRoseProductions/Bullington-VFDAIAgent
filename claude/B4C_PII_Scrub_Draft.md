@@ -34,7 +34,7 @@ The one record citing them by filename (`docs/review/membership_window_REVIEW.md
 
 **Comment-only redactions** in 14 applied / historical SQL files:
 - Labels are stable across the repo: Member A Chase Thomas · B Spencer Sampler · C Kai Newton · D Mike Bell · E Kenny Bell ·
-  F Paul Stetzel · G Jared Allen · H Matt Hohon · J Jeff Harper · K Josh Merritt · L Roger Gaines · M Randy Little. **This
+  F Paul Stetzel · G Jared Allen · H Matt Hohon · J Jeff Harper · K Josh Merritt · L Roger Gaines · M Randy Little · N the owner (shared/members.js). **This
   key lives only here, in this note, not in the SQL.** Delete this line before any share.
 - Only `--` comments were touched; a trailing `-- …` after code had only its comment edited.
 - **Proof:** every one of the 14 files is **byte-identical with comments stripped** (`sed 's/--.*$//' | shasum`, before vs
@@ -108,3 +108,26 @@ accounts' emails.
 
 **If approved,** items 2-6 and 11 are one small follow-up: comment / placeholder / fixture text only, plus that test's own
 assertion, with the same byte-identity proof for the SQL comments.
+
+## Follow-up (gate PASS @f46c6c9, rulings applied)
+Built on this branch, text only:
+- `src/App.jsx` placeholders `scott@northhood.org` → `chief@example.org`, "e.g. Scott Miller" ×2 → "e.g. Alex Rivera",
+  `dale@harrishardware.com` → `owner@example.com`;
+- the three "Chase Thomas" comments → Member A;
+- `tests/assistant.e2e.test.mjs` fixture "Kai Newton" → "Pat Example";
+- `docs/review/membership_window_REVIEW.md` → Member C / F / G (pronouns neutral);
+- the owner's bullroseproductions address in two SQL comments → "the owner". **Comment-strip proof:** both files are
+  byte-identical without comments.
+- `shared/members.js`: "Ashlea (owner)" → "the owner (Member N)". **The ids stay (ruling c; the DB flag is backlogged).**
+- **Rider, unchanged by ruling:** the Matt Hohon comment in `geofence_depart`'s live body (and its capture in
+  `ws4d_LIVEDEFS.json`).
+
+**Re-sweep:** the 12 names now appear only in SQL code (flagged in Part 1), the captured function body (rider), the `_DIFF.patch`
+history copies, and this note's label key.
+
+**⚑ Found, not caused:** `tests/assistant.e2e.test.mjs` (outside the suite loop) **fails identically before and after** this
+change (FAIL "answer returned", FAIL "meter recorded BEFORE the first model call", `TypeError … 'lastMsg'`). It's a stale test, not
+this slice.
+
+**Promote order (held):** (1) Ashlea adds `DIGEST_TEST_TO=ashlea@b4thecall.com` to Vercel **Production**, (2) pin + merge +
+push, (3) **Redeploy**: env binds per deployment.

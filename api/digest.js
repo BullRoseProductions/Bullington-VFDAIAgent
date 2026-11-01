@@ -332,7 +332,7 @@ function shiftHours(s) {
 
    WHY IT CHANGED. It used to compute credited as `standby + training` from these rows. Those two
    buckets are not disjoint — a member on standby when a drill starts is inside both — so every drill
-   attended by someone already at the station was counted twice. Chase Thomas read 38.42 credited for a
+   attended by someone already at the station was counted twice. Member A read 38.42 credited for a
    month in which he was present 36.92 hours. The screen had the same bug; both are fixed by taking the
    figure from SQL instead of adding it up here.
 
