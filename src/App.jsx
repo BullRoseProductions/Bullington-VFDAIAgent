@@ -167,7 +167,9 @@ const useCardFace = () => (React.useContext(NoirCtx) ? FS.cardNoir : FS.card);
 // optional red count badge, and `right` pushed to the far end.
 function CardHead({ icon: Icon, title, count, right, as: Tag = "div", style, ...rest }) {
   return (
-    <Tag style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", ...style }} {...rest}>
+    // flexWrap: phone widths — when the title, count and the right-hand slot can't share one line, the slot wraps to its
+    // own line (still pushed right by its marginLeft: auto) instead of running past the card. One line wherever it fits.
+    <Tag style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 9, marginBottom: 8, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: "inherit", color: "inherit", ...style }} {...rest}>
       {Icon && <Icon size={16} color={FIRE.redBright} style={{ flexShrink: 0 }} />}
       <span style={{ position: "relative", paddingBottom: 4, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, letterSpacing: ".02em", color: FIRE.textPrimary, lineHeight: 1.15, whiteSpace: "nowrap" }}>
         {title}
@@ -2310,8 +2312,8 @@ function Notification({ S, kind, title, text, details, action, onClose }) {
       <Icon size={18} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {isErr ? (<>
-          <div style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary }}>{title}</div>
-          {text && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{text}</div>}
+          <div style={{ fontWeight: 700, fontSize: 14, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{title}</div>
+          {text && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2, overflowWrap: "anywhere" }}>{text}</div>}
           {details && (<>
             <button onClick={() => setShowDetails((v) => !v)} style={{ marginTop: 8, border: "none", background: "transparent", color: accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
               {showDetails ? "Hide details" : "Show details"}
@@ -2321,7 +2323,7 @@ function Notification({ S, kind, title, text, details, action, onClose }) {
             )}
           </>)}
         </>) : (
-          <div style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary }}>{text || title}</div>
+          <div style={{ fontWeight: 600, fontSize: 13.5, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{text || title}</div>
         )}
         {action && (
           <button onClick={() => { action.onClick(); onClose(); }} style={{ marginTop: 9, border: "none", background: isErr ? FIRE.red : FIRE.green, color: FIRE.white, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 13px", borderRadius: 7, fontFamily: "inherit" }}>{action.label}</button>
@@ -26165,7 +26167,7 @@ function TrainingSchedule({ S, role, plan, setPlan, loadPlans, sessions, setSess
       <div style={{ ...Lcard, marginBottom: 16 }}>
         <CardHead icon={ClipboardList} title={listFilter === "month" ? `Sessions · ${TRAIN_MONTHS[cur.m]} ${cur.y}` : listTitle} count={listFilter === "month" ? monthSessions.length : listCount}
           right={<span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <select aria-label="Show" value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ ...Linput, width: "auto", padding: "5px 9px", fontSize: 12 }}>
+            <select aria-label="Show" value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ ...Linput, width: "auto", maxWidth: "100%", minWidth: 0, padding: "5px 9px", fontSize: 12 }}>
               <option value="month">Calendar month</option>
               <option value="thisMonth">Completed this month</option>
               <option value="lastMonth">Completed last month</option>
@@ -29607,7 +29609,9 @@ function baseStyles() {
     input: { border: `1px solid ${LINE}`, borderRadius: 8, padding: "10px 12px", fontSize: 14.5, fontFamily: body, background: "#fff", color: INK, width: "100%" },
     twoColForm: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
     /* recruitment */
-    phaseRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 },
+    // Phone widths: three columns side by side where they fit, stacked on a phone — never three ~96px columns, and
+    // never a plain 1fr (its min-content floor pushed the third column past a 360px screen).
+    phaseRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 12, marginBottom: 20 },
     phaseCard: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 11, padding: "16px 18px" },
     phaseTop: { display: "flex", alignItems: "baseline", justifyContent: "space-between" },
     phaseNum: { fontFamily: mono, fontWeight: 600, fontSize: 16 },
@@ -29624,7 +29628,7 @@ function baseStyles() {
     calWk: { fontFamily: display, fontWeight: 600, fontSize: 14, marginBottom: 8 },
     calTag: { fontFamily: mono, fontSize: 9, color: "#fff", padding: "3px 7px", borderRadius: 4, letterSpacing: ".4px" },
     calText: { fontSize: 13, color: SLATE, marginTop: 9, lineHeight: 1.45 },
-    tierRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 22 },
+    tierRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: 12, marginBottom: 22 },   // same as phaseRow
     tier: { background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: "18px 17px" },
     tierMid: { border: "1.5px solid #9A6B12", boxShadow: "0 8px 24px rgba(154,107,18,.10)" },
     tierName: { fontFamily: display, fontWeight: 600, fontSize: 16 },

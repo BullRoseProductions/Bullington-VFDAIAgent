@@ -1,0 +1,32 @@
+<!doctype html><meta charset="utf-8"><title>sweep</title>
+<body style="margin:0;background:#222;color:#ddd;font:12px monospace">
+<div id="frames"></div>
+<script>
+// Phone-layout sweep (dev harness, NOT shipped). Loads each screen into an iframe of exactly W px and reports:
+//   page   — document-level horizontal overflow (scrollWidth − clientWidth)
+//   inner  — every element whose content is wider than its box and that SCROLLS (overflow-x auto/scroll) or CLIPS
+//            (hidden/clip) it, with the deepest elements poking past the box and the text that can't wrap.
+// The app's main column is overflow-x:hidden (it must be: overflow-y:auto forces it), so an offender under it shows as
+// CLIPPED on that column, never as page scroll — read "inner" for real offenders. Decorative crops (absolute glows) are
+// expected CLIPPED entries. forced=1 injects the touch-screen 16px input rule, which desktop Chrome would not apply.
+const SCREENS = ["dashboard","notifications","training","roster","onboarding","apparatus","qualifications","equipment","myequipment","stationhours","duties","recruit","funding","visibility","minutes","reports","expirations","readiness","study","qanda","documents","readsign","resources","settings","admin","adddept","department","library"];
+const pathOf = (el) => { const p = []; for (let e = el; e && e.tagName !== "BODY" && p.length < 4; e = e.parentElement) { const st = e.getAttribute("style") || ""; p.unshift(e.tagName.toLowerCase() + (st.match(/(min-width|max-width|width|grid-template-columns|white-space|overflow[-a-z]*)\s*:[^;]*/g) || []).slice(0, 3).map((s) => "{" + s + "}").join("")); } return p.join(" > "); };
+const deepest = (box, limit) => { const out = []; for (const el of box.querySelectorAll("*")) { const r = el.getBoundingClientRect(); if (!r.width || r.right <= limit + 0.5 || [...el.children].some((c) => c.getBoundingClientRect().right > limit + 0.5)) continue; out.push({ tag: el.tagName.toLowerCase(), right: Math.round(r.right), text: (el.textContent || "").trim().slice(0, 40), path: pathOf(el) }); if (out.length >= 3) break; } return out; };
+function measure(doc, W) { const win = doc.defaultView, de = doc.documentElement; const res = { page: de.scrollWidth - de.clientWidth, pageOffs: [], inner: [] }; if (res.page > 0) res.pageOffs = deepest(doc.body, W);
+  for (const el of doc.body.querySelectorAll("*")) { const ox = win.getComputedStyle(el).overflowX; if (ox === "visible" || el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 1) continue; if (win.getComputedStyle(el).textOverflow === "ellipsis") continue;
+    res.inner.push({ kind: ox === "hidden" || ox === "clip" ? "CLIPPED" : "SCROLLS", by: el.scrollWidth - el.clientWidth, box: pathOf(el), offs: deepest(el, el.getBoundingClientRect().left + el.clientWidth) }); } return res; }
+async function sweep(screens = SCREENS, widths = [360, 375, 390, 430], { wait = 2400, forced = false } = {}) {
+  const out = [], host = document.getElementById("frames");
+  for (const W of widths) for (const s of screens) {
+    host.replaceChildren(); await new Promise((r) => setTimeout(r, 150));   // the old frame's pagehide saves ITS screen — then we overwrite
+    sessionStorage.setItem("b4c.restore.v1", JSON.stringify({ screen: s, at: Date.now() }));
+    const f = document.createElement("iframe"); f.style.cssText = `width:${W}px;height:800px;border:0`; host.appendChild(f); f.src = "/?sweep=" + Math.random();
+    await Promise.race([new Promise((r) => (f.onload = r)), new Promise((r) => setTimeout(r, 8000))]);
+    if (forced) { const st = f.contentDocument.createElement("style"); st.textContent = 'input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), select, textarea { font-size: 16px !important; }'; f.contentDocument.head.appendChild(st); }
+    await new Promise((r) => setTimeout(r, wait));
+    out.push({ W, s, ...measure(f.contentDocument, W) });
+  }
+  window.__sweep = out; return out;
+}
+window.sweep = sweep;
+</script>
