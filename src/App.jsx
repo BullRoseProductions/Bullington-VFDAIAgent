@@ -22933,7 +22933,10 @@ function OnboardingCardPath({ S, me, go, dept }) {
   const done = items.length - open.length;
   // Probationary: shown until they go Active (the path includes the reviews and the vote). Anyone else: only while a
   // checklist they've started is unfinished. Never onboarded = never shown.
-  if (!prob && (open.length === 0 || done === 0)) return null;
+  // "Started" = a human act on their record: a probation start date, an officer-ticked manual item, or an
+  // assigned mentor. Auto kinds (ack/hours/cert) satisfy themselves for long-time members — NOT evidence.
+  const humanStarted = !!st.started_on || items.some((it) => (!it.kind || it.kind === "manual") && it.satisfied);
+  if (!prob && (open.length === 0 || !humanStarted)) return null;
   const pct = Math.round((done / items.length) * 100);
   const g = st.gate || {};
   const left = Math.max(0, (g.required || 0) - (g.satisfied || 0));
