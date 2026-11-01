@@ -2717,7 +2717,15 @@ export default function App() {
     const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     return { ok: true, at: now, title, geoFailed };
   }
-  // Receiver scans a handoff QR/deep-link → move custody to the signed-in member.
+  /* L-7: a scan no longer moves custody by itself. The receiver first sees what is being handed to them
+     (preview_equipment_handoff — accept's own checks, consumes nothing) and taps Accept; only then does
+     accept_equipment_handoff run. A refusal shows the server's own words, which were written to be shown. */
+  async function doPreviewHandoff(handoffId, code) {
+    const { data, error } = await supabase.rpc("preview_equipment_handoff", { p_handoff_id: handoffId, p_code: code });
+    if (error || !data) return { ok: false, reason: error?.message || "We couldn't look up that transfer — ask the sender for a fresh code." };
+    return { confirm: true, hid: handoffId, code, giver: data.from_member_name, items: (data.items || []).map((i) => i.name), expiresAt: data.expires_at };
+  }
+  // Receiver taps Accept on the confirm → move custody to the signed-in member.
   async function doAcceptHandoff(handoffId, code) {
     const { data, error } = await supabase.rpc("accept_equipment_handoff", { p_handoff_id: handoffId, p_code: code });
     if (error) return { ok: false, reason: error.message || "We couldn't complete the transfer — ask the sender for a fresh code." };
@@ -2856,11 +2864,22 @@ export default function App() {
     if (myMemberId == null) {
       setHandoffResult({ ok: false, reason: "We couldn't match your sign-in to a member record, so nothing was transferred. Please sign in as yourself and scan again." });
     } else {
-      doAcceptHandoff(pendingHandoff.hid, pendingHandoff.code).then(setHandoffResult);
+      doPreviewHandoff(pendingHandoff.hid, pendingHandoff.code).then(setHandoffResult);   // the confirm, not the move
     }
     setPendingHandoff(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingHandoff, identityChecked, myMemberId]);
+  // The confirm's two answers. Accept runs the unchanged accept RPC exactly once (the ref holds it against a
+  // double tap before the re-render lands); Decline moves nothing — the code just runs out, or the sender cancels.
+  const acceptingHandoff = useRef(false);
+  async function acceptHandoff() {
+    const r = handoffResult;
+    if (!r?.confirm || acceptingHandoff.current) return;
+    acceptingHandoff.current = true;
+    setHandoffResult({ pending: true, accepting: true });
+    try { setHandoffResult(await doAcceptHandoff(r.hid, r.code)); } finally { acceptingHandoff.current = false; }
+  }
+  const declineHandoff = () => setHandoffResult({ declined: true });
   const addFeedback = (f) => setFeedback((p) => [{ ...f, when: "Just now" }, ...p]);
   const notify = (n) => setToast(n);
   // When a token refresh fails (dead refresh token), authFetch calls this — surface an actionable
@@ -3229,7 +3248,7 @@ export default function App() {
           <AskB4CDock open={askOpen} onOpen={() => setAskOpen(true)} onClose={closeAsk} onHide={() => setAskOpen(false)} gen={askGen}
             role={role} go={go} dept={dept} msgs={askMsgs} setMsgs={setAskMsgs} draft={askDraft} setDraft={setAskDraft} />
           {screen === "checkin" && <CheckinConfirm S={S} result={checkinResult} members={members} meId={myMemberId} go={go} />}
-          {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} />}
+          {screen === "handoff" && <HandoffConfirm S={S} result={handoffResult} go={go} onAccept={acceptHandoff} onDecline={declineHandoff} />}
           {screen === "packet" && packet && <Packet S={S} packet={packet} dept={dept} notify={notify} back={() => setScreen("library")}
             usage={lib.usage[packet.libraryId]} added={lib.pulled.has(packet.libraryId)}
             canAdd={hasAny(role, ["Department Admin"]) || !!isTrainingOfficer} onAdd={() => addLibraryDrill(packet.libraryId)} />}
@@ -19155,12 +19174,13 @@ function RecoverModal({ S, unit, meId, notify, onClose, onRecovered }) {
 // The snapshot is NOT dropped, because "the condition I signed for" is the member's accountability
 // record: when the two differ, condition_at_open renders as a muted "signed for as …" line beneath.
 // So the row now answers both questions — what it is today, and what they accepted.
-// Giver's "Start transfer" screen. create_equipment_handoff mints a hashed, single-use, 60s code and
+// Giver's "Start transfer" screen. create_equipment_handoff mints a hashed, single-use, short-lived code (the server sets
+// its lifetime — read from expires_at, never assumed here) and
 // returns the RAW code once (for the QR) — it moves NO custody. The receiver scanning + accept_equipment_handoff
 // is what moves it. `items` = [{ equipment_id, equipment_name }] the giver picked from My Equipment.
 function HandoffModal({ items, notify, onClose }) {
   const [st, setSt] = useState({ phase: "loading" });   // loading | live | expired | error
-  const [secs, setSecs] = useState(60);
+  const [secs, setSecs] = useState(null);   // null until the server's expires_at is in hand — never a guessed number
   const started = useRef(false);
 
   useEffect(() => {
@@ -19220,7 +19240,7 @@ function HandoffModal({ items, notify, onClose }) {
             <QRCodeCanvas value={url} size={196} />
           </div>
           <div style={{ marginTop: 12, fontSize: 13, color: secs <= 10 ? FIRE.redText : FIRE.textSecondary, fontWeight: 700, ...FS.num }}>
-            Expires in {secs}s
+            Expires in {secs ?? Math.max(0, Math.round((new Date(st.expiresAt).getTime() - Date.now()) / 1000))}s
           </div>
           <div style={{ marginTop: 4, fontSize: 11.5, color: FIRE.textMuted }}>
             Transferring: {items.map((i) => i.equipment_name).join(", ")}
@@ -23825,23 +23845,51 @@ function CheckinConfirm({ S, result, members, meId, go }) {
   );
 }
 // Post-scan confirmation for an equipment handoff — the receiver's sibling of CheckinConfirm.
-function HandoffConfirm({ S, result, go }) {
+// States: pending (looking it up / moving it) · confirm (the preview: who, what, Accept / Decline) · declined · the result.
+function HandoffConfirm({ S, result, go, onAccept, onDecline }) {
   const ok = result?.ok;
   const pending = result?.pending;
-  const n = result?.items || 0;
+  const confirm = result?.confirm;
+  const declined = result?.declined;
+  const n = result?.items?.length ?? result?.items ?? 0;
+  // The countdown is DISPLAY ONLY, keyed off the server's expires_at against this device's clock. The server decides:
+  // Accept stays tappable at zero, and an expired code comes back in the server's own words.
+  const left = () => Math.max(0, Math.round((new Date(result?.expiresAt).getTime() - Date.now()) / 1000));
+  const [secs, setSecs] = useState(() => (confirm ? left() : null));
+  useEffect(() => {
+    if (!confirm) return;
+    setSecs(left());
+    const id = setInterval(() => setSecs(left()), 500);
+    return () => clearInterval(id);
+  }, [confirm, result?.expiresAt]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const title = pending ? (result?.accepting ? "Completing the transfer…" : "Checking the transfer…")
+    : confirm ? "Accept this equipment?" : declined ? "Declined" : ok ? "Transfer complete" : "Couldn't complete the transfer";
+  const icon = pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : confirm ? <HardHat size={48} color={FIRE.amberText} />
+    : declined ? <X size={48} color={FIRE.textMuted} /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />;
   return (
     <div style={{ maxWidth: 520, margin: "0 auto" }}>
-      <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }}>
-        {pending ? <Loader2 size={48} color={FIRE.textMuted} className="spin" /> : ok ? <CheckCircle2 size={48} color={FIRE.green} /> : <AlertTriangle size={48} color={FIRE.redText} />}
-        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{pending ? "Completing the transfer…" : ok ? "Transfer complete" : "Transfer didn't go through"}</h2>
+      <div style={{ ...S.opCard, ...FS.cardNoir, textAlign: "center", padding: "30px 22px" }} data-handoff-state={pending ? "pending" : confirm ? "confirm" : declined ? "declined" : ok ? "done" : "error"}>
+        {icon}
+        <h2 style={{ ...S.featTitle, marginTop: 14, color: FIRE.textPrimary, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 20, letterSpacing: ".01em" }}>{title}</h2>
         <p style={{ color: FIRE.textSecondary, fontSize: 14.5, marginTop: 6, lineHeight: 1.5 }}>
           {pending
-            ? "One moment while we move custody to you."
+            ? (result?.accepting ? "One moment while we move custody to you." : "One moment while we look up what's being handed to you.")
+            : confirm
+            ? <><b style={{ color: FIRE.textPrimary }}>{result.giver}</b> is handing you {n === 1 ? "1 item" : `${n} items`}: {result.items.join(", ")}. Accept?</>
+            : declined
+            ? "Nothing was transferred. The code simply expires — and the sender can also cancel it from their side."
             : ok
             ? <>{n === 1 ? "1 item is" : `${n} items are`} now in your custody. You're responsible for {n === 1 ? "it" : "them"} until {n === 1 ? "it's" : "they're"} returned or transferred.</>
             : (result?.reason || "Something went wrong.")}
         </p>
-        <button style={{ ...FS.btnPrimary, marginTop: 18 }} onClick={() => go("myequipment")}><HardHat size={16} /> Go to My Equipment</button>
+        {confirm && <>
+          <div style={{ marginTop: 6, fontSize: 12.5, color: secs <= 10 ? FIRE.redText : FIRE.textMuted, fontWeight: 700, ...FS.num }} data-handoff-countdown>Code expires in {secs}s</div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}>
+            <button style={FS.btnPrimary} onClick={onAccept}><CheckCircle2 size={16} /> Accept</button>
+            <button style={FS.btn} onClick={onDecline}>Decline</button>
+          </div>
+        </>}
+        {!pending && !confirm && <button style={{ ...FS.btnPrimary, marginTop: 18 }} onClick={() => go("myequipment")}><HardHat size={16} /> Go to My Equipment</button>}
       </div>
     </div>
   );
