@@ -1,15 +1,15 @@
 -- =====================================================================
 -- CLOSE THREE FORGOTTEN SHIFTS — North Hood County, out-time 9:30 PM Central, 10/15/2026. HOURS-WRITING.
 -- APPLIED by hand 2026-10-16 as ashlea@bullroseproductions.com (North Hood DA). No recorded review PASS before apply.
--- Do NOT re-run (the shifts are closed; a re-run refuses). Result on live: Kai Newton 7:02:26 PM -> 9:30 PM = 2h27m33s ·
--- Mike Bell 7:39:17 PM -> 9:30 PM = 1h50m42s · Kenny Bell 7:40:30 PM -> 9:30 PM = 1h49m29s; all auto_closed false,
--- verified unchanged (true). Chase Thomas (in 10:36:56 PM) and Spencer Sampler (in 7:39:14 PM) left OPEN.
+-- Do NOT re-run (the shifts are closed; a re-run refuses). Result on live: Member C 7:02:26 PM -> 9:30 PM = 2h27m33s ·
+-- Member D 7:39:17 PM -> 9:30 PM = 1h50m42s · Member E 7:40:30 PM -> 9:30 PM = 1h49m29s; all auto_closed false,
+-- verified unchanged (true). Member A (in 10:36:56 PM) and Member B (in 7:39:14 PM) left OPEN.
 -- Run ONLY after sql/close_forgotten_shifts_2026-10-15_PREVIEW.sql has been checked.
 -- Goes through the admin-gated close_open_shift() (it enforces out-time in [check-in, now], refuses an already-closed
 -- shift, sets checked_out_at + auto_closed = false, never touches verified) — acting as a North Hood Department Admin.
--- ALL-OR-NOTHING. Raises and changes nothing unless, for EACH of Kai Newton / Mike Bell / Kenny Bell: exactly one open
+-- ALL-OR-NOTHING. Raises and changes nothing unless, for EACH of Member C / Member D / Member E: exactly one open
 -- shift in North Hood, checked in on 10/15/2026 at the stated minute (7:02 / 7:39 / 7:40 PM CT), and the credited time
--- comes back within ±1 minute of 2h28m / 1h51m / 1h50m (rounded; check-ins carry seconds). Chase Thomas's and Spencer Sampler's open shifts must still be open after.
+-- comes back within ±1 minute of 2h28m / 1h51m / 1h50m (rounded; check-ins carry seconds). Member A's and Member B's open shifts must still be open after.
 -- =====================================================================
 DO $close$
 DECLARE
@@ -61,7 +61,7 @@ END
 $close$;
 
 -- state check (read-only) — expect the three CLOSED at Oct 15 2026 09:30 PM, auto_closed false, credited 2h28m / 1h51m /
--- 1h50m; Chase Thomas and Spencer Sampler still OPEN.
+-- 1h50m; Member A and Member B still OPEN.
 SELECT m.name, sp.kind, sp.verified, sp.auto_closed,
        to_char(sp.checked_in_at AT TIME ZONE 'America/Chicago', 'Mon DD YYYY HH12:MI AM') AS checked_in_ct,
        coalesce(to_char(sp.checked_out_at AT TIME ZONE 'America/Chicago', 'Mon DD YYYY HH12:MI AM'), 'OPEN') AS checked_out_ct,

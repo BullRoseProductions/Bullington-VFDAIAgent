@@ -2,7 +2,7 @@
 -- One-off data cleanup — APPLIED 2026-10-13 by hand (result: closed_at 2026-10-13 15:44:33Z,
 -- orphans_still_open = 0). Kept as the record of what was changed. Do NOT re-run.
 --
--- Lipan Volunteer Fire Department: custody period 1f48e56a… ("Radios · SN 1234", Roger Gaines,
+-- Lipan Volunteer Fire Department: custody period 1f48e56a… ("Radios · SN 1234", Member L,
 -- issued 2026-08-20) was open with equipment_id NULL — the unit had been deleted from the registry
 -- while issued (equipment_custody.equipment_id is ON DELETE SET NULL). No RPC can close such a
 -- period (they all key on equipment_id), so it showed on his My Equipment forever.

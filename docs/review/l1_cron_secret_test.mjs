@@ -6,7 +6,7 @@
 //      length → 401 · ?secret=<the RIGHT secret> with no header → 401 (the query form is gone, value never compared)
 //      · ?secret= alongside a right header → still 401 · right Bearer → runs. No refusal touches the DB or sends.
 //   2. digest ?to=: an address off the allow-list → 400 before any read (no client, no send), never swapped for the
-//      default · the default address passes · DIGEST_TEST_TO widens the list (case/space-insensitive) · ?to=x&dry=1
+//      default · with DIGEST_TEST_TO unset NO address passes (none is compiled in — PII scrub) · DIGEST_TEST_TO is the list (case/space-insensitive) · ?to=x&dry=1
 //      renders for x and sends nothing · a real run (no ?to=) still mails the department's admins
 //   3. source fences: no `!==` secret compare and no req.query.secret read left in digest/pulse; both import
 //      requireCron; _cron.js uses timingSafeEqual over fixed-length digests; locked tokens 132/32/14; Notify held;
@@ -98,24 +98,28 @@ let r = await call(R.digest, { query: { to: "stranger@evil.test" }, auth: RIGHT 
 ok("digest ?to=<off the allow-list> → 400 before any read: no client, no send", r.code === 400 && r.clients === 0 && r.sends.length === 0, JSON.stringify(r.body));
 r = await call(R.digest, { query: { to: "stranger@evil.test", dry: "1" }, auth: RIGHT });
 ok("digest ?to=<off the allow-list>&dry=1 → 400 too (dry does not open the door)", r.code === 400 && r.clients === 0);
-r = await call(R.digest, { query: { to: "ashlea@b4thecall.com", dry: "1" }, auth: RIGHT });
+// PII scrub: no address is compiled into api/digest.js any more — with DIGEST_TEST_TO unset the allow-list is EMPTY, so the
+// owner's former built-in default is refused like any other (it was the only thing the hard-coded address did).
+r = await call(R.digest, { query: { to: "owner@test.fd", dry: "1" }, auth: RIGHT });
 const d0 = r.body?.departments?.[0];
-ok("digest ?to=<the default address>&dry=1 → 200, renders for that address only, sends nothing", r.code === 200 && r.sends.length === 0 && JSON.stringify(d0?.wouldSendTo) === JSON.stringify(["ashlea@b4thecall.com"]), JSON.stringify(d0?.wouldSendTo));
-r = await call(R.digest, { query: { to: "ashlea@b4thecall.com" }, auth: RIGHT });
-ok("digest ?to=<the default address> → one send, to that address only", r.code === 200 && r.sends.length === 1 && JSON.stringify(r.sends[0].body.to) === JSON.stringify(["ashlea@b4thecall.com"]), JSON.stringify(r.sends.map((s) => s.body.to)));
+ok("DIGEST_TEST_TO unset → ?to=<the owner's address>&dry=1 is refused 400 before any read (no compiled-in default)", r.code === 400 && r.clients === 0 && r.sends.length === 0 && d0 === undefined, JSON.stringify(d0?.wouldSendTo));
+r = await call(R.digest, { query: { to: "owner@test.fd" }, auth: RIGHT });
+ok("DIGEST_TEST_TO unset → ?to=<the owner's address> (a real send) is refused 400 too: nothing read, nothing sent", r.code === 400 && r.clients === 0 && r.sends.length === 0);
 r = await call(R.digest, { query: { to: "chief@test.fd" }, auth: RIGHT });
 ok("digest ?to=<a real admin, but not on the test list> → 400 (the list is explicit, not 'any member')", r.code === 400 && r.sends.length === 0);
 r = await call(R.digest, { auth: RIGHT });
 ok("digest real run (no ?to=) → mails the department's admins (unchanged)", r.code === 200 && r.sends.length === 1 && JSON.stringify(r.sends[0].body.to) === JSON.stringify(["chief@test.fd"]), JSON.stringify(r.sends.map((s) => s.body.to)));
 // DIGEST_TEST_TO is read at module load, so a second bundle sees the widened list.
-process.env.DIGEST_TEST_TO = " Ashlea@B4theCall.com , qa@b4thecall.com ";
+process.env.DIGEST_TEST_TO = " Owner@Test.FD , qa@b4thecall.com ";
 const digest2 = await (async () => { const out = join(outDir, "digest2.mjs"); await build({ entryPoints: [join(root, "api/digest.js")], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent",
   plugins: [{ name: "fake-sb", setup(b) { b.onResolve({ filter: /^@supabase\/supabase-js$/ }, () => ({ path: "sb", namespace: "fake" })); b.onLoad({ filter: /.*/, namespace: "fake" }, () => ({ contents: FAKE_SB, loader: "js" })); } }] });
   return (await import(pathToFileURL(out).href + "?2")).default; })();
 r = await call(digest2, { query: { to: "QA@b4thecall.com ", dry: "1" }, auth: RIGHT });
 ok("DIGEST_TEST_TO widens the list (case- and space-insensitive)", r.code === 200 && r.sends.length === 0, JSON.stringify(r.body).slice(0, 120));
-r = await call(digest2, { query: { to: "ashlea@b4thecall.com", dry: "1" }, auth: RIGHT });
-ok("DIGEST_TEST_TO replaces the default list (the default only passes if it's listed — it is here)", r.code === 200);
+r = await call(digest2, { query: { to: "owner@test.fd", dry: "1" }, auth: RIGHT });
+ok("DIGEST_TEST_TO lists the owner's address → ?to=<it>&dry=1 → 200, renders for that address only, sends nothing", r.code === 200 && r.sends.length === 0 && JSON.stringify(r.body?.departments?.[0]?.wouldSendTo) === JSON.stringify(["owner@test.fd"]));
+r = await call(digest2, { query: { to: "owner@test.fd" }, auth: RIGHT });
+ok("…and ?to=<it> → one send, to that address only (the test send works exactly as before, configured instead of compiled)", r.code === 200 && r.sends.length === 1 && JSON.stringify(r.sends[0].body.to) === JSON.stringify(["owner@test.fd"]), JSON.stringify(r.sends.map((x) => x.body.to)));
 r = await call(digest2, { query: { to: "stranger@evil.test" }, auth: RIGHT });
 ok("DIGEST_TEST_TO set: an unlisted address is still refused", r.code === 400 && r.sends.length === 0);
 delete process.env.DIGEST_TEST_TO;

@@ -3,7 +3,7 @@
 -- Step 1 count: 23 rows (20 from Sep 12, 3 from Oct 7), 1 department (Indian Harbor 6fbb2d91…).
 -- Result: pending_now = 23, still_rejected = 0, all_josh_submissions = 23, josh certs = 0 (unchanged).
 --
--- Josh Merritt (member 019d1fd0…, Indian Harbor VFD) filed 23 cert submissions with Indian Harbor.
+-- Member K (an Indian Harbor VFD member — id in the WHERE below) filed 23 cert submissions with Indian Harbor.
 -- All 23 were rejected by auth user 819dd88d… with "no longer in department" / "No longer in
 -- service at NHCVFD" — apparently a North Hood admin who could see another department's queue.
 -- This puts EXACTLY those rows back to 'pending' so an Indian Harbor admin can review them.

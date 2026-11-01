@@ -9,7 +9,7 @@
 -- read today returns it for an on-station row:
 --   • dept_on_station_now_all() returns member/kind/check-in/station — no shift id;
 --   • a direct station_presence read returns 0 rows to a Department Admin under RLS (checked live 2026-10-16 while
---     dept_on_station_now_all listed Chase Thomas and Spencer Sampler);
+--     dept_on_station_now_all listed Member A and Member B);
 --   • dept_open_long_shifts() has the id but only for geofenced shifts open longer than the threshold (28 h).
 --
 -- WHAT IT IS. dept_open_long_shifts() minus its two filters (source = 'gps_geofence', open > threshold): every OPEN

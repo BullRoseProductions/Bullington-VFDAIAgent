@@ -14,8 +14,10 @@
 //
 // Env (Vercel → Settings → Environment Variables):
 //   CRON_SECRET               — request gate (Bearer header only — from Cron, or curl for a manual run)
-//   DIGEST_TEST_TO            — optional, comma-separated: the only addresses ?to= may name. Unset → just
-//                               DEFAULT_TO. Anything else is refused, never silently swapped for the default
+//   DIGEST_TEST_TO            — comma-separated: the only addresses ?to= may name (the owner's test inbox lives
+//                               HERE, not in the code). Unset → no test send is allowed at all; a real run is
+//                               unaffected (it mails each department's own DAs). Anything else is refused,
+//                               never silently swapped for another address
 //   RESEND_API_KEY            — sending
 //   SUPABASE_URL              — server-side project URL (NOT the VITE_-prefixed one; those are
 //                               build-time inlined into the browser bundle and are absent here)
@@ -38,8 +40,8 @@ import { isListedMember, isCountedMember } from "../shared/members.js";
 import { requireCron } from "./_cron.js";
 import { digestOutcome } from "../shared/cron-outcome.js";   // cron honesty: a failed run answers 5xx
 
-const DEFAULT_TO = "ashlea@b4thecall.com";
-const TEST_TO = (process.env.DIGEST_TEST_TO || DEFAULT_TO).split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
+// The test allow-list is configuration, not code (PII scrub): no personal address is compiled in. Empty when unset.
+const TEST_TO = (process.env.DIGEST_TEST_TO || "").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
 const FROM = "B4C <notifications@b4thecall.com>";
 // Gmail strips data: URIs, so the logo MUST be an absolute https URL to a public asset.
 // public/b4c-email-logo.png ships with the app and is served at the site root.
@@ -589,7 +591,7 @@ export default async function handler(req, res) {
   // so the layout and the "—" fallbacks can be eyeballed on a quiet week. Without ?to= (how Cron will call
   // it) SEND_WHEN_NOTHING_FLAGGED governs, so a real broadcast still stays silent when there's nothing to say.
   const isTestSend = !!req.query?.to;
-  // Refused, not replaced with DEFAULT_TO: someone who asked for a test send to X and got one at the default
+  // Refused, not replaced with another address: someone who asked for a test send to X and got one elsewhere
   // would believe X received it. Checked before any read, so a refused call opens no service-role client.
   if (isTestSend && !TEST_TO.includes(String(req.query.to).trim().toLowerCase())) {
     return res.status(400).json({ error: "?to= is not on the test allow-list (DIGEST_TEST_TO)", note: "Nothing was read or sent." });
@@ -597,7 +599,7 @@ export default async function handler(req, res) {
   // Explicit allow-list rather than !!req.query.dry, so ?dry=0 does NOT silently enable a dry run —
   // the failure mode of a truthy "0" here is someone believing they previewed when they broadcast.
   const isDry = ["1", "true", "yes", "on"].includes(String(req.query?.dry ?? "").toLowerCase());
-  const to = isTestSend ? String(req.query.to).trim() : DEFAULT_TO;
+  const to = isTestSend ? String(req.query.to).trim() : null;   // only a test send has one address; a real run mails each department's DAs
   const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });   // no session server-side → no authFetch refresh wrapper
   const today = startOfToday();
   const week = digestWeekWindow(new Date());   // the week that just ended, [Mon 00:00, Mon 00:00) Central

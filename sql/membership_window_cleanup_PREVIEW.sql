@@ -5,7 +5,7 @@
 -- One result set, one row per thing the cleanup WOULD delete, plus INFO rows for what it deliberately KEEPS:
 --   DELETE prejoin    attendance on a drill dated before the member's start (joined_date, else Jan 1 of `joined`'s year)
 --   DELETE postexit   attendance on a drill dated after the member's termination date (end day kept)
---   DELETE paul_cert  every certs row of Paul Stetzel (expected 41)
+--   DELETE paul_cert  every certs row of Member F (expected 41)
 --   INFO   paul_term  the termination date the cleanup will set for Paul (2026-10-09) — or what is already on file
 --   INFO   hours_kept a station_presence 'training' row (geo check-in hours) for one of the attendance rows above — KEPT
 --   INFO   proof_kept a deleted cert's proof file in storage — the file is NOT deleted by SQL (KEPT)

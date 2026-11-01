@@ -1,4 +1,4 @@
--- READ-ONLY. Why didn't the preview flag Jared Allen? Shows the join date the server actually uses for him, and every
+-- READ-ONLY. Why didn't the preview flag Member G? Shows the join date the server actually uses for him, and every
 -- drill he's recorded at, each marked inside/outside his window. One row per drill (plus one row if he has none).
 WITH j AS (
   SELECT m.id, m.name, m.joined, m.status, mp.joined_date,

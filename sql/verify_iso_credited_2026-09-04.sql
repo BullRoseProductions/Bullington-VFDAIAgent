@@ -19,7 +19,7 @@
 -- total, and would let auto-closed shifts back into it. That is the same class
 -- of error as the double-count, in the other direction, on the same number.
 --
--- Chase Thomas's expected figures are themselves the tell. 1.5 h is exactly the
+-- Member A's expected figures are themselves the tell. 1.5 h is exactly the
 -- flat 90-minute attested cap, and 35.42 + 1.50 = 36.92 — his standby total
 -- unchanged, with the drill carved OUT of it rather than added ON to it. That
 -- arithmetic only happens if attested spans reach dept_iso_hours, i.e. only if
@@ -127,7 +127,7 @@ order by over_credit desc nulls last, member;
 rollback;   -- nothing above writes, but the impersonation must not outlive the check
 
 -- EXPECTED, and these are the three acceptance tests:
---   • Chase Thomas       old 36.92 / 1.50 / 38.42   ->   new 35.42 / 1.50 / 36.92
+--   • Member A       old 36.92 / 1.50 / 38.42   ->   new 35.42 / 1.50 / 36.92
 --                        over_credit 1.50 — the drill he was already on standby for.
 --   • A member who attended a drill with NO overlapping standby: training unchanged
 --     at 1.50 and over_credit 0.00. The attested-only case must not move.

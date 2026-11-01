@@ -74,7 +74,7 @@ BEGIN
    WHERE member_id = v_member AND checked_out_at IS NULL;
 
   -- ============ 1. BACKDATED REPLAY INSIDE AN EXISTING SPAN -> REJECTED =====
-  -- The Jeff Harper case: an arrival written late, timestamped inside a shift
+  -- The Member J case: an arrival written late, timestamped inside a shift
   -- that has already been opened, closed and credited.
   v_in := now() - interval '3 hours';
   INSERT INTO public.station_presence (department_id, member_id, station_id, source, kind,
@@ -140,7 +140,7 @@ BEGIN
   -- ============ 5. FENCED RUNAWAY USES THE FENCED BACKSTOP =================
   -- Longer than max_shift_hours but SHORTER than the fenced cap. Before this
   -- migration it was trimmed to max_shift_hours and flagged; now it must close
-  -- at the real exit, unflagged. This is Matt Hohon's 1.2 lost hours.
+  -- at the real exit, unflagged. This is Member H's 1.2 lost hours.
   UPDATE public.station_presence SET checked_out_at = now()
    WHERE member_id = v_member AND checked_out_at IS NULL;
   v_in := now() - make_interval(hours => v_cap + 2);      -- past max_shift_hours, inside the backstop
