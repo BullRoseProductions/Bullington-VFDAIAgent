@@ -36,6 +36,7 @@ import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./Con
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk } from "./appUpdate";
 import { RESEND_COOLDOWN, sendInvite, normalizeLoginEmail } from "./authLinks";
+import { fmtPhone } from "./phone.js";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
 // only fetched when the worker starts) — so this does NOT pull the ~400KB pdfjs parser into the initial bundle;
 // that parser is lazy-imported in extractPdfText() on first upload.
@@ -955,7 +956,7 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
       .then(({ data }) => { if (!off) setCurrent(data ? (data.reach_out_member_id || null) : null); });
     return () => { off = true; };
   }, [meId]);
-  const options = (members || []).filter((m) => isAssignable(m) && m.id !== meId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const options = pickable(members).filter((m) => m.id !== meId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   const person = current ? (members || []).find((m) => m.id === current) : null;
   async function choose(val) {
     const target = val || null;
@@ -992,7 +993,7 @@ function ReachOutPersonPicker({ S, members, meId, notify }) {
               {avatar(person, 46)}
               <div style={{ flex: 1, minWidth: 140 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, color: FIRE.textPrimary }}>{person.name}</div>
-                <div style={{ fontSize: 12.5, color: FIRE.textMuted, ...FS.num }}>{person.phone || "No number on file"}</div>
+                <div style={{ fontSize: 12.5, color: FIRE.textMuted, ...FS.num }}>{fmtPhone(person.phone) || "No number on file"}</div>
               </div>
               {person.phone && <a href={`tel:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.green, color: "#fff", border: "none" }}><Phone size={14} color="#fff" /> Call</a>}
               {person.phone && <a href={`sms:${telDigits(person.phone)}`} style={{ ...YS_ACTION_BTN, background: FIRE.card2Noir, color: FIRE.btnText, border: `1px solid ${FIRE.line2Noir}` }}><MessageSquare size={14} color={FIRE.btnIcon} /> Text</a>}
@@ -3355,6 +3356,12 @@ const dashboardGreeting = (me) => {
 // Owner/test/demo + any Project Admin must never be a selectable assignee (mentor/duty/action-item/owner pickers).
 const isAssignable = isListedMember;
 const assignableMembers = (ms) => (ms || []).filter(isAssignable);
+/* PICKERS THAT HAND SOMEONE A RESPONSIBILITY (an owner, an assignee, the person a member reaches out to) offer only people
+   who are still serving: not Inactive, not separated. A NULL status is "masked for this viewer" (members_view), not
+   "inactive", so it stays in. keepId keeps the row's CURRENT person listed even if they've since gone inactive, so an
+   edit form never silently shows someone else. Historical "who did it" logs are records, not assignments — unfiltered. */
+const isPickable = (m) => isAssignable(m) && m.status !== "Inactive" && m.separated !== true;
+const pickable = (ms, keepId) => (ms || []).filter((m) => isPickable(m) || (!!keepId && m.id === keepId));
 /* JOIN-DATE CUTOFF — joinCutoff / expectedAfterJoin now live in shared/attendance.js (WS-4b), so the weekly
    email applies the same cutoff (it had none: a September joiner read as absent for every January drill). */
 /* The server refuses attendance outside a member's membership window (join date .. termination date — the trigger in
@@ -5567,6 +5574,7 @@ const DEPT_QUAL_GROUP = "Department Qualifications (Non-Certification)";
 const isDeptQual = (c) => (CERT_TRACKS[DEPT_QUAL_GROUP] || []).includes(c);   // skill sign-off / demonstration, not a written-exam cert
 function StudySession({ S }) {
   const [cert, setCert] = useState(Object.values(CERT_TRACKS)[0][0]);   // first cert of the first group
+  const [certQ, setCertQ] = useState("");          // the track search — filters the grouped list below it
   const [mode, setMode] = useState("quiz");        // 'quiz' | 'explain'
   const [turns, setTurns] = useState([]);           // [{ role: 'user'|'assistant', content, hidden? }]
   const [input, setInput] = useState("");
@@ -5674,13 +5682,33 @@ function StudySession({ S }) {
       <NoirSkin>
       <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={{ ...S.field, flex: 1, minWidth: 220, marginBottom: 0 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Certification</span>
-          <select style={FS.input} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
-            {Object.entries(CERT_TRACKS).map(([cat, certs]) => (
-              <optgroup key={cat} label={cat}>
-                {certs.map((c) => <option key={c} value={c}>{c}</option>)}
-              </optgroup>
-            ))}
-          </select></label>
+          {/* ~160 tracks in one native list was unsearchable on a phone. A search box narrows the SAME grouped list
+              (a match on the track or its group heading); the picked track always stays listed so the select never
+              shows a value it doesn't hold. */}
+          {(() => {
+            const q = certQ.trim().toLowerCase();
+            const all = Object.values(CERT_TRACKS).flat().length;
+            const groups = Object.entries(CERT_TRACKS).map(([cat, certs]) => [cat, !q || cat.toLowerCase().includes(q) ? certs : certs.filter((c) => c === cert || c.toLowerCase().includes(q))]).filter(([, cs]) => cs.length);
+            const matches = q ? Object.entries(CERT_TRACKS).reduce((n, [cat, cs]) => n + (cat.toLowerCase().includes(q) ? cs.length : cs.filter((c) => c.toLowerCase().includes(q)).length), 0) : all;
+            return (<>
+              <input data-cert-search type="search" aria-label="Search certifications" style={{ ...FS.input, marginBottom: 6 }} value={certQ} placeholder={`Search ${all} tracks — e.g. EMT, driver, hazmat`}
+                onChange={(e) => {
+                  const v = e.target.value; setCertQ(v);
+                  // Narrowed to one obvious track → pick it, so typing "rope" is enough.
+                  const t = v.trim().toLowerCase(); if (!t) return;
+                  const hits = Object.values(CERT_TRACKS).flat().filter((c) => c.toLowerCase().includes(t));
+                  if (hits.length === 1 && hits[0] !== cert) { setCert(hits[0]); reset(); }
+                }} />
+              <select data-cert-select style={FS.input} value={cert} onChange={(e) => { setCert(e.target.value); reset(); }}>
+                {groups.map(([cat, certs]) => (
+                  <optgroup key={cat} label={cat}>
+                    {certs.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              {q && <span data-cert-count style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 4 }}>{matches} of {all} match</span>}
+            </>);
+          })()}</label>
         <div>
           <div style={{ ...S.fieldLabel, color: FIRE.textSecondary, marginBottom: 6 }}>Mode</div>
           <NoirSeg options={[["quiz", qual ? "Skill check" : "Quiz me"], ["explain", "Explain"]]} value={mode} onChange={(k) => { setMode(k); reset(); }} />
@@ -7915,7 +7943,7 @@ function eventTimeRange(start, end) {
   return "All day";
 }
 // Both set → the end can't come before the start. Either alone, or neither, is fine.
-const eventTimesInvalid = (start, end) => !!(start && end && evHHMM(end) < evHHMM(start));
+const eventTimesInvalid = (start, end) => !!(start && end && evHHMM(end) <= evHHMM(start));   // end must be AFTER start: an 11:47 → 11:47 shift is zero hours, not a shift
 function EventFields({ S, f, set, frs, frColorMap, withDay, dim }) {
   const lbl = (t, sub) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}{sub && <span style={{ color: FIRE.textMuted, fontWeight: 400 }}> — {sub}</span>}</span>;
   return (<>
@@ -8020,7 +8048,7 @@ function EventNeedsPanel({ S, event, needs, claims, members, canWrite, past, not
     const f = form, role = f.role.trim(), n = Number(f.slots);
     if (!role) { notify({ kind: "error", title: "Name the need", text: "Say what the need is — e.g. Engine crew, Kids' table." }); return; }
     if (!/^\d+$/.test(String(f.slots).trim()) || n < 1 || n > 50) { notify({ kind: "error", title: "How many people?", text: "A whole number from 1 to 50." }); return; }
-    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The shift ends before it starts." }); return; }
+    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The shift has to end after it starts." }); return; }
     setBusy("save");
     const fields = { role_label: role, slots_needed: n, start_time: f.start || null, end_time: f.end || null, notes: f.notes.trim() || null };
     let res;
@@ -8255,7 +8283,7 @@ function EventsCalendar({ S, role, notify, members }) {
     const f = adding; const t = f.title.trim();
     if (!EVENT_KINDS[f.kind]) { notify({ kind: "error", title: "Pick a type", text: "Choose Fundraiser event or Community event first." }); return; }
     if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
-    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time is before the start time." }); return; }
+    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time has to be after the start time." }); return; }
     setAddBusy(true);
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");
     if (deptErr || !deptId) { setAddBusy(false); notify({ kind: "error", title: "Couldn't find your department", text: "We couldn't determine your department — please try again." }); return; }
@@ -8279,7 +8307,7 @@ function EventsCalendar({ S, role, notify, members }) {
     const it = open, f = edit; const t = f.title.trim();
     if (!t) { notify({ kind: "error", title: "Event needs a title", text: "Give the event a title before saving it." }); return; }
     if (!f.date) { notify({ kind: "error", title: "Pick a date", text: "An event needs a day." }); return; }
-    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time is before the start time." }); return; }
+    if (eventTimesInvalid(f.start, f.end)) { notify({ kind: "error", title: "Check the times", text: "The end time has to be after the start time." }); return; }
     setBusy(true);
     const patch = { title: t, date: f.date, color: f.color, start_time: f.start || null, end_time: f.end || null,
                     location_label: f.loc.trim() || null, notes: f.notes.trim() || null,
@@ -9585,7 +9613,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
               <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
                 <select style={FS.input} value={r.ownerId} onChange={(e) => setPlanReview((pv) => ({ ...pv, actionItems: pv.actionItems.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x) }))}>
                   <option value="">Unassigned</option>
-                  {(members || []).filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {pickable(members, r.ownerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select></label>
               <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setPlanReview((pv) => ({ ...pv, actionItems: pv.actionItems.map((x, j) => j === i ? { ...x, due: e.target.value } : x) }))} /></label>
             </div>
@@ -11225,7 +11253,7 @@ function DonorDetail({ S, notify, donor, onBack, onEdit }) {
             <div style={{ fontSize: 19, fontWeight: 800, color: FIRE.textPrimary }}>{donor.organization || donor.name}</div>
             {donor.organization && donor.name && <div style={{ fontSize: 13.5, color: FIRE.textSecondary, marginTop: 2 }}>{donor.name}{donor.role ? ` · ${donor.role}` : ""}</div>}
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8, fontSize: 12.5, color: FIRE.textMuted }}>
-              {donor.phone && <span><Phone size={12} style={{ verticalAlign: "-1px" }} /> {donor.phone}</span>}
+              {donor.phone && <span><Phone size={12} style={{ verticalAlign: "-1px" }} /> {fmtPhone(donor.phone)}</span>}
               {donor.email && <span><Mail size={12} style={{ verticalAlign: "-1px" }} /> {donor.email}</span>}
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
@@ -11484,7 +11512,7 @@ function DonationBusinesses({ S, notify, meId, members }) {
                     </div>
                     {d.organization && d.name && <div style={{ fontSize: 13, color: FIRE.textSecondary, marginTop: 2 }}>{d.name}{d.role && d.role !== "Donor" ? ` · ${d.role}` : ""}</div>}
                     <div style={{ fontSize: 12, color: FIRE.textMuted, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {d.phone && <span>{d.phone}</span>}
+                      {d.phone && <span>{fmtPhone(d.phone)}</span>}
                       {d.email && <span>{d.email}</span>}
                       {d.amount_committed != null && <span>Pledged ${Number(d.amount_committed).toLocaleString()}</span>}
                       {d.next_follow_up && <span style={{ color: due ? FIRE.amberText : FIRE.textMuted, fontWeight: due ? 700 : 400 }}>
@@ -11903,7 +11931,7 @@ async function printRoster(list, dept) {
     // though they were on the active roll, so the word appears on both; only its styling differs.
     rows: rows.map((m) => ({
       muted: m.status === "Inactive",
-      cells: [m.name || "", m.role || "Member", m.phone || "", m.email || ""],
+      cells: [m.name || "", m.role || "Member", fmtPhone(m.phone), m.email || ""],
     })),
   };
   // meta reproduces the line this sheet has always carried; the shell appends "Printed <date>",
@@ -12155,7 +12183,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
               {canAdd && canDeleteShared && <button title="Remove from roster" style={{ ...FS.btn, padding: "6px 8px", marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); remove(m.id, m.name); }}><X size={14} color={FIRE.deleteRed} /></button>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: FIRE.textMuted, flexWrap: "wrap" }}>
-              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={12} /> {m.phone}
+              {m.joined && <span>since <b style={{ color: FIRE.textSecondary }}>{m.joined}</b> ·</span>}<Phone size={12} /> {fmtPhone(m.phone)}
               {onOpen ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, color: FIRE.btnText, fontWeight: 600, fontSize: 11 }}>View file <ChevronRight size={13} /></span>
                 : <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{m.certs.length} certs</span>}
             </div>
@@ -12350,7 +12378,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       lead={<div style={{ width: 84, height: 84, borderRadius: 18, background: "linear-gradient(135deg, #2A313A, #12161C)", border: `1px solid ${FIRE.line2Noir}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 32, color: FIRE.redText, flexShrink: 0, boxShadow: "0 8px 22px rgba(0,0,0,.5)" }}>{initials}</div>}
       kicker={dept?.name ? `MEMBER FILE · ${dept.name}` : "MEMBER FILE"} title={member.name}
       // No join year → drop the "since" segment rather than print "since null" (JOINED below shows "—" the same way).
-      sub={[member.role, member.joined ? `Member since ${member.joined}` : null, assign ? null : member.phone].filter(Boolean).join(" · ")}   /* leaders with the Profile card see the phone there */
+      sub={[member.role, member.joined ? `Member since ${member.joined}` : null, assign ? null : fmtPhone(member.phone)].filter(Boolean).join(" · ")}   /* leaders with the Profile card see the phone there */
       actions={<span style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 999, color: statusTone, background: `${statusTone}1F`, border: `1px solid ${statusTone}66` }}><span style={{ width: 7, height: 7, borderRadius: 999, background: statusTone }} />{member.status}</span>}>
       <NoirSkin>
       {/* Quick-stat chips — participation (live 90-day), station hours (6 mo), training attendance, certs. */}
@@ -12448,7 +12476,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                      only fail is worse than none. Say what to do instead: the Edit member form
                      immediately above is where an address gets added. */
                   : (<span style={{ color: FIRE.amberText, fontStyle: "italic" }}>No email — can&rsquo;t sign in. Add one with <b style={{ fontStyle: "normal" }}>Edit member</b>.</span>)],
-                ["Phone", member.phone || "—"],
+                ["Phone", fmtPhone(member.phone) || "—"],
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
                 ["Address", priv?.address || "—"],
@@ -15052,9 +15080,9 @@ function CapitalPlanReport({ S, dept, back }) {
         </div>
         {/* per-year detail */}
         {groups.map((g) => (
-          <ScrollX key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
+          <div key={g.year} style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
             <CardHead icon={Calendar} title={String(g.year)} right={<span style={{ ...FS.num, color: FIRE.textPrimary, fontWeight: 600 }}>{money(g.subtotal)}</span>} style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th><th style={{ ...TH, textAlign: "right" }}>Replacement cost</th><th style={{ ...TH, textAlign: "right" }}>Set aside / yr</th></tr></thead>
               <tbody>
                 {g.rows.map((r) => (
@@ -15074,15 +15102,15 @@ function CapitalPlanReport({ S, dept, back }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </ScrollX>
+            </table></ScrollX>
+          </div>
         ))}
         {/* not yet planned */}
         {unplanned.length > 0 && (
-          <ScrollX style={{ ...FS.cardNoir, padding: "8px 0" }}>
+          <div style={{ ...FS.cardNoir, padding: "8px 0" }}>
             <CardHead icon={Truck} title="Not yet planned" style={{ padding: "10px 12px 2px", marginBottom: 4 }} />
             <div style={{ fontSize: 12, color: FIRE.textMuted, padding: "0 12px 6px" }}>No planned replacement year on record.</div>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
               <thead><tr><th style={TH}>Apparatus</th><th style={TH}>Type</th><th style={{ ...TH, textAlign: "right" }}>Purchased</th><th style={{ ...TH, textAlign: "right" }}>Purchase cost</th></tr></thead>
               <tbody>
                 {unplanned.map((r) => (
@@ -15094,8 +15122,8 @@ function CapitalPlanReport({ S, dept, back }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </ScrollX>
+            </table></ScrollX>
+          </div>
         )}
         {/* DEPRECIATION — ESTIMATE, fenced off from every entered/computed dollar above. Not an appraisal. */}
         {rigs.length > 0 && (() => {
@@ -15932,12 +15960,12 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         )}
       </div>
       {/* hours by member */}
-      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Users} title="Hours by member" style={{ marginBottom: 0 }} /></div>
         {rows.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No station hours recorded in this range.</div>
         ) : (
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+          <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             {/* Standby / Training / Total are VERIFIED-ONLY. Unverified sits in its own muted column so a
                 member's uncredited time is visible without ever being added into a credited figure. */}
             <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Credited</th><th style={{ ...TH, textAlign: "right", color: FIRE.textMuted2 }}>Unverified</th><th style={{ ...TH, textAlign: "right" }}>Verified</th></tr></thead>
@@ -15964,9 +15992,9 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: vColor(dept_vpct) }}>{dept_vpct}%</td>
               </tr>
             </tbody>
-          </table>
+          </table></ScrollX>
         )}
-      </ScrollX>
+      </div>
       {/* ISO hours — the reportable number */}
       {/* This table is NOT a second opinion on "Hours by member" above; it is the same time counted
           correctly. dept_iso_hours unions each member's verified, CLOSED intervals so a minute that is
@@ -15975,7 +16003,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
           The explainer names both in plain words and labels the number neutrally, because a chief who
           spots a gap without an explanation will assume the report is broken, and a gap that was
           labelled "overlap" when it is partly boundary clipping is worse than no label at all. */}
-      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
+      <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ShieldAlert} title="ISO hours — no double-counting" style={{ marginBottom: 0 }} /></div>
         <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
           Every minute counted once — time that is both training and standby is credited to training only. Shifts are also clipped to the reporting period, so one that starts before it or runs past it counts only for the part inside. This is the per-member breakdown of the <b style={{ color: FIRE.textSecondary }}>Credited</b> figure above; the two agree exactly, because they are the same numbers.
@@ -15989,7 +16017,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             No ISO hours in this range yet. A shift counts only once it is <b style={{ color: FIRE.textSecondary }}>verified at the station</b> and <b style={{ color: FIRE.textSecondary }}>closed</b> — an open shift has no duration yet, so it is not zero hours, it is not yet countable.
           </div>
         ) : (
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+          <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead><tr><th style={TH}>Member</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
             <tbody>
               {/* order comes from the RPC (credited time desc, ties by name) — not re-sorted here */}
@@ -16008,7 +16036,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_total)}</td>
               </tr>
             </tbody>
-          </table>
+          </table></ScrollX>
         )}
         {/* Zero training with non-zero standby is the EXPECTED live state today, not a fault — say so,
             or it reads as a broken join. Only shown when there is data but no training in it. */}
@@ -16017,7 +16045,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             No training hours yet. A drill counts here once a member scans the QR <b style={{ color: FIRE.textSecondary }}>on site</b> (an off-site or location-denied scan still signs them in, but earns no clock) and an officer finalizes the session.
           </div>
         )}
-      </ScrollX>
+      </div>
       {/* ---- ISO BY HOUSE (E) ----
            THE TOTAL ABOVE STAYS THE HEADLINE. This is an enhancement beneath it, never a
            replacement: dept_iso_hours is untouched and is still where the reportable number
@@ -16038,12 +16066,12 @@ function StationHoursReport({ S, role, dept, notify, back }) {
 
            SUPPRESSED ENTIRELY FOR A SINGLE-STATION DEPARTMENT — see multiStation. */}
       {multiStation && isoByStation.length > 0 && (
-        <ScrollX style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
+        <div style={{ ...FS.cardNoir, padding: "8px 0", marginBottom: 14 }}>
           <div style={{ padding: "8px 12px 6px" }}><CardHead icon={Building2} title="ISO hours by house" style={{ marginBottom: 0 }} /></div>
           <div style={{ fontSize: 12.5, color: FIRE.textMuted, lineHeight: 1.5, padding: "0 12px 10px" }}>
             The same ISO total above, split across your houses. Every minute is counted once and lands in exactly one house, so these add up to the department total.
           </div>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+          <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead><tr><th style={TH}>House</th><th style={{ ...TH, textAlign: "right" }}>Training</th><th style={{ ...TH, textAlign: "right" }}>Standby</th><th style={{ ...TH, textAlign: "right" }}>ISO total</th></tr></thead>
             <tbody>
               {byHouse.map((h) => (
@@ -16068,11 +16096,11 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                 <td style={{ ...TD, textAlign: "right", ...FS.num, fontWeight: 700, color: FIRE.textPrimary }}>{h1(iso_total)}</td>
               </tr>
             </tbody>
-          </table>
-        </ScrollX>
+          </table></ScrollX>
+        </div>
       )}
       {/* shift log */}
-      <ScrollX style={{ ...FS.cardNoir, padding: "8px 0" }}>
+      <div style={{ ...FS.cardNoir, padding: "8px 0" }}>
         <div style={{ padding: "8px 12px 6px" }}><CardHead icon={ClipboardList} title="Shift log" style={{ marginBottom: 0 }} /></div>
         {/* Station filter, reusing the shipped all-houses idiom: ALL_STATIONS first and default,
             then each house, then Unassigned only when there is something in it. Chips rather than
@@ -16092,7 +16120,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
         {shifts.length === 0 ? (
           <div style={{ fontSize: 13.5, color: FIRE.textMuted, padding: "6px 12px 12px" }}>No shifts in this range.</div>
         ) : (<>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+          <ScrollX><table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
             <thead><tr><th style={TH}>Date</th><th style={TH}>Member</th>{multiStation && <th style={TH}>House</th>}<th style={TH}>In</th><th style={TH}>Out</th><th style={{ ...TH, textAlign: "right" }}>Hours</th><th style={TH}>Type</th><th style={TH}>Verified</th></tr></thead>
             <tbody>
               {log.map((s, i) => {
@@ -16129,7 +16157,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
                 );
               })}
             </tbody>
-          </table>
+          </table></ScrollX>
           {/* Counts the FILTERED set. Reading "showing 25 of 300" while a house filter is on
               would be describing a list the reader is not looking at. */}
           {shiftsForLog.length > LOG_CAP && (
@@ -16147,7 +16175,7 @@ function StationHoursReport({ S, role, dept, notify, back }) {
             </div>
           )}
         </>)}
-      </ScrollX>
+      </div>
       </NoirSkin>
     </PageShell>
   );
@@ -19282,9 +19310,12 @@ function HandoffModal({ items, notify, onClose }) {
           <div style={{ background: "#fff", padding: 12, borderRadius: 12, display: "inline-block" }}>
             <QRCodeCanvas value={url} size={196} />
           </div>
-          <div style={{ marginTop: 12, fontSize: 13, color: secs <= 10 ? FIRE.redText : FIRE.textSecondary, fontWeight: 700, ...FS.num }}>
-            Expires in {secs ?? Math.max(0, Math.round((new Date(st.expiresAt).getTime() - Date.now()) / 1000))}s
-          </div>
+          {/* One number for both the text and the tint: before the first tick secs is null, and null <= 10 is TRUE in JS —
+              that painted a fresh 120 s code red for one frame. */}
+          {(() => { const left = secs ?? Math.max(0, Math.round((new Date(st.expiresAt).getTime() - Date.now()) / 1000));
+            return <div data-giver-countdown style={{ marginTop: 12, fontSize: 13, color: left <= 10 ? FIRE.redText : FIRE.textSecondary, fontWeight: 700, ...FS.num }}>
+              Expires in {left}s
+            </div>; })()}
           <div style={{ marginTop: 4, fontSize: 11.5, color: FIRE.textMuted }}>
             Transferring: {items.map((i) => i.equipment_name).join(", ")}
           </div>
@@ -20983,7 +21014,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
               <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Owner</span>
                 <select style={FS.input} value={r.ownerId} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, ownerId: e.target.value } : x))}>
                   <option value="">Unassigned</option>
-                  {members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {pickable(members, r.ownerId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select></label>
               <label style={{ ...S.field, minWidth: 140 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due</span><input type="date" style={FS.input} value={r.due} onChange={(e) => setReview((rv) => rv.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} /></label>
             </div>
@@ -21544,6 +21575,7 @@ function Expirations({ S, role, members, meId, notify }) {
   const [err, setErr] = useState(false);
   const [tick, setTick] = useState(0);
   const [sending, setSending] = useState(false);
+  const [expNew, setExpNew] = useState(0);   // the empty-state CTA: bumps → ExpManage opens a new credential and scrolls to it
   const reload = () => setTick((t) => t + 1);
   useEffect(() => {
     if (!leader) return;
@@ -21585,16 +21617,23 @@ function Expirations({ S, role, members, meId, notify }) {
               </div>
             ))}
           </div>
-          <button onClick={sendReminders} disabled={sending} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: FIRE.redText, background: "rgba(200,50,58,.08)", border: "1px dashed rgba(200,50,58,.45)", borderRadius: 11, padding: 12, marginBottom: 6, cursor: sending ? "default" : "pointer" }}>
-            {sending ? <Loader2 size={16} className="spin" /> : <Bell size={16} />} Send reminders to flagged members{flaggedMembers ? ` · ${flaggedMembers}` : ""}
+          {/* A normal button (was a dashed red banner that read as an alarm). Disabled at zero, with the reason on hover
+              and in the label, instead of a tap that answers "nothing to send". */}
+          <button data-send-reminders onClick={sendReminders} disabled={sending || !flaggedMembers}
+            title={flaggedMembers ? undefined : "Nobody has anything expired or expiring soon — nothing to send."}
+            style={{ ...FS.btn, width: "100%", justifyContent: "center", padding: "10px 12px", marginBottom: 6, opacity: sending || !flaggedMembers ? 0.55 : 1, cursor: sending || !flaggedMembers ? "not-allowed" : "pointer" }}>
+            {sending ? <Loader2 size={15} className="spin" /> : <Bell size={15} color={FIRE.btnIcon} />} {flaggedMembers ? `Send reminders to flagged members · ${flaggedMembers}` : "Send reminders — nobody's flagged"}
           </button>
           <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", marginBottom: 18 }}>Push reaches members on app 2.2+ who turned notifications on; everyone else sees it in their B4C notifications.</div>
           {ranked.length === 0
-            ? <Card padding={16} style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 14 }}>Nothing's expiring — add credentials, gear and apparatus tests to track them.</Card>
+            ? <Card padding={16} style={{ fontSize: 13, color: FIRE.textMuted, marginBottom: 14 }} data-empty-expirations>
+                Nothing's tracked yet — add credentials, gear and apparatus tests and they'll show here before they lapse.
+                {ops && <div style={{ marginTop: 10 }}><button data-empty-cta style={FS.btnPrimary} onClick={() => setExpNew((n) => n + 1)}><Plus size={15} /> Add the first credential</button></div>}
+              </Card>
             : <ExpSections ranked={ranked} />}
           {err && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 10 }}>Couldn't refresh — showing what was last loaded.</div>}
         </>)}
-      {ops && <ExpManage members={members} meId={meId} notify={notify} onChanged={reload} />}
+      {ops && <ExpManage members={members} meId={meId} notify={notify} onChanged={reload} openNew={expNew} />}
       <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>This tracker keeps expiry dates, class and pass/fail only — never a license number or any medical detail. Uploaded proof files (certificates, cards) can be opened only by the member and department leaders.</div>
       </NoirSkin>
     </PageShell>
@@ -21602,7 +21641,7 @@ function Expirations({ S, role, members, meId, notify }) {
 }
 /* DA / Officer: add / edit / remove the records behind the list. Every write is an RPC; the database refuses anyone
    else and refuses a 5+ digit run in a label or class — that message is shown inline, never swallowed. */
-function ExpManage({ members, meId, notify, onChanged }) {
+function ExpManage({ members, meId, notify, onChanged, openNew = 0 }) {
   const [tab, setTab] = useState("cred");
   const [creds, setCreds] = useState(null); const [gear, setGear] = useState(null); const [tests, setTests] = useState(null);
   const [apparatus, setApparatus] = useState([]);
@@ -21643,8 +21682,16 @@ function ExpManage({ members, meId, notify, onChanged }) {
   const saveGear = () => call("set_gear_item", { p_id: form.id || null, p_member_id: nn(form.member_id), p_label: form.label, p_in_service_on: nn(form.in_service_on), p_last_inspected_on: nn(form.last_inspected_on), p_next_inspection_on: nn(form.next_inspection_on) }, form.id ? "Gear saved." : "Gear added.");
   const saveTest = () => call("set_apparatus_test", { p_id: form.id || null, p_apparatus_id: form.apparatus_id, p_test_type: form.test_type, p_tested_on: nn(form.tested_on), p_next_due_on: nn(form.next_due_on), p_result: form.result }, form.id ? "Test saved." : "Test recorded.");
   const tabs = [["cred", "Credentials"], ["gear", "Gear"], ["test", "Apparatus tests"]];
+  // The page's empty-state CTA: open a new credential here and bring it into view (0 = never asked).
+  const boxRef = useRef(null);
+  useEffect(() => {
+    if (!openNew) return;
+    setTab("cred"); setFormErr(""); setForm({ member_id: "", kind: "license", label: "", cls: "", issued_on: "", expires_on: "" });
+    boxRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [openNew]);
   return (
     <Card padding="12px 14px" style={{ marginTop: 6 }}>
+      <div ref={boxRef} style={{ scrollMarginTop: 12 }} />
       <CardHead icon={Pencil} title="Manage records" />
       <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>{tabs.map(([k, l]) => <button key={k} onClick={() => { setTab(k); setForm(null); setFormErr(""); }} style={{ ...small, borderColor: tab === k ? FIRE.redText : undefined, color: tab === k ? FIRE.textPrimary : undefined }}>{l}</button>)}</div>
       {tab === "cred" && (<>
@@ -22161,6 +22208,7 @@ function Qualifications({ S, role, members, meId, notify }) {
   const [drives, setDrives] = useState(null);
   const [apparatus, setApparatus] = useState([]);
   const [tick, setTick] = useState(0);
+  const [qualNew, setQualNew] = useState(0);              // the empty-state CTA: bumps → QualConfig opens a new type
   const [selType, setSelType] = useState(null);
   const reload = () => setTick((t) => t + 1);
   useEffect(() => {
@@ -22239,7 +22287,8 @@ function Qualifications({ S, role, members, meId, notify }) {
         <QualSection icon={Grid3x3} label="Qualification matrix" color="#6FD0E0" />
         {mxErr && !mx ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.amberText }}>Couldn't load the matrix. <button style={{ ...FS.btn, padding: "3px 9px", marginLeft: 6 }} onClick={reload}>Retry</button></Card>
           : mx === null ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>Loading…</Card>
-          : activeTypes.length === 0 ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }}>No qualifications set up yet.{configurer ? " Add your department's first one under Manage qualifications below." : " A Department Admin sets them up."}</Card>
+          : activeTypes.length === 0 ? <Card padding={14} style={{ marginBottom: 16, fontSize: 13, color: FIRE.textMuted }} data-empty-quals>No qualifications set up yet.{configurer ? " Driver / operator check-offs per apparatus, or positions like Interior or OIC." : " A Department Admin sets them up."}
+              {configurer && <div style={{ marginTop: 10 }}><button data-empty-cta style={FS.btnPrimary} onClick={() => setQualNew((n) => n + 1)}><Plus size={15} /> Add the first qualification</button></div>}</Card>
           : (<>
             <div style={{ display: "flex", gap: 14, margin: "0 2px 12px", fontSize: 10, color: FIRE.textMuted }}>{["qualified", "in_progress", "not_started"].map((k) => <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}><QualDot status={k} size={9} />{QUAL_DOT[k].label}</span>)}</div>
             <ScrollX style={{ ...FS.cardNoir, borderRadius: 14, padding: "4px 6px 6px", marginBottom: 19 }}>
@@ -22268,7 +22317,7 @@ function Qualifications({ S, role, members, meId, notify }) {
           </>)}
       </>)}
 
-      {configurer && <QualConfig types={types} apparatus={apparatus} notify={notify} onChanged={reload} />}
+      {configurer && <QualConfig types={types} apparatus={apparatus} notify={notify} onChanged={reload} openNew={qualNew} />}
       <div style={{ fontSize: 10.5, color: FIRE.textMuted, textAlign: "center", margin: "14px 0 4px" }}>Statuses, counts &amp; dates only — no license numbers or documents are stored here.</div>
       </NoirSkin>
     </PageShell>
@@ -22398,9 +22447,16 @@ function QualLogDrive({ types, members, meId, notify, onLogged }) {
 }
 /* DA / PA: the department's own list. Types are deactivated, never deleted. Kind + apparatus lock once used (the RPC
    says so). Retired rigs are left out of the picker; a type already on one keeps showing it. */
-function QualConfig({ types, apparatus, notify, onChanged }) {
+function QualConfig({ types, apparatus, notify, onChanged, openNew = 0 }) {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);   // a type row being edited, or { new: true }
+  // The page's empty-state CTA: open this section on a new type and bring it into view (0 = never asked).
+  const boxRef = useRef(null);
+  useEffect(() => {
+    if (!openNew) return;
+    setOpen(true); setEdit({ new: true, name: "", kind: "apparatus_driver", apparatus_id: null, threshold_drives: "", sort_order: (types || []).length + 1, active: true });
+    boxRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [openNew]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   useEditorOpen(!!edit);
   const live = apparatus.filter((a) => !a.deleted_at);
@@ -22419,6 +22475,7 @@ function QualConfig({ types, apparatus, notify, onChanged }) {
   const inp = { ...FS.input, padding: "6px 9px", fontSize: 12 };
   const lab = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: FIRE.textSecondary };
   return (<>
+    <div ref={boxRef} style={{ scrollMarginTop: 12 }} />
     <QualSection icon={Pencil} label="Manage qualifications" color={FIRE.textSecondary} right={<button style={{ ...FS.btn, padding: "3px 9px", fontSize: 11, textTransform: "none", letterSpacing: 0 }} onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Show"}</button>} />
     {open && (
       <Card padding="10px 14px" style={{ marginBottom: 14 }}>
@@ -23926,7 +23983,7 @@ function HandoffConfirm({ S, result, go, onAccept, onDecline }) {
             : (result?.reason || "Something went wrong.")}
         </p>
         {confirm && <>
-          <div style={{ marginTop: 6, fontSize: 12.5, color: secs <= 10 ? FIRE.redText : FIRE.textMuted, fontWeight: 700, ...FS.num }} data-handoff-countdown>Code expires in {secs}s</div>
+          <div style={{ marginTop: 6, fontSize: 12.5, color: secs != null && secs <= 10 ? FIRE.redText : FIRE.textMuted, fontWeight: 700, ...FS.num }} data-handoff-countdown>Code expires in {secs}s</div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}>
             <button style={FS.btnPrimary} onClick={onAccept}><CheckCircle2 size={16} /> Accept</button>
             <button style={FS.btn} onClick={onDecline}>Decline</button>
@@ -27561,7 +27618,7 @@ function StationDuties({ S, role, members, meId, notify }) {
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={editBuf.category} onChange={(e) => setEditBuf((b) => ({ ...b, category: e.target.value }))}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
                   {editBuf.category === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={editBuf.catNew} onChange={(e) => setEditBuf((b) => ({ ...b, catNew: e.target.value }))} /></label>}
                   <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={editBuf.recurrence} onChange={(e) => setEditBuf((b) => ({ ...b, recurrence: e.target.value }))}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-                  <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                  <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={editBuf.assignee} onChange={(e) => setEditBuf((b) => ({ ...b, assignee: e.target.value }))}><option value="">Station-wide (everyone)</option>{pickable(members, editBuf.assignee).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
                   <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={editBuf.due} onChange={(e) => setEditBuf((b) => ({ ...b, due: e.target.value }))} /></label>
                   <button style={FS.btnPrimary} onClick={() => saveEditDuty(a.id)}><CheckCircle2 size={15} /> Save</button>
                   <button style={FS.btn} onClick={() => setEditingDutyId(null)}>Cancel</button>
@@ -27641,7 +27698,7 @@ function StationDuties({ S, role, members, meId, notify }) {
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Category</span><select style={FS.input} value={acat} onChange={(e) => setAcat(e.target.value)}>{allCats.map((c) => <option key={c} value={c}>{c}</option>)}<option value="__new__">+ New category…</option></select></label>
           {acat === "__new__" && <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>New category name</span><input style={FS.input} value={acatNew} placeholder="e.g. Fundraising" onChange={(e) => setAcatNew(e.target.value)} /></label>}
           <label style={{ ...S.field, minWidth: 130 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Recurs</span><select style={FS.input} value={arec} onChange={(e) => setArec(e.target.value)}>{RECUR.map((r) => <option key={r}>{r}</option>)}</select></label>
-          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{members.filter(isAssignable).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+          <label style={{ ...S.field, minWidth: 160 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Assign to</span><select style={FS.input} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Station-wide (everyone)</option>{pickable(members).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
           <label style={{ ...S.field, minWidth: 150 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Due date (optional)</span><input type="date" style={FS.input} value={due} onChange={(e) => setDue(e.target.value)} /></label>
           <button style={FS.btnPrimary} onClick={addDuty}><Plus size={15} /> Add to checklist</button>
           <button style={FS.btn} onClick={() => setAddingA(false)}>Cancel</button>
@@ -28519,6 +28576,10 @@ function ResendLink({ email, notify }) {
     return () => clearTimeout(t);
   }, [cooldown]);
   async function send() {
+    // A light confirm, not the typed-phrase delete gate: every send spends one of the project's hourly auth emails
+    // (the ceiling every member's sign-in shares), so a stray tap shouldn't cost one.
+    const to = normalizeLoginEmail(email);
+    if (!(await noirConfirm({ title: `Email a sign-in link to ${to}?`, body: "It uses one of this hour's sign-in emails, which everyone's login shares.", confirmLabel: "Send link" }))) return;
     setBusy(true);
     const { error } = await sendInvite(email);         // /api/invite: trims + lowercases; DA (own roster) or PA (a DA) path
     setBusy(false);
