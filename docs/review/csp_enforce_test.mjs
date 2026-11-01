@@ -13,8 +13,9 @@ import { fileURLToPath } from "url";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "d377999";   // live main when this was drafted (industrial-noir-54)
-// REV is the working tree until review; pin it to the reviewed commit in the promote push.
-const REV = process.env.REV || null;
+// Structural fences PINNED to the reviewed range: base d377999 .. reviewed b6bb821 — "vs the working tree" would go red once
+// later work lands. REV=<sha> (or REV="" for the working tree) overrides.
+const REV = process.env.REV ?? "b6bb821";
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const base = JSON.parse(show(BASE, "vercel.json")), cur = JSON.parse(show(REV, "vercel.json"));
 const all = (v) => v.headers.flatMap((b) => b.headers.map((h) => ({ src: b.source, ...h })));
