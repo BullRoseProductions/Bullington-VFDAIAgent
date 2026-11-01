@@ -20,6 +20,13 @@ import { createRequire } from "module";
 import { execSync } from "child_process";
 import { pathToFileURL, fileURLToPath } from "url";
 import { build } from "esbuild";
+// A PINNED CLOCK — the 15th of the current month at noon, local. The Training page shows the CURRENT month, and the fixture
+// needs a finished drill in it (three days back) plus a different earlier day to correct it to. On the 1st–3rd of a month no
+// such day exists, which is why this test went red at every month start (it clamped with max(1, getDate() - 3)). Every
+// new Date() / Date.now() — the fixture's and the bundled app's — reads this instant; the day arithmetic below is real.
+const RealDate = Date;
+const PINNED = new RealDate(new RealDate().getFullYear(), new RealDate().getMonth(), 15, 12, 0, 0).getTime();
+globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [PINNED])); } static now() { return PINNED; } };
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -72,12 +79,18 @@ const { Training, createRoot, act, React } = await import(pathToFileURL(out).hre
 
 // ---- fixtures: one finalized + attended drill, one open drill with a start time (for Complete), this month
 const now = new Date(), Y = now.getFullYear(), M = now.getMonth();
-const dDone = Math.max(1, now.getDate() - 3), dOpen = now.getDate();
 const pad = (n) => String(n).padStart(2, "0");
+// The finished drill is three days ago by REAL date math — it may fall in last month (and year). It used to be
+// max(1, getDate() - 3), which on the 1st put it on today's open session's day and made the correction below a no-op.
+const done = new Date(Y, M, now.getDate() - 3);
+const DY = done.getFullYear(), DM = done.getMonth(), dDone = done.getDate(), dOpen = now.getDate();
+// Where the correction moves it: the day before — always a real change from dDone, always in the past (never a fixed day).
+const moveTo = new Date(DY, DM, dDone - 1);
+const MOVE_TO = `${moveTo.getFullYear()}-${pad(moveTo.getMonth() + 1)}-${pad(moveTo.getDate())}`;
 const sess = (id, title, extra = {}) => ({ id, title, y: Y, m: M, d: dOpen, done: false, plans: [], attendance: [], signinOpen: false, audience: "everyone",
   planId: null, startTime: "19:00:00", durationMin: 120, countsAttendance: true, isMeeting: false, isOffsite: false, locLabel: "", ...extra });
 const SESS = () => [
-  sess("sd", "Hose drill", { d: dDone, done: true, attendance: ["m-1", "m-2"], planId: "c1" }),
+  sess("sd", "Hose drill", { y: DY, m: DM, d: dDone, done: true, attendance: ["m-1", "m-2"], planId: "c1" }),
   sess("so", "Ladder night", { durationMin: null, attendance: ["m-1"] }),
 ];
 const CATS = [{ id: "c1", name: "Hose Ops", cadence: "Monthly", color: "#C0392B", lastISO: null }];
@@ -137,7 +150,7 @@ async function editMode() { const b = btn(host, "Edit sessions"); if (b) { await
   const panel = row("sd").querySelector('[data-testid="correct-panel"]');
   const title = panel?.querySelector("input:not([type])"), date = panel?.querySelector('input[type="date"]'), len = panel?.querySelector('input[type="number"]');
   ok("the form opens pre-filled (title, date, length) with the roll ticked as recorded",
-    title?.value === "Hose drill" && date?.value === `${Y}-${pad(M + 1)}-${pad(dDone)}` && len?.value === "120"
+    title?.value === "Hose drill" && date?.value === `${DY}-${pad(DM + 1)}-${pad(dDone)}` && len?.value === "120"
     && [...panel.querySelectorAll('input[type="checkbox"]')].filter((c) => c.checked).length >= 2, JSON.stringify([title?.value, date?.value, len?.value]));
   await setVal(title, "Hose drill (corrected)", win.HTMLInputElement); await setVal(len, "90", win.HTMLInputElement);
   const box = (name) => [...panel.querySelectorAll("label")].find((l) => norm(l.textContent) === name)?.querySelector('input[type="checkbox"]');
@@ -164,7 +177,7 @@ for (const [code, msg, re] of [
   const { unmount } = await mount(["Member"], true, "m-tom");
   await editMode(); await click(btn(row("sd"), /^Correct…$/)); await tick();
   const panel = row("sd").querySelector('[data-testid="correct-panel"]');
-  await setVal(panel.querySelector('input[type="date"]'), `${Y}-${pad(M + 1)}-01`, win.HTMLInputElement);
+  await setVal(panel.querySelector('input[type="date"]'), MOVE_TO, win.HTMLInputElement);
   await setVal(panel.querySelector('[data-testid="correct-reason"]'), "Moving it to the night it ran", win.HTMLTextAreaElement);
   globalThis.__sb.fail.correct_training_session = msg;
   await click(btn(panel, /Save correction/)); await tick(); await tick();
@@ -236,7 +249,7 @@ for (const [code, msg, re] of [
 // 5 — the no-length notice routes length fixes through a logged correction. Since the Oct 27 one-tap fix
 //     (claude/B4C_NoLengthCard_OneTapFix_BuildOrder.md) it's inline — a minutes box + Save on the card — instead of a detour
 //     into Correct…; the invariant this section guards is unchanged: correct_training_session, duration_min only.
-{ const { unmount } = await mount(["Department Admin"], false, "m-ada", [...SESS(), sess("sn", "Pump drill", { d: dDone, done: true, durationMin: null, attendance: ["m-1"] })]);
+{ const { unmount } = await mount(["Department Admin"], false, "m-ada", [...SESS(), sess("sn", "Pump drill", { y: DY, m: DM, d: dDone, done: true, durationMin: null, attendance: ["m-1"] })]);
   await click(btn(host, /1 finished drill with no length recorded/)); await tick();
   const nr = [...host.querySelectorAll('[data-testid="nolen-row"]')].find((x) => /Pump drill/.test(x.textContent));
   ok("the no-length notice lists the drill with an inline minutes box + Save (an officer)", !!nr?.querySelector('input[type="number"]') && !!btn(nr, "Save"));
