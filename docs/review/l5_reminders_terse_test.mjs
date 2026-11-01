@@ -18,8 +18,9 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "5b26d28";   // live main when this was drafted (industrial-noir-57)
-// REV is the working tree until review; pin it to the reviewed commit in the promote push.
-const REV = process.env.REV || null;
+// Structural fences PINNED to the reviewed range: base 5b26d28 .. reviewed 606f9b7 — "vs the working tree" would go red once
+// later work lands. REV=<sha> (or REV="" for the working tree) overrides. The handler comparison runs on today's code vs BASE.
+const REV = process.env.REV ?? "606f9b7";
 const SVC = "svc-KEY-never-in-a-body";
 Object.assign(process.env, { PUSH_ENABLED: "1", SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: SVC, SUPABASE_ANON_KEY: "anon-test" });
 
