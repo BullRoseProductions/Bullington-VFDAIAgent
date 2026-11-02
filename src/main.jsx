@@ -5,6 +5,7 @@ import Login from "./Login.jsx";
 import { supabase } from "./supabaseClient";
 import { SetNewPassword } from "./SetPassword.jsx";
 import { capturePendingScan } from "./pendingScan";
+import { capturePendingPath } from "./router";
 import { markBundleHealthy, watchLiveUpdates } from "./liveUpdate";
 import { startUpdateWatch } from "./appUpdate";
 import { DestructiveConfirmHost } from "./ConfirmDestructive.jsx";
@@ -37,6 +38,12 @@ const IS_RECOVERY =
  * same-tab path keeps working exactly as it does today. See src/pendingScan.js for the TTL, the
  * consume-once rule, and why this is localStorage rather than sessionStorage. */
 capturePendingScan(typeof window !== "undefined" ? window.location.search : "");
+
+/* ---------------- The deep URL, held across the magic-link round-trip (routing R1) ----------------
+ * Same structural reason as the scan above: someone signed out opens /reports, the gate shows <Login/>, and a magic link
+ * returns to the bare APP_URL. Captured here from the PATHNAME only (never the hash: the auth tokens live there), and
+ * consumed once by App on its first mount. See src/router.js. */
+capturePendingPath(typeof window !== "undefined" ? window.location.pathname : "/");
 
 /* ---------------- New builds, picked up without a refresh (web) ----------------
  * Replaces the old stale-bundle guard that lived here (cold-start reload + an "Update now" bar). Same detector —

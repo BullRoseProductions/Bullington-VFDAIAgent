@@ -116,6 +116,10 @@
     {
       "source": "/handoff",
       "destination": "/index.html"
+    },
+    {
+      "source": "/((?!api/|assets/|\\.well-known/)[^.]*)",
+      "destination": "/index.html"
     }
   ]
 }

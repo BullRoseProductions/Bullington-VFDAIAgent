@@ -29,12 +29,13 @@ import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
 import { supabase, APP_ORIGIN, setOnSessionExpired } from "./supabaseClient";
-import { consumePendingScan } from "./pendingScan";
+import { consumePendingScan, readFreshPendingScan, parseScan } from "./pendingScan";
 import { saveOrShare, saveOrShareText, setShareNotifier } from "./share";
 import { safeHref } from "./safeHref.js";   // M-2: every user-supplied link passes one scheme allowlist (http/https/mailto/tel)
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
-import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk } from "./appUpdate";
+import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk, updateReady } from "./appUpdate";
+import { pathFor, parsePath, isOneShotPath, pushRoute, replaceRoute, saveOutgoingScroll, scrollMainTo, restoreMainScroll, consumePendingPath } from "./router";
 import { RESEND_COOLDOWN, sendInvite, normalizeLoginEmail } from "./authLinks";
 import { fmtPhone } from "./phone.js";
 // PDF text-extraction worker URL. Vite `?url` resolves to just a string (the worker asset is emitted separately and
@@ -2425,10 +2426,27 @@ export default function App() {
     const r = takeRestoredPlace();
     return deepLink || !r || !r.screen || r.screen === "checkin" || r.screen === "handoff" ? null : r;
   };
-  const [screen, setScreen] = useState(() => bootPlace()?.screen || "dashboard");
-  useEffect(() => { if (screen === "ai") setScreen("training"); }, [screen]);   // retired AI Training page → redirect any stale deep-link
-  const [packetId, setPacketId] = useState(() => bootPlace()?.packetId ?? null);
-  const [navArg, setNavArg] = useState(() => bootPlace()?.navArg ?? null);
+  /* WHERE TO START (routing R1). The ADDRESS BAR decides the screen: it's what a refresh, a shared link or a typed URL
+     means. go() writes the destination URL before an app-update boundary reload, so after such a reload the URL and the
+     restored place agree, and the restored place then supplies that screen's extras (packet, navArg). If they disagree
+     (a URL typed into this tab within the restore window), the URL is the newer intent and wins. An unknown or one-shot
+     path (/checkin, /handoff: routeDeepLink's) falls back to the restored place, then the dashboard. The history entry's
+     own state carries navArg across a refresh or Back (it never goes in the URL). */
+  const [boot] = useState(() => {
+    const r = bootPlace();
+    const u = typeof window !== "undefined" ? parsePath(window.location.pathname) : null;
+    const st = typeof window !== "undefined" && window.history?.state && typeof window.history.state === "object" ? window.history.state : null;
+    if (!u) return { screen: r?.screen || "dashboard", packetId: r?.packetId ?? null, navArg: r?.navArg ?? null };
+    const same = r && r.screen === u.screen;
+    return { screen: u.screen, packetId: u.packetId ?? (same ? r.packetId ?? null : null),
+             navArg: st && st.screen === u.screen && "navArg" in st ? st.navArg ?? null : same ? r.navArg ?? null : null };
+  });
+  const [screen, setScreen] = useState(boot.screen);
+  const navModeRef = useRef("init");   // how the next screen change meets the address bar: "init" | "push" | "replace" | "none"
+  const replaceNextRef = useRef(false);   // the next write to a DIFFERENT path replaces (the pending path's landing)
+  useEffect(() => { if (screen === "ai") { navModeRef.current = "replace"; setScreen("training"); } }, [screen]);   // retired AI Training page → redirect any stale deep-link
+  const [packetId, setPacketId] = useState(boot.packetId);
+  const [navArg, setNavArg] = useState(boot.navArg);
   /* The Ask B4C side panel. Its open state, conversation and half-typed question ride along with the saved place
      (src/appUpdate.js), so an auto-update or a manual refresh reopens it as it was instead of closing it and wiping the
      chat. Forgotten on sign-out (clearPlaceGetter). */
@@ -2862,6 +2880,17 @@ export default function App() {
 
      So: spend it unconditionally, then let the URL win the ROUTING. If both are present they are
      the same scan anyway; if they somehow differ, the address bar is the more recent intent. */
+  /* THE PENDING PATH (router.js): a deep URL carried across the magic-link round-trip. Spent on first mount whatever
+     happens; acted on only when we landed on "/" and no QR scan is in play (the scan always wins). Declared BEFORE the
+     scan replay below on purpose: effects run in order, and this must see a stashed scan before that effect spends it. */
+  useEffect(() => {
+    const p = consumePendingPath();
+    if (!p || window.location.pathname !== "/" || parseScan(window.location.search) || readFreshPendingScan()) return;
+    const u = parsePath(p);
+    if (!u || u.screen === "dashboard") return;
+    replaceNextRef.current = true;   // land there without a Back step to an empty dashboard
+    setScreen(u.screen); setPacketId(u.packetId ?? null); setNavArg(null);
+  }, []);
   /* eslint-disable-next-line react-hooks/exhaustive-deps */
   useEffect(() => {
     const scan = consumePendingScan();                   // spend it on first mount, whichever path delivered the code
@@ -2970,9 +2999,62 @@ export default function App() {
     // (the boundary swap carries the panel too, so it reopens on the destination screen)
     // A newer build is waiting and nothing is unsaved or in flight: they're leaving this view anyway, so reload
     // straight onto the screen they're heading to (src/appUpdate.js). Otherwise navigate as always.
+    // Routing R1: the reload lands on the URL, so point it at the destination first; put it back if no reload happens.
+    const dest = pathFor(k);
+    const before = updateReady() && dest ? { state: window.history.state, url: window.location.pathname + window.location.search + window.location.hash } : null;
+    if (before) replaceRoute(dest, { screen: k, packetId: null, navArg: arg ?? null });
     if (applyAtBoundary({ screen: k, navArg: arg ?? null, packetId: null, ask: placeRef.current?.ask ?? null })) return;
+    if (before) { try { window.history.replaceState(before.state, "", before.url); } catch { /* best-effort */ } }
+    saveOutgoingScroll();
     setScreen(k); setPacketId(null); setDrawer(false); setNavArg(arg ?? null);
   }
+  /* ---- ROUTING R1: the address bar follows the screen ----
+     A screen change PUSHES a history entry (Back walks screens); tab switches inside a screen don't route at all in R1,
+     so they never add one. REPLACE (no Back step) for: the first render, redirects (retired "ai", a disabled module, a
+     missing packet, the role guard), View-as, a pending path, the same path with new state, and leaving a one-shot
+     check-in / handoff screen (Back must never land on a spent code). "none" = popstate already moved the bar.
+     /checkin and /handoff are never written here: routeDeepLink owns them. The hash is never touched (router.js). */
+  const [routeTick, setRouteTick] = useState(0);   // lets a popstate to the SAME screen still reset the mode
+  const prevScreenRef = useRef(screen);
+  const popScrollRef = useRef(null);
+  useEffect(() => {
+    const mode = navModeRef.current; navModeRef.current = "push";
+    const prev = prevScreenRef.current; prevScreenRef.current = screen;
+    if (mode === "none") { if (popScrollRef.current != null) { const y = popScrollRef.current; popScrollRef.current = null; restoreMainScroll(y); } return; }
+    if (screen === "checkin" || screen === "handoff") return;
+    const here = window.location.pathname;
+    if (mode === "init" && isOneShotPath(here)) return;            // a fresh /checkin or /handoff load: routeDeepLink's turn
+    const path = pathFor(screen, { packetId });
+    if (!path) return;
+    const st = { screen, packetId, navArg };
+    const leavingOneShot = prev === "checkin" || prev === "handoff" || isOneShotPath(here);
+    const forced = replaceNextRef.current && path !== here;
+    if (forced) replaceNextRef.current = false;
+    if (mode === "init" || mode === "replace" || forced || leavingOneShot || path === here) replaceRoute(path, st);
+    else { pushRoute(path, st); scrollMainTo(0); }
+  }, [screen, packetId, navArg, routeTick]);
+  // Back / Forward: the URL has already moved; bring the screen (and its scroll) to it without pushing again.
+  useEffect(() => {
+    const onPop = (e) => {
+      const st = e.state && typeof e.state === "object" ? e.state : null;
+      const u = parsePath(window.location.pathname);
+      navModeRef.current = u ? "none" : "replace";                 // a spent /checkin or an unknown path → "/" (replaced)
+      popScrollRef.current = u ? (st && typeof st.scroll === "number" ? st.scroll : 0) : null;
+      setScreen(u ? u.screen : "dashboard");
+      setPacketId(u ? u.packetId ?? null : null);
+      setNavArg(u && st && st.screen === u.screen ? st.navArg ?? null : null);
+      setDrawer(false);
+      setRouteTick((n) => n + 1);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  // Sign-out lands the tab on "/" with no Back step, so whoever signs in next doesn't start on the last person's screen.
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => { if (event === "SIGNED_OUT") replaceRoute("/", { screen: "dashboard", packetId: null, navArg: null }); });
+    return () => sub?.subscription?.unsubscribe?.();
+  }, []);
+
   // Native push registration — once we know which member is signed in, so the device token is filed
   // against the right person. No-op on web and while VITE_PUSH_ENABLED is off. Tapping a push opens
   // the inbox rather than deep-linking to the subject: the inbox is the one destination we control.
@@ -3182,7 +3264,7 @@ export default function App() {
       }
     })();
   });
-  function openPacket(id) { setPacketId(id); setScreen("packet"); setDrawer(false); }
+  function openPacket(id) { saveOutgoingScroll(); setPacketId(id); setScreen("packet"); setDrawer(false); }
   // Trim to the oversight+support surface ONLY when the ACTIVE role is exactly Project Admin
   // (nothing else). Every other role — and a PA who is viewing-as/also-holding another role —
   // falls through to the unchanged hasAny filter.
@@ -3199,11 +3281,23 @@ export default function App() {
   // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
   // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
   // redirect at the top of the component.
-  useEffect(() => { if (!moduleEnabled(screen, disabledModules)) setScreen("dashboard"); }, [screen, dept]);
+  useEffect(() => { if (!moduleEnabled(screen, disabledModules)) { navModeRef.current = "replace"; setScreen("dashboard"); } }, [screen, dept]);
+  /* THE ROLE GUARD (routing R1). A typed or shared URL can name a screen this role's sidebar never offers. Bounce it to
+     "/" (replaced). IT WAITS FOR IDENTITY: role is ["Member"] until the identity read lands, so a guard that ran earlier
+     would bounce a Department Admin's cold /reports. Equipment (equipment managers load after identity) and Read & Sign
+     (in the menu only while something is outstanding) aren't bounced; both screens already show the right view to
+     anyone. Module toggles stay with the redirect above. */
+  useEffect(() => {
+    if (!identityChecked || screen === "checkin" || screen === "handoff") return;
+    const k = SCREEN_PARENT[screen] || screen;
+    const ok = k === "dashboard" || k === "notifications" || k === "equipment" || k === "readsign"
+      || (isProjectAdminOnly ? PA_NAV.includes(k) : NAV.some((n) => n.key === k && hasAny(role, n.roles)));
+    if (!ok) { navModeRef.current = "replace"; setScreen("dashboard"); setPacketId(null); setNavArg(null); }
+  }, [screen, role, identityChecked]);   // eslint-disable-line react-hooks/exhaustive-deps
   const packet = library.find((p) => p.id === packetId);
   // A restored place can name a packet the catalog no longer has (the old hard-coded ids like "fire-203", or a withdrawn
   // drill). Once the catalog has loaded, fall back to the Library instead of a blank screen.
-  useEffect(() => { if (screen === "packet" && lib.loaded && !packet) setScreen("library"); }, [screen, lib.loaded, packet]);
+  useEffect(() => { if (screen === "packet" && lib.loaded && !packet) { navModeRef.current = "replace"; setScreen("library"); } }, [screen, lib.loaded, packet]);
 
   // Signed in, confirmed on no roster: the one screen, not an empty shell (every hook above has already run).
   if (memberless) return <NotAttached email={authEmail} />;
@@ -3257,7 +3351,7 @@ export default function App() {
         </div>
       </aside>
 
-      <div style={S.main} data-b4c-scroll="main">{/* the app's scroller — src/appUpdate.js saves + restores its position */}
+      <div style={S.main} data-b4c-scroll="main" data-b4c-screen={screen}>{/* the app's scroller — src/appUpdate.js saves + restores its position */}
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
@@ -3267,7 +3361,7 @@ export default function App() {
             {isLeader(realRole) && realRole.length > 1 && (
               <>
                 <span style={S.viewAsLabel}>View as</span>
-                <select value={role.length === realRole.length ? "__all__" : (role[0] || "")} onChange={(e) => { setRole(e.target.value === "__all__" ? [...realRole] : [e.target.value]); setScreen("dashboard"); }} style={S.select}>
+                <select value={role.length === realRole.length ? "__all__" : (role[0] || "")} onChange={(e) => { setRole(e.target.value === "__all__" ? [...realRole] : [e.target.value]); navModeRef.current = "replace"; setScreen("dashboard"); setNavArg(null); setPacketId(null); }} style={S.select}>
                   <option value="__all__">All my roles</option>
                   {realRole.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
