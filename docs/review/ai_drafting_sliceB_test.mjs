@@ -310,8 +310,13 @@ ok("AIDrillPlanner: untouched by Slice B (aed762f vs its parent)", fn(rel, "AIDr
 ok("AIDrillPlanner: Training Officers (2a94baa) = its parent's with exactly the canManageTraining gate swap; here = 2a94baa's",
   AIDP_SWAP.every(([a]) => aidpToParent.split(a).length === 2) && AIDP_SWAP.reduce((s, [a, b]) => s.replace(a, () => b), aidpToParent) === aidpTo
   && aidpSrc === aidpTo && !aidpSrc.includes("CANMANAGE_OPS_ROLES") && aidpSrc.length > 1000);
-ok("serializeDrillPlan + AiPlanViewer: untouched by Slice B (aed762f vs its parent); here = aed762f's",
-  ["serializeDrillPlan", "AiPlanViewer"].every((f) => fn(rel, f) === fn(relParent, f) && fn(src, f) === fn(rel, f)));
+// AiPlanViewer re-ruled by the sidebar + AI-framing slice (off 2f1bf9a): its long DISCLAIMER paragraph became the one-line
+// AI note, and NOTHING else in it moved. serializeDrillPlan stays exactly aed762f's.
+const AIPV_SWAP = ["<Disclaimer S={S} compact dark />", "<AiNote />"];
+ok("serializeDrillPlan + AiPlanViewer: untouched by Slice B (aed762f vs its parent); here = aed762f's (AiPlanViewer: + only the AI-note swap)",
+  ["serializeDrillPlan", "AiPlanViewer"].every((f) => fn(rel, f) === fn(relParent, f))
+  && fn(src, "serializeDrillPlan") === fn(rel, "serializeDrillPlan")
+  && fn(rel, "AiPlanViewer").split(AIPV_SWAP[0]).length === 2 && fn(src, "AiPlanViewer") === fn(rel, "AiPlanViewer").replace(AIPV_SWAP[0], () => AIPV_SWAP[1]));
 const rpcSet = (s) => new Set([...(s.match(/supabase\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(14, -1)), ...[...s.matchAll(/\bact\("[a-z]+", "([a-z_]+)"/g)].map((m) => m[1])]);
 const added = [...rpcSet(rel)].filter((n) => !rpcSet(relParent).has(n)).sort();
 // The six Slice A RPCs: the only RPCs Slice B (aed762f) added vs its parent, and all still called today. (The Training
