@@ -1,6 +1,13 @@
+// node docs/review/assistant_e2e_test.mjs — no network, no DB. Ask B4C (/api/assistant) end to end with fetch faked.
+// MOVED from tests/assistant.e2e.test.mjs (outside the suite loop, so nobody saw it go stale): WS-2 added the per-member
+// DAILY cap (chargeAiCall → record_ai_call) ahead of the monthly ceiling, and this file had no fake for it, so every call
+// got 503 "Couldn't check today's AI limit" and the model was never reached. Now: the record_ai_call fake, the original
+// 15 checks unchanged, and the cap's ordering — applied BEFORE the model call (and before the monthly meter), and a
+// refusal or a failed cap read never reaches the model.
 process.env.ANTHROPIC_API_KEY = "test-key"; process.env.SUPABASE_URL = "https://sb.test"; process.env.SUPABASE_ANON_KEY = "anon";
 const JWT = "member-jwt";
 const log = []; let anthropicCalls = 0; let script = []; let limitHit = false;
+let capReply = () => json({ allowed: true, scope: "member", used: 3, ceiling: 60 });   // record_ai_call (WS-2 daily cap)
 const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); const method = (init.method || "GET").toUpperCase();
@@ -8,6 +15,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (url.startsWith("https://api.anthropic.com")) { anthropicCalls++; const body = JSON.parse(init.body); log.push({ anthropic: true, tools: body.tools.map(t => t.name), lastMsg: body.messages.at(-1) }); return json(script.shift()); }
   log.push({ url: url.replace("https://sb.test", ""), method, auth });
   if (url.includes("/auth/v1/user")) return json({ id: "u1", email: "m@x" });
+  if (url.includes("/rpc/record_ai_call")) { log.at(-1).body = init.body; return capReply(); }
   if (url.includes("/rpc/record_assistant_turn")) return json(limitHit ? { allowed: false, used: 500, ceiling: 500 } : { allowed: true, used: 7, ceiling: 500 });
   if (url.includes("/rpc/my_member_id")) return json("mem-1");
   if (url.includes("/rpc/my_department_id")) return json("dept-1");
@@ -20,10 +28,10 @@ globalThis.fetch = async (url, init = {}) => {
   if (url.includes("/rest/v1/cert_submissions")) return json([]);
   return json({ message: "unmocked " + url }, 404);
 };
-const { default: handler } = await import("../api/assistant.js");
+const { default: handler } = await import("../../api/assistant.js");
 const call = async (messages) => { let out = { status: 200 }; const res = { setHeader() {}, status(s) { out.status = s; return res; }, json(o) { out.body = o; return res; }, end() { return res; } };
   await handler({ method: "POST", headers: { authorization: `Bearer ${JWT}`, origin: "https://app.b4thecall.com" }, body: { messages } }, res); return out; };
-const check = (ok, m) => console.log(ok ? "PASS" : "FAIL", m);
+const check = (ok, m) => { console.log(ok ? "PASS" : "FAIL", m); if (!ok) process.exitCode = 1; };
 
 // 1. hours + certs question: model calls two tools, then answers
 script = [
@@ -73,7 +81,25 @@ limitHit = false;
 log.length = 0; anthropicCalls = 0;
 let o = {}; const res = { setHeader() {}, status(s) { o.s = s; return res; }, json(b) { o.b = b; return res; }, end() { return res; } };
 await handler({ method: "POST", headers: {}, body: { messages: [{ role: "user", content: "x" }] } }, res);
-check(o.s === 401 && anthropicCalls === 0 && !log.some(l => l.url?.includes("record_assistant_turn")), "no session -> 401, no meter, no model");
+check(o.s === 401 && anthropicCalls === 0 && !log.some(l => l.url?.includes("record_assistant_turn") || l.url?.includes("record_ai_call")), "no session -> 401, no meter, no model");
 // 5. history must end on a user turn
 o = {}; await handler({ method: "POST", headers: { authorization: `Bearer ${JWT}` }, body: { messages: [{ role: "assistant", content: "x" }] } }, res);
 check(o.s === 400, "bad history -> 400");
+
+// 6. NEW — the per-member daily cap (WS-2) is applied BEFORE the model call
+log.length = 0; anthropicCalls = 0;
+script = [{ stop_reason: "end_turn", content: [{ type: "text", text: "Hello." }] }];
+r = await call([{ role: "user", content: "hi" }]);
+const iCap = log.findIndex(l => l.url?.includes("/rpc/record_ai_call")), iTurn = log.findIndex(l => l.url?.includes("/rpc/record_assistant_turn")), iModel = log.findIndex(l => l.anthropic);
+check(r.status === 200 && iCap >= 0 && iCap < iModel && iCap < iTurn && JSON.parse(log[iCap].body).p_route === "assistant" && log[iCap].auth === `Bearer ${JWT}`,
+  "cap: record_ai_call({ p_route: \"assistant\" }) runs as the caller BEFORE the model call (and before the monthly meter)");
+for (const [label, reply, status] of [["refused", () => json({ allowed: false, scope: "member", used: 60, ceiling: 60 }), 429],
+                                      ["RPC error", () => json({ message: "function record_ai_call does not exist" }, 404), 503]]) {
+  log.length = 0; anthropicCalls = 0; capReply = reply;
+  script = [{ stop_reason: "end_turn", content: [{ type: "text", text: "should never be sent" }] }];
+  r = await call([{ role: "user", content: "hi" }]);
+  check(r.status === status && anthropicCalls === 0 && !log.some(l => l.url?.includes("record_assistant_turn")),
+    `cap ${label} -> ${status}, the model is never called, the monthly meter isn't touched`);
+}
+capReply = () => json({ allowed: true, scope: "member", used: 3, ceiling: 60 });
+process.exit(process.exitCode || 0);
