@@ -24,7 +24,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "2f1bf9a";   // live main when this was drafted (industrial-noir-63, routing R1)
-const REV = process.env.REV || null;   // the working tree until review; pin it in the promote push
+const REV = process.env.REV ?? "7966874";   // pinned to the reviewed range 2f1bf9a..7966874 (gate PASS @7966874)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 
 const depDir = process.env.HAPPY_DOM_DIR || root;
