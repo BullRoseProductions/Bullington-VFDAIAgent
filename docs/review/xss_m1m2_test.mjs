@@ -217,6 +217,7 @@ const CLASS = [   // [expression pattern, why it is safe]
   [/^`(tel|sms):\$\{telDigits\([\w.]+\)\}`$/, "app-built: fixed scheme, digits-only payload"],
   [/^`mailto:\$\{SUPPORT_EMAIL\}`$/, "constant"],
   [/^GEOFENCE_DISCLOSURE\.policy\.href$/, "constant https literal"],
+  [/^AI_POLICY_URL$/, "constant https literal (the AI note's \"How we use AI\" link; pinned below)"],
   [/^url$/, "DocViewer: a Supabase signed URL (every caller pinned below)"],
   [/^donate$/, "safeHref(c.external_url)"],
 ];
@@ -229,6 +230,7 @@ ok("pin: ResourceActions' links — website and email go through safeHref, tel/s
   && /const web = safeHref\(r\.website\);/.test(SRC) && /const mail = r\.email \? safeHref\(`mailto:\$\{r\.email\}`\) : null;/.test(SRC), JSON.stringify(bCalls));
 ok("pin: the Donate link is safeHref(c.external_url); no stored URL field reaches an href raw",
   /const donate = safeHref\(c\.external_url\);/.test(SRC) && !/href=\{\s*(r|c|row|item|res|campaign)\.[\w.]+\s*\}/.test(SRC) && !/b\(r\.website/.test(SRC) && !/\bhref:\s*(r|c)\.\w+/.test(SRC));
+ok("pin: AI_POLICY_URL is a b4thecall.com https literal", /\nconst AI_POLICY_URL = "https:\/\/b4thecall\.com\/[^"]+";/.test(SRC));
 ok("pin: LEGAL and GEOFENCE_DISCLOSURE hrefs are https literals", [...SRC.matchAll(/\{ label: "[^"]+", href: "([^"]+)"/g)].every((m) => /^https:\/\/b4thecall\.com\//.test(m[1])) && /policy: \{ label: "[^"]+", href: "https:\/\/b4thecall\.com\//.test(SRC));
 const viewerUrls = [...SRC.matchAll(/set(?:Viewer|ViewerDoc|Proof|ViewerProof)\(\{ url: ([^,]+),/g)].map((m) => m[1]);
 ok(`pin: every DocViewer url (${viewerUrls.length} callers) is a Supabase signed URL`, viewerUrls.length === 5 && viewerUrls.every((u) => u === "data.signedUrl"), JSON.stringify(viewerUrls));

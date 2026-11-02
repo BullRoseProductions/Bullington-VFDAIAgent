@@ -46,13 +46,17 @@ async function fetchNotifications(limit = 50) {
 }
 
 /* The bell + unread count for the app chrome. */
-export function NotificationBell({ meId, onOpen }) {
+/* onCount (optional): told the same unread number the bell shows, after each successful read — the grouped sidebar
+   surfaces it on its Today header. It reuses THIS read; it never triggers one of its own. */
+export function NotificationBell({ meId, onOpen, onCount }) {
   const [unread, setUnread] = useState(0);
   const load = useCallback(async () => {
     const rows = await fetchNotifications(50);
     if (rows === null) return;                                   // keep the last-known count on a failed read
-    setUnread(rows.filter((r) => !r.read_at && r.member_id === meId).length);   // badge counts YOUR items only
-  }, [meId]);
+    const n = rows.filter((r) => !r.read_at && r.member_id === meId).length;   // badge counts YOUR items only
+    setUnread(n);
+    if (onCount) onCount(n);
+  }, [meId, onCount]);
 
   useEffect(() => {
     load();

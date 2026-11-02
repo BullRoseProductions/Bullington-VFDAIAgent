@@ -35,6 +35,8 @@ import { safeHref } from "./safeHref.js";   // M-2: every user-supplied link pas
 import { confirmDestructive, setDeleteGateRole, useCanDeleteShared } from "./ConfirmDestructive.jsx";
 import { noirConfirm, noirPrompt } from "./NoirDialogs.jsx";
 import { registerPlaceGetter, clearPlaceGetter, applyAtBoundary, takeRestoredPlace, useRestorableView, beginAppRequest, endAppRequest, forgetSavedAsk, updateReady } from "./appUpdate";
+import { isSopType, groundingSummary, qaStage, draftPrefill } from "./aiFraming";
+import { groupNav, groupBadge, holdsScreen, readCollapsed, writeCollapsed } from "./navGroups";
 import { pathFor, parsePath, isOneShotPath, pushRoute, replaceRoute, saveOutgoingScroll, scrollMainTo, restoreMainScroll, consumePendingPath } from "./router";
 import { RESEND_COOLDOWN, sendInvite, normalizeLoginEmail } from "./authLinks";
 import { fmtPhone } from "./phone.js";
@@ -1842,6 +1844,11 @@ const NAV = [
   { key: "department", label: "Department", Icon: Building2, roles: ["Project Admin"] },
 ];
 
+// Notifications has no NAV entry (it is not a module, and the bell opens it); the grouped sidebar lists it under Today so
+// its unread count can surface on that header. Not in NAV, so QuickAccess, module toggles and the role guard are unchanged.
+const NOTIFICATIONS_NAV = { key: "notifications", label: "Notifications", Icon: Bell };
+const NAV_BADGE = { minWidth: 18, height: 18, borderRadius: 999, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: FIRE.red };
+
 // A Project-Admin-ONLY user gets a trimmed oversight+support nav (no department-operation screens,
 // which are RLS-scoped to their own department anyway). Keys must exist in NAV above.
 const PA_NAV = ["dashboard", "settings", "admin", "adddept", "department"];
@@ -2468,6 +2475,9 @@ export default function App() {
   placeRef.current = { screen, packetId, navArg, ask: { open: askOpen, msgs: askMsgs.slice(-20), draft: askDraft } };
   useEffect(() => { registerPlaceGetter(() => placeRef.current); return clearPlaceGetter; }, []);
   const [drawer, setDrawer] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(() => readCollapsed());   // sidebar groups folded on THIS device (convenience only)
+  const [gearOpen, setGearOpen] = useState(false);
+  const [navUnread, setNavUnread] = useState(0);   // your unread notifications, reported by the bell's own read (no second fetch)
   const [requests, setRequests] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [members, setMembers] = useState(MEMBERS);
@@ -3277,6 +3287,21 @@ export default function App() {
    // Read & Sign: in the menu ONLY while you have outstanding required reading (needs / re-sign) — never a standing
    // entry. Leaders configure documents and review compliance from Station Documents' Read & Sign controls.
    .filter((n) => n.key !== "readsign" || rsOutstanding(rsQueue.rows) > 0);
+  // The grouped sidebar (src/navGroups.js): the same items plus Notifications (whose door was only the bell) under Today.
+  const navGrouped = groupNav([...visibleNav, NOTIFICATIONS_NAV]);
+  const navCounts = { readsign: rsOutstanding(rsQueue.rows), notifications: navUnread };
+  const toggleNavGroup = (id) => setNavCollapsed((c) => { const next = { ...c, [id]: !c[id] }; writeCollapsed(next); return next; });
+  const navButton = (n) => {
+    const active = screen === n.key || SCREEN_PARENT[screen] === n.key;   // library / packet light up Training
+    const count = Number(navCounts[n.key]) || 0;
+    return (
+      <button key={n.key} data-nav-key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
+        <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
+        {n.premium && <span style={S.premiumTag}>AI</span>}
+        {count > 0 && <span aria-label={n.key === "readsign" ? `${count} to sign` : `${count} unread`} style={NAV_BADGE}>{count > 99 ? "99+" : count}</span>}
+      </button>
+    );
+  };
   // Closes the hole the nav filter can't: go() is called from dashboard tiles and CTAs, and ?checkin=/
   // ?handoff= set the screen directly, so a disabled module stays reachable without passing the sidebar.
   // Also covers a module being switched off while a member is standing on it. Mirrors the retired-"ai"
@@ -3324,18 +3349,44 @@ export default function App() {
         <div style={S.brandRow}>
           <Logo />
         </div>
-        <nav style={S.nav}>
-          {visibleNav.map((n) => {
-            const active = screen === n.key || SCREEN_PARENT[screen] === n.key;   // library / packet light up Training
+        {/* GROUPED SIDEBAR (presentation only — see src/navGroups.js). The SAME visibleNav, under Bret's five headers, with
+            support/admin behind the gear. Every item still calls go(key): routing is untouched. The phone drawer is this
+            same <aside>, so it groups the same way. */}
+        <nav style={S.nav} aria-label="Main">
+          {navGrouped.groups.map((g) => {
+            const pinned = holdsScreen(g.items, screen);              // the group holding the screen on show is always open
+            const open = pinned || !navCollapsed[g.id];
+            const badge = groupBadge(g, navCounts);
             return (
-              <button key={n.key} onClick={() => go(n.key)} className={active ? "dr-nav-on" : undefined} style={{ ...S.navItem, ...(active ? S.navItemActive : {}) }}>
-                <n.Icon size={18} /><span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
-                {n.premium && <span style={S.premiumTag}>AI</span>}
-                {n.key === "readsign" && rsOutstanding(rsQueue.rows) > 0 && <span aria-label={`${rsOutstanding(rsQueue.rows)} to sign`} style={{ minWidth: 18, height: 18, borderRadius: 999, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: FIRE.red }}>{rsOutstanding(rsQueue.rows)}</span>}
-              </button>
+              <div key={g.id} data-nav-group={g.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <button type="button" onClick={pinned ? undefined : () => toggleNavGroup(g.id)} aria-expanded={open} aria-disabled={pinned || undefined}
+                  title={pinned ? "Holds the screen you're on" : undefined}
+                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: "12px 12px 4px", color: FIRE.textMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", fontFamily: "inherit", cursor: pinned ? "default" : "pointer", textAlign: "left" }}>
+                  <span style={{ flex: 1 }}>{g.label}</span>
+                  {!open && badge > 0 && <span data-nav-group-badge={g.id} aria-label={`${badge} waiting in ${g.label}`} style={NAV_BADGE}>{badge > 99 ? "99+" : badge}</span>}
+                  {!pinned && (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />)}
+                </button>
+                {open && g.items.map(navButton)}
+              </div>
             );
           })}
         </nav>
+        {/* THE GEAR: Settings & Support, plus the Project Admin screens. One item → just that item; more → a small menu,
+            open whenever it holds the screen on show. */}
+        {navGrouped.gear.length === 1 && <div style={{ marginTop: 6 }}>{navButton(navGrouped.gear[0])}</div>}
+        {navGrouped.gear.length > 1 && (() => {
+          const pinned = holdsScreen(navGrouped.gear, screen);
+          const open = pinned || gearOpen;
+          return (
+            <div data-nav-group="gear" style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 6 }}>
+              <button type="button" onClick={pinned ? undefined : () => setGearOpen((v) => !v)} aria-expanded={open} aria-disabled={pinned || undefined} style={{ ...S.navItem, cursor: pinned ? "default" : "pointer" }}>
+                <SettingsIcon size={18} /><span style={{ flex: 1, textAlign: "left" }}>Settings &amp; admin</span>
+                {!pinned && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+              </button>
+              {open && <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 12 }}>{navGrouped.gear.map(navButton)}</div>}
+            </div>
+          );
+        })()}
         {/* Unfile the device BEFORE signing out. The delete is governed by
             member_devices_delete_own (USING member_id = my_member_id()), so after signOut() the
             policy matches nothing and the row would silently survive — leaving this phone
@@ -3355,7 +3406,7 @@ export default function App() {
         <header style={S.topbar}>
           <button className="dr-menu" style={S.menuBtn} onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div style={{ flex: 1 }} />
-          <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} />
+          <NotificationBell meId={myMemberId} onOpen={() => go("notifications")} onCount={setNavUnread} />
           <StationPicker S={S} notify={notify} />
           <div style={S.viewAs}>
             {isLeader(realRole) && realRole.length > 1 && (
@@ -3425,8 +3476,8 @@ export default function App() {
             : <MyEquipment S={S} meId={myMemberId} notify={notify} />)}
           {screen === "myequipment" && <MyEquipment S={S} meId={myMemberId} notify={notify} />}
           {screen === "stationhours" && <StationHours S={S} dept={dept} notify={notify} />}
-          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
-          {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} />}
+          {screen === "recruit" && <Recruitment S={S} brand={brand} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={visibleSessions} />}
+          {screen === "visibility" && <Visibility S={S} brand={brand} role={role} notify={notify} dept={dept} members={members} sessions={visibleSessions} />}
           {screen === "duties" && <StationDuties S={S} role={role} members={members} meId={myMemberId} notify={notify} />}
           {screen === "funding" && <Funding S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} />}
           {screen === "minutes" && <Minutes S={S} role={role} notify={notify} dept={dept} meId={myMemberId} members={members} sessions={trainingSessions} initialMode={navArg} />}
@@ -4580,6 +4631,7 @@ function useInsightDrafts() {
       ) : draftErr ? (
         <div style={{ fontSize: 12.5, color: FIRE.redText, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span>{draftErr}</span><button style={{ ...FS.btn, padding: "4px 9px", fontSize: 11.5 }} onClick={() => runDraft(key, sys, ctx)}>Retry</button></div>
       ) : (<>
+        <AiNote style={{ marginTop: 0 }} />
         <textarea style={{ ...FS.input, minHeight: 74, resize: "vertical", fontSize: 13, width: "100%" }} value={draftText} onChange={(e) => setDraftText(e.target.value)} />
         <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
           <button style={FS.btnPrimary} onClick={copyDraft}>{copied ? <><CheckCircle2 size={15} /> Copied!</> : <><ClipboardCheck size={15} /> Copy</>}</button>
@@ -5242,6 +5294,7 @@ function AskB4C({ role, go, dept, onClose, onHide, gen, msgs, setMsgs, text, set
               </div>
             </div>
           ))}
+          {msgs.some((m) => m.role !== "user") && <AiNote style={{ margin: "2px 0 0" }} />}
           {busy && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: NOIR_AI.blueText }}><Loader2 size={14} className="spin" /> Checking…</div>}
           {err && <div style={NOIR_ERR}>{err}</div>}
           <div ref={endRef} />
@@ -5833,7 +5886,7 @@ function StudySession({ S }) {
         </div>
         {qual && <span style={{ ...NOIR_AI.chip, color: FIRE.amberText, background: "rgba(214,169,94,.1)", border: "1px solid rgba(214,169,94,.35)", marginBottom: 8 }}>Department qualification · hands-on sign-off</span>}
       </div>
-      <Disclaimer S={S} compact dark />
+      <AiNote />
 
       {structuredQuiz && quizN > 0 && !quizDone && (
         <div style={{ ...NOIR_INSET, padding: "10px 13px", marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -5929,14 +5982,17 @@ function StationQA({ S }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [ground, setGround] = useState({ text: "", has: false, note: "", names: [], loaded: false });   // grounding context, hasGrounding, size-limit note, included doc names (display only), read finished
+  const [ground, setGround] = useState({ text: "", has: false, note: "", names: [], docs: [], loaded: false });   // grounding context, hasGrounding, size-limit note, included doc names + { name, type } (display only), read finished
+  const [askedAt, setAskedAt] = useState(0);   // when the question in flight was sent — drives the staged wait lines
+  const [, setTick] = useState(0);
+  useEffect(() => { if (!loading) return undefined; const t = setInterval(() => setTick((n) => n + 1), 1000); return () => clearInterval(t); }, [loading]);
   useEffect(() => {
     let alive = true;
     (async () => {
       const { data: deptId } = await supabase.rpc("my_department_id");
       if (!deptId || !alive) { if (alive) setGround((g) => ({ ...g, loaded: true })); return; }
       const { data, error } = await supabase.from("documents")
-        .select("name, content_text")
+        .select("name, type, content_text")     // type: the SOP/SOG classifier (aiFraming.isSopType) — same query, one more column
         .eq("department_id", deptId)
         .is("deleted_at", null)                 // current versions only —
         .is("archived_at", null)                // composes with the Failsafe
@@ -5946,21 +6002,22 @@ function StationQA({ S }) {
       const CAP = 300000;                         // ~300k-char (~75k-token) grounding budget; safely within the
                                                   // model's 200k-token window. Real RAG would retrieve instead
                                                   // of stuffing everything in.
-      let text = ""; let included = 0; const names = [];
+      let text = ""; let included = 0; const names = []; const docs = [];
       for (const d of data) {
         const block = `=== ${d.name} ===\n${d.content_text}`;
         if (text.length + block.length + 2 > CAP) break;   // stop once the next doc would exceed the budget
         text += (text ? "\n\n" : "") + block;
-        included++; names.push(d.name);
+        included++; names.push(d.name); docs.push({ name: d.name, type: d.type });
       }
-      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "", names, loaded: true });
+      setGround({ text, has: included > 0, note: included < data.length ? `${included} of ${data.length} documents included (size limit)` : "", names, docs, loaded: true });
     })();
     return () => { alive = false; };
   }, []);
+  const groundSum = groundingSummary(ground.docs);
   const reset = () => { setTurns([]); setInput(""); setErr(""); };
   async function send(text) {
     const next = [...turns, { role: "user", content: text }];
-    setTurns(next); setInput(""); setLoading(true); setErr("");
+    setTurns(next); setInput(""); setLoading(true); setErr(""); setAskedAt(Date.now());
     try {
       const sys = ground.has ? groundedQandaSys(ground.text) : QANDA_SYS;   // grounded if SOPs loaded; else clean ungrounded fallback
       const reply = await callClaudeChat(sys, next);
@@ -5978,11 +6035,11 @@ function StationQA({ S }) {
       {/* What the assistant is reading — the SAME documents read above; this only reports it. */}
       <div style={{ ...NOIR_INSET, padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         {!ground.loaded
-          ? <><Loader2 size={15} className="spin" color={NOIR_AI.blueText} /><span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Reading your SOPs…</span></>
+          ? <><Loader2 size={15} className="spin" color={NOIR_AI.blueText} /><span style={{ fontSize: 12.5, color: FIRE.textSecondary }}>Reading your station documents…</span></>
           : ground.has
             ? <><FileText size={15} color={NOIR_AI.blueText} style={{ flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>Reading <b style={{ color: FIRE.textPrimary, ...FS.num }}>{ground.names.length}</b> SOP document{ground.names.length === 1 ? "" : "s"} — answers cite them when they apply.{ground.note ? <span style={{ color: FIRE.amberText }}> {ground.note}.</span> : ""}</span>
-                <span style={NOIR_AI.chip}>SOP-grounded</span></>
+                <span data-qa-grounding="" style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>Reading {groundSum.text} — answers cite them when they apply.{ground.note ? <span style={{ color: FIRE.amberText }}> {ground.note}.</span> : ""}</span>
+                <span style={NOIR_AI.chip}>{groundSum.sop > 0 ? "SOP-grounded" : "Document-grounded"}</span></>
             : <><BookOpen size={15} color={FIRE.textMuted} style={{ flexShrink: 0 }} />
                 <span style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: FIRE.textSecondary }}>No SOP text uploaded yet — answers are general fire-service guidance and will say so.</span></>}
       </div>
@@ -6000,7 +6057,7 @@ function StationQA({ S }) {
             <div key={i} style={{ ...FS.cardNoir, padding: "12px 15px", marginBottom: 10, borderLeft: `3px solid ${cited ? NOIR_AI.blue : FIRE.line2Noir}`, ...(cited ? { background: `${NOIR_AI.glow}, ${FS.cardNoir.background}` } : {}) }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                 {cited
-                  ? <><span style={NOIR_AI.chip}><FileText size={11} /> From your SOPs</span>{cites.slice(0, 3).map((n) => <span key={n} style={{ fontSize: 11, color: NOIR_AI.blueText, border: `1px solid rgba(79,144,214,.3)`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}</>
+                  ? <><span style={NOIR_AI.chip}><FileText size={11} /> {cites.every((n) => isSopType(ground.docs.find((d) => d.name === n)?.type)) ? "From your SOPs" : "From your documents"}</span>{cites.slice(0, 3).map((n) => <span key={n} style={{ fontSize: 11, color: NOIR_AI.blueText, border: `1px solid rgba(79,144,214,.3)`, borderRadius: 999, padding: "2px 8px" }}>{n}</span>)}</>
                   : <span style={{ ...NOIR_AI.chip, color: FIRE.textSecondary, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>General guidance</span>}
               </div>
               <RichOutput S={S} text={t.content} dark />
@@ -6017,10 +6074,11 @@ function StationQA({ S }) {
             </div>
           </div>
         )}
-        {loading && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> {ground.has ? "Checking your SOPs…" : "Thinking…"}</div>}
+        {/* THE WAIT (~15–20 s; /api/claude doesn't stream): staged lines that say what is happening, not a bare spinner. */}
+        {loading && <div role="status" aria-live="polite" data-qa-stage="" style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}><Loader2 size={14} className="spin" /> {qaStage(Date.now() - askedAt, ground.has ? ground.docs.length : 0)}</div>}
         {err && <div style={NOIR_ERR}>{err}</div>}
       </div>
-      <div style={{ marginTop: 12 }}><Disclaimer S={S} compact dark /></div>
+      <AiNote style={{ marginTop: 12 }} />
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, padding: 6, borderRadius: 12, background: FIRE.card2Noir, border: `1px solid ${FIRE.line2Noir}` }}>
         <input style={{ ...FS.input, flex: 1, minWidth: 0, border: "none", background: "transparent" }} value={input} placeholder="Ask the station assistant…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} disabled={loading} aria-label="Your question" />
         <button style={{ ...FS.btnPrimary, padding: "9px 14px", opacity: loading || !input.trim() ? 0.6 : 1 }} onClick={submit} disabled={loading || !input.trim()}><Send size={15} /> Ask</button>
@@ -6212,7 +6270,7 @@ function DrillPlanPanel({ S, plan, form, loading, onRegenerate, onSave, saveOpen
             <AIList S={S} dark Icon={CheckCircle2} title="You're done when" items={plan.evaluationChecklist} />
           </div>
         )}
-        <Disclaimer S={S} compact dark />
+        <AiNote />
       </div>
       <div style={{ display: "flex", gap: 10, padding: "14px 18px", borderTop: `1px solid ${FIRE.lineNoir}`, background: FIRE.insetNoir, flexWrap: "wrap" }}>
         <button onClick={onSave} aria-expanded={saveOpen} style={{ ...FS.btnPrimary, flex: "1 1 180px", justifyContent: "center", borderRadius: 10, padding: "11px 15px" }}><FileText size={14} /> Save to a session</button>
@@ -6460,11 +6518,24 @@ function weekCalendar(startISO, weeks = 9) {
   }
   return lines.join("\n");
 }
-function Recruitment({ S, brand, role, notify, dept, meId, members }) {
-  const [town, setTown] = useState("");
-  const [size, setSize] = useState("14");
+function Recruitment({ S, brand, role, notify, dept, meId, members, sessions }) {
+  /* PREFILL from what the app already holds (aiFraming.draftPrefill): the department's town, today's headcount (the
+     shared/members.js rule), and the next meeting / training night as dated lines. Fills a field only until the person
+     types in it; nothing is fetched for it. "Department size" used to start at a made-up 14. */
+  const pre = draftPrefill({ dept, members, sessions });
+  const touched = useRef({});
+  const [town, setTownRaw] = useState(pre.town);
+  const [size, setSizeRaw] = useState(pre.size);
   const [need, setNeed] = useState("A few younger volunteers and people who can run daytime calls.");
-  const [localDates, setLocalDates] = useState("");   // optional — real local events + dates the leader supplies; drives post scheduling
+  const [localDates, setLocalDatesRaw] = useState(pre.localDates);   // optional — real local events + dates the leader supplies; drives post scheduling
+  const setTown = (v) => { touched.current.town = true; setTownRaw(v); };
+  const setSize = (v) => { touched.current.size = true; setSizeRaw(v); };
+  const setLocalDates = (v) => { touched.current.localDates = true; setLocalDatesRaw(v); };
+  useEffect(() => {   // the roster / department / sessions can land after this screen mounts
+    if (!touched.current.town && pre.town) setTownRaw(pre.town);
+    if (!touched.current.size && pre.size) setSizeRaw(pre.size);
+    if (!touched.current.localDates && pre.localDates) setLocalDatesRaw(pre.localDates);
+  }, [pre.town, pre.size, pre.localDates]);
   const [startDate, setStartDate] = useState(() => nextMondayISO());   // Week 1 begins here; app computes all post dates from this
   const [loading, setLoading] = useState(false); const [plan, setPlan] = useState(""); const [err, setErr] = useState("");
   const [plannerOpen, setPlannerOpen] = useState(true);   // AI Recruitment Planner — expanded by default
@@ -6479,7 +6550,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
     try {
       const startLabel = new Date(startDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
       const cal = weekCalendar(startDate);
-      const t = await callClaude(sys, `Department: ${dept?.name || ""}\nTown: ${town}\nDepartment size: ${size} members\nWhat they need: ${need}\nKey local dates: ${localDates.trim() || "(none provided)"}\nPlan start date (Week 1 begins): ${startLabel}\n\nWEEK CALENDAR — the real calendar date of every day; use ONLY these, never compute your own:\n${cal}\n\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`);
+      const t = await callClaude(sys, `Department: ${dept?.name || ""}\nTown: ${town.trim() || "(not given)"}\nDepartment size: ${String(size).trim() ? `${String(size).trim()} members` : "(not given)"}\nWhat they need: ${need}\nKey local dates: ${localDates.trim() || "(none provided)"}\nPlan start date (Week 1 begins): ${startLabel}\n\nWEEK CALENDAR — the real calendar date of every day; use ONLY these, never compute your own:\n${cal}\n\nDepartment voice: ${brand?.voice || ""}\nTagline: ${brand?.tagline || ""}`);
       setPlan(t); setSaveTitle(need.trim().slice(0, 60) || `Recruitment plan · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`);
     }
     catch { setErr("Couldn't draft a plan just now. Try again in a moment."); } finally { setLoading(false); }
@@ -6542,7 +6613,7 @@ function Recruitment({ S, brand, role, notify, dept, meId, members }) {
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft a plan</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {plan && <RecruitmentPlanView S={S} text={plan} />}
+          {plan && <><AiNote /><RecruitmentPlanView S={S} text={plan} /></>}
           {plan && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
@@ -7590,7 +7661,7 @@ function Documents({ S, role, notify, uploaderName, members, dept }) {
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><FilePlus size={16} /> Draft document</>}
             </button>
             {err && <div style={NOIR_ERR}>{err}</div>}
-            {out && <div style={{ marginTop: 14 }}><Disclaimer S={S} compact dark /><RichOutput S={S} text={out} dark /></div>}
+            {out && <div style={{ marginTop: 14 }}><AiNote /><RichOutput S={S} text={out} dark /></div>}
           </div>
         </Card>
         </>)}
@@ -8769,14 +8840,19 @@ function CaptionCard({ text, onRewrite, rewriting, notify }) {
     </div>
   );
 }
-function Visibility({ S, brand, role, notify }) {
-  const [topic, setTopic] = useState("A Tuesday-night ladder drill");
+function Visibility({ S, brand, role, notify, dept, members, sessions }) {
+  // PREFILL (aiFraming.draftPrefill): the next public training night, until the person types; the old example otherwise.
+  const pre = draftPrefill({ dept, members, sessions });
+  const topicTouched = useRef(false);
+  const [topic, setTopicRaw] = useState(pre.topic || "A Tuesday-night ladder drill");
+  const setTopic = (v) => { topicTouched.current = true; setTopicRaw(v); };
+  useEffect(() => { if (!topicTouched.current && pre.topic) setTopicRaw(pre.topic); }, [pre.topic]);
   const [ideasOpen, setIdeasOpen] = useState(false);   // Ideas for Things to Make — collapsed by default
   const [loading, setLoading] = useState(false); const [post, setPost] = useState(""); const [err, setErr] = useState("");
   async function draft() {
     setLoading(true); setErr(""); setPost("");
     const sys = "You write short, warm social media captions for a volunteer fire/EMS department to build community visibility and trust — not recruitment. Match the department's voice. Plain, genuine, under 60 words, with a tasteful hashtag or two. Never graphic content or patient information. Return only the caption.";
-    try { const t = await callClaude(sys, `Post about: ${topic}\nDepartment voice: ${brand?.voice || ""}`); setPost(t); }
+    try { const t = await callClaude(sys, `Post about: ${topic}\nDepartment: ${dept?.name || ""}${dept?.city ? `\nTown: ${dept.city}` : ""}\nDepartment voice: ${brand?.voice || ""}`); setPost(t); }
     catch { setErr("Couldn't draft that just now. Try again."); } finally { setLoading(false); }
   }
   return (
@@ -8805,6 +8881,7 @@ function Visibility({ S, brand, role, notify }) {
             {loading ? <><Loader2 size={16} className="spin" /> Writing…</> : <><Sparkles size={16} /> Draft a caption</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
+          {post && <AiNote />}
           {post && <CaptionCard text={post} onRewrite={draft} rewriting={loading} notify={notify} />}
         </div>
       </div>
@@ -9664,6 +9741,7 @@ function FundraiserHQ({ S, notify, fundraiser, members, meId, dept, onBack, onEd
               what the saved document will look like when it is reopened. */}
           {dOut && (
             <div style={{ marginTop: 14 }}>
+              <AiNote />
               <RichOutput S={S} text={dOut} dark />
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
                 <label style={{ ...S.field, flex: 1, minWidth: 200 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span>
@@ -10393,7 +10471,7 @@ function Fundraisers({ S, role, notify, dept, meId, members, back }) {
             </div>
           )}
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && <><AiNote /><RichOutput S={S} text={out} dark /></>}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Draft title" /></label>
@@ -13371,7 +13449,7 @@ function RosterCerts({ S, members, role, notify }) {
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Draft renewal reminders</>}
           </button>
           {err && <div style={{ marginTop: 10, fontSize: 12, padding: "8px 11px", borderRadius: 8, background: "rgba(200,50,58,.08)", border: "1px solid rgba(200,50,58,.3)", color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && <><AiNote /><RichOutput S={S} text={out} dark /></>}
         </div>
       </Card>
       {proofMount}
@@ -14107,6 +14185,7 @@ function RosterReports({ S, role, members, sessions, dept, back, meId, notify, i
                 <SectionBar label="Draft preview" style={{ margin: 0, flex: 1 }} />
                 <button title="Clear" style={{ ...FS.btn, padding: "5px 8px" }} onClick={() => { setOut(""); setErr(""); }}><X size={14} color={FIRE.deleteRed} /></button>
               </div>
+              <AiNote />
               <RichOutput S={S} text={out} dark />
               {/* The chief's own section, right after the AI narrative — one report, but outside the AI block and never
                   styled as a figure. Same component the saved report and the input card use. */}
@@ -18879,7 +18958,7 @@ function MaintenancePanel({ S, role, rigs, meId, members, notify, onItems }) {
               {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Wrench size={16} /> Draft a checklist</>}
             </button>
             {err && <div style={NOIR_ERR}>{err}</div>}
-            {out && <RichOutput S={S} text={out} dark />}
+            {out && <><AiNote /><RichOutput S={S} text={out} dark /></>}
           </div>
         </div>
       )}
@@ -21080,7 +21159,7 @@ function Minutes({ S, role, notify, dept, meId, members, sessions, initialMode }
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><ClipboardList size={16} /> Draft the minutes</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && <><AiNote /><RichOutput S={S} text={out} dark /></>}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Minutes title" /></label>
@@ -21556,7 +21635,7 @@ function MeetingAgenda({ S, role, notify, dept, meId, members, sessions, certCon
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><Sparkles size={16} /> Generate agenda</>}
           </button>
           {err && <div style={NOIR_ERR}>{err}</div>}
-          {out && <div style={{ marginTop: 12, borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 10 }}><RichOutput S={S} text={out} dark /></div>}
+          {out && <><AiNote style={{ marginTop: 12 }} /><div style={{ borderLeft: `2px solid ${NOIR_AI.blue}`, borderRadius: 10 }}><RichOutput S={S} text={out} dark /></div></>}
           {out && canManage && (
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexWrap: "wrap" }}>
               <label style={{ ...S.field, flex: 1, minWidth: 180 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Save as</span><input style={FS.input} value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Agenda title" /></label>
@@ -23863,7 +23942,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
             {loading ? <><Loader2 size={16} className="spin" /> Drafting…</> : <><UserPlus size={16} /> Draft welcome & plan</>}
           </button>
           {err && <div style={{ marginTop: 10, fontSize: 13, color: FIRE.redText }}>{err}</div>}
-          {out && <RichOutput S={S} text={out} dark />}
+          {out && <><AiNote /><RichOutput S={S} text={out} dark /></>}
         </div>
       </Card>
       </NoirSkin>
@@ -24145,7 +24224,7 @@ function AiPlanViewer({ S, plan, onClose, dept, notify }) {
               {[["quick", "Quick run sheet"], ["full", "Full plan"]].map(([k, l]) => <button key={k} onClick={() => setView(k)} aria-pressed={view === k} style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 12px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: "inherit", background: view === k ? FIRE.redBright : "transparent", color: view === k ? "#fff" : FIRE.textSecondary }}>{l}</button>)}
             </div>
           )}
-          <Disclaimer S={S} compact dark />
+          <AiNote />
           <RichOutput S={S} text={shown} dark />
         </div>
       </div>
@@ -29695,6 +29774,24 @@ function Chip({ S, active, accent, onClick, children }) {
 function Section({ S, Icon, title, children }) {
   // Training Library packet sections: a Noir card with the CardHead header (S kept for the call sites).
   return <div style={{ ...FS.cardNoir, padding: "14px 16px", marginBottom: 10 }}><CardHead icon={Icon} title={title} />{children}</div>;
+}
+/* THE AI NOTE: one plain line on every surface that shows text the AI just wrote, with "more" for the full terms and
+   where to read how B4C uses AI. Replaces the paragraph-long DISCLAIMER on AI output (people stopped reading it); the
+   full DISCLAIMER stays on the library drill packets, which are written content, not AI output. */
+const AI_NOTE = "Written by AI — it can be wrong. Check it against your department's SOPs before you use it.";
+const AI_POLICY_URL = "https://b4thecall.com/legal/responsible-ai";   // the same page Settings → Legal & trust links ("How we use AI")
+function AiNote({ style }) {
+  const [more, setMore] = useState(false);
+  return (
+    <div data-ai-note="" style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 12, lineHeight: 1.45, color: FIRE.textMuted, margin: "8px 0", ...style }}>
+      <Sparkles size={13} color={FIRE.amberText} style={{ flexShrink: 0, marginTop: 2 }} />
+      <span>
+        {AI_NOTE}{" "}
+        <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more} style={{ background: "none", border: "none", padding: 0, color: FIRE.blueText, fontSize: "inherit", fontFamily: "inherit", cursor: "pointer", textDecoration: "underline" }}>{more ? "less" : "more"}</button>
+        {more && <span style={{ display: "block", marginTop: 4 }}>{DISCLAIMER}{" "}<a href={AI_POLICY_URL} target="_blank" rel="noopener noreferrer" style={{ color: FIRE.blueText }}>How we use AI</a></span>}
+      </span>
+    </div>
+  );
 }
 function Disclaimer({ S, compact, dark }) {
   return <div style={{ ...S.disclaimer, ...(compact ? { marginTop: 0 } : {}), ...(dark ? { background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderLeft: `3px solid ${FIRE.amberText}`, color: FIRE.textSecondary } : {}) }}><AlertTriangle size={16} color={dark ? FIRE.amberText : undefined} style={{ flexShrink: 0, marginTop: 1 }} /><span>{DISCLAIMER}</span></div>;
