@@ -22,7 +22,7 @@ DECLARE
   v_other int; v_own int; v_err text; v_target uuid; v_own_target uuid; v_tmember uuid; v_tdept uuid;
   rpt text := chr(10); n int := 0; v_pass int := 0; v_fail int := 0;
 BEGIN
-  -- Josh Merritt's 23 (reset to pending earlier today) — where are they now? (read as owner)
+  -- Member K's 23 (reset to pending earlier today) — where are they now? (read as owner)
   rpt := rpt || (SELECT format('   Josh Merritt: %s pending · %s approved · %s rejected (of %s)%s',
                    count(*) FILTER (WHERE status = 'pending'), count(*) FILTER (WHERE status = 'approved'),
                    count(*) FILTER (WHERE status = 'rejected'), count(*), chr(10))

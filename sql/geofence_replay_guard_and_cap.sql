@@ -14,7 +14,7 @@
 -- hours sat inside overlapping station_presence rows, in 3 pairs across 2
 -- members. Every pair involved a gps_geofence row; none was two manual rows.
 --
--- Jeff Harper, Indian Harbor, 2026-08-31 — the clearest case, and the one this
+-- Member J, Indian Harbor, 2026-08-31 — the clearest case, and the one this
 -- guard is written against:
 --
 --   d45cee11  created 19:24:44  checked_in 19:22:44 -> 20:02:13   0.66h
@@ -30,7 +30,7 @@
 --   2. a +/- 2 MINUTE arrival-time window catches a redelivery of the SAME
 --      event. These were not redeliveries: the fence fired a SECOND, genuine
 --      DWELL minutes after the first. Observed gaps were 8m46s (Jeff), 4m05s
---      and 2m03s (Matt Hohon, Granbury) — every one outside the window.
+--      and 2m03s (Member H, Granbury) — every one outside the window.
 --
 -- WIDENING THE WINDOW IS NOT THE FIX. Nine minutes of slack would start
 -- rejecting real re-entries. Containment is exact instead, and it catches all
@@ -55,7 +55,7 @@
 -- had two different maximum lengths depending on which path closed it, and the
 -- phone reporting CORRECTLY produced the shorter one.
 --
---   Matt Hohon, Granbury, 2026-08-30. max_shift_hours 10, backstop null -> 36.
+--   Member H, Granbury, 2026-08-30. max_shift_hours 10, backstop null -> 36.
 --   Phone reported EXIT 11.2h after arrival. Capped to exactly 10.000h and
 --   flagged. Had the phone stayed silent the sweeper would have allowed 36h.
 --   He lost 1.2 hours because it worked.

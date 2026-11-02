@@ -14,7 +14,7 @@
  * reports "—" rather than 0%. It cannot prove dept_iso_hours_for returns the right numbers; that is
  * SQL, it is tested in its own migration, and the live check against North Hood is the other half.
  *
- * Case 1 is Chase Thomas's real shape, which is the whole reason for this change.
+ * Case 1 is Member A's real shape, which is the whole reason for this change.
  */
 import { stationMetrics } from "../api/digest.js";
 

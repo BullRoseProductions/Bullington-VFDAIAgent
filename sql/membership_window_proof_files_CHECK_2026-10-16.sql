@@ -1,4 +1,4 @@
--- READ-ONLY. Are Paul Stetzel's cert-proof files orphaned, or still behind his (kept) cert_submissions?
+-- READ-ONLY. Are Member F's cert-proof files orphaned, or still behind his (kept) cert_submissions?
 -- approve_cert_submission copies the SUBMISSION's proof_path onto the cert, so a deleted cert's file is usually the
 -- same storage object his submission still points at. Expect: referenced_by_submission = files_in_folder (nothing orphaned).
 WITH paul AS (SELECT id, department_id FROM public.members WHERE lower(btrim(name)) = 'paul stetzel'),

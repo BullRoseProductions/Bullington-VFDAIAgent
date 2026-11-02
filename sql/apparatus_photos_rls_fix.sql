@@ -26,7 +26,7 @@ CREATE POLICY "leadership manage photos" ON public.apparatus_photos
 -- DIAGNOSIS (optional, read-only) - confirm the cause:
 -- =====================================================================
 -- select id, name, access, department_id, status
--- from public.members where lower(email) = lower('ashlea@bullroseproductions.com');
+-- from public.members where lower(email) = lower('<the owner''s email>');
 --   -- If access lacks 'Department Admin'/'Officer' (e.g. only 'Board Member'
 --   -- and/or 'Project Admin'), that is exactly why is_canmanage_ops() rejected
 --   -- the insert while is_canmanage() passes.

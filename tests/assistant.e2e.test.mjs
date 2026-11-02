@@ -11,7 +11,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (url.includes("/rpc/record_assistant_turn")) return json(limitHit ? { allowed: false, used: 500, ceiling: 500 } : { allowed: true, used: 7, ceiling: 500 });
   if (url.includes("/rpc/my_member_id")) return json("mem-1");
   if (url.includes("/rpc/my_department_id")) return json("dept-1");
-  if (url.includes("/rest/v1/members")) return json({ name: "Kai Newton", access: ["Member"], joined: "2026" });
+  if (url.includes("/rest/v1/members")) return json({ name: "Pat Example", access: ["Member"], joined: "2026" });
   if (url.includes("/rest/v1/departments")) return json({ name: "North Hood" });
   if (url.includes("/rest/v1/celebrations")) return json({ joined_date: "2026-10-08" });
   if (url.includes("/rpc/my_station_shifts")) return json([{ hours: 2.47, verified: true, kind: "standby" }, { hours: 1, verified: false, kind: "standby" }]);

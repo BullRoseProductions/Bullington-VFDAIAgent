@@ -22,7 +22,7 @@
 /* Owner, test and demo accounts — out of every count and every assignee picker. Was hard-coded TWICE (App.jsx and
    api/digest.js, "MUST stay in sync"); now once. */
 export const STATS_EXCLUDED_IDS = new Set([
-  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // Ashlea (owner)
+  "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // the owner (Member N)
   "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
   "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
 ]);

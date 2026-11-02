@@ -1,7 +1,7 @@
 -- =====================================================================
 -- PREVIEW — READ-ONLY. North Hood County: every OPEN station_presence shift (checked_out_at IS NULL), with the planned
 -- action. Three are to be closed at 9:30 PM Central on 10/15/2026 (they left then and forgot to clock out):
--- Kai Newton (in 7:02 PM), Mike Bell (in 7:39 PM), Kenny Bell (in 7:40 PM). Everyone else — Chase Thomas, Spencer
+-- Member C (in 7:02 PM), Member D (in 7:39 PM), Member E (in 7:40 PM). Everyone else — Member A, Spencer
 -- Sampler — stays OPEN. Times shown in America/Chicago. Expect exactly one CLOSE row per name, with the check-in time
 -- above, and credited ≈ Kai 2h28m · Mike 1h51m · Kenny 1h50m. acting_da = the North Hood Department Admin the close
 -- script acts as (close_open_shift is admin-gated; it records no actor).
