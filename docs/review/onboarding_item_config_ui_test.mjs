@@ -59,7 +59,8 @@ ok("signed / open unchanged", probItemView({ state: "signed", signed_by_name: "C
 const members = [{ id: "m-kerr", name: "Dana Kerr", status: "Active", access: ["Member"] }, { id: "m-pro", name: "Pat Probie", status: "Probationary", access: ["Member"] },
   { id: "m-gone", name: "Gus Gone", status: "Inactive", access: ["Member"] }, { id: "m-pa", name: "Pam Admin", status: "Active", access: ["Project Admin"] }];
 const cfgHtml = R(e(OicItemConfig, { it: { id: "i1", ...person }, members, busy: false, onSave: () => {} }));
-ok("config: the three tiers + active / probationary members, never inactive or a Project Admin", ["Any Officer", "Any Department Admin", "Any Board Member", "Dana Kerr", "Pat Probie"].every((t) => cfgHtml.includes(t)) && !cfgHtml.includes("Gus Gone") && !cfgHtml.includes("Pam Admin"));
+// Polish batch A (gate ruling): a sign-off approver must be ACTIVE — Probationary members are no longer offered.
+ok("config: the three tiers + active members only — never probationary, inactive or a Project Admin", ["Any Officer", "Any Department Admin", "Any Board Member", "Dana Kerr"].every((t) => cfgHtml.includes(t)) && !cfgHtml.includes("Pat Probie") && !cfgHtml.includes("Gus Gone") && !cfgHtml.includes("Pam Admin"));
 ok("config: a document item shows the scoped disclaimer", cfgHtml.includes("B4C doesn&#x27;t store this document — an officer checks it in person and records the sign-off."));
 const cfgPlain = R(e(OicItemConfig, { it: { id: "i2", ...plain }, members, busy: false, onSave: () => {} }));
 ok("config: no disclaimer when no document check", !cfgPlain.includes("store this document") && cfgPlain.includes("Any officer / leadership (default)"));

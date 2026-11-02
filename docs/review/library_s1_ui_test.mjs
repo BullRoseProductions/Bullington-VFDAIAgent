@@ -117,7 +117,9 @@ reset();
 await render(React.createElement(Probe));
 { const r = globalThis.__sb.reads.find((x) => x.table === "library_drills");
   ok("catalog read lists explicit columns — never * and never origin_department_id", r && r.cols === "id, code, title, track, level, duration_min, audience, content, origin, credit_name, published_at" && !/\*|origin_department_id/.test(r.cols), r?.cols);
-  ok("usage via the counts-only RPC; pulled ids from drill_plans.library_id", globalThis.__sb.calls.some((c) => c.n === "library_drill_usage") && globalThis.__sb.reads.some((x) => x.table === "drill_plans" && x.cols === "library_id"));
+  // Polish batch A (gate rulings): the same drill_plans read also returns the department copy's id + status, so a packet can
+  // offer "Schedule this" / "Attach to a session" once its copy is approved. Still dept-scoped by RLS, still library rows only.
+  ok("usage via the counts-only RPC; pulled ids (+ the copy's id/status) from drill_plans.library_id", globalThis.__sb.calls.some((c) => c.n === "library_drill_usage") && globalThis.__sb.reads.some((x) => x.table === "drill_plans" && x.cols === "library_id, id, status, title, duration_min, category"));
   ok("hook state: 2 packets, usage map, pulled set", hookOut.items.length === 2 && hookOut.usage.L1?.held === 3 && hookOut.usage.L1?.departments === 2 && hookOut.pulled.has("L2") && hookOut.loaded && !hookOut.err);
   CATALOG_ERR = true; await act(async () => { await hookOut.reload(); }); await tick();
   ok("a failed catalog read keeps the last-known list and flags it (never blank on error)", hookOut.items.length === 2 && hookOut.err === true); }
