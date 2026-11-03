@@ -1,0 +1,26 @@
+state: [{"fn":"pa_department_stations(p_department_id uuid)","definer":true,"vol":"s","anon_exec":false,"auth_exec":true,"returns":"TABLE(station_id uuid, name text, label text, address text, is_default boolean, is_active boolean, lat double precision, lng double precision, radius_m integer, geofence_enabled boolean)"},{"fn":"pa_set_station_geofence(p_station_id uuid, p_enabled boolean)","definer":true,"vol":"v","anon_exec":false,"auth_exec":true,"returns":"uuid"}]
+re-run -> Precondition failed: pa_department_stations(uuid) is not the expected six-column shape (found: TABLE(station_id uuid, name text, label text, address text, is_default boolean, is_active boolean, lat double precision, lng double precision, radius_m integer, geofence_enabled boolean)). Stop and re-read the live definition.
+PASS  G0 ten-column read; both definer, gated, search_path pinned, anon locked out, authenticated in
+— fixtures in Lipan
+   PASS  N1 a DA and a plain member are refused by both functions ('Not authorized'); switch unchanged
+   PASS  R1 pa_department_stations returns lat / lng / radius_m / geofence_enabled for both fixtures
+   PASS  E1 switching ON an unpinned house is refused with the DA editor's sentence; it stays off
+   PASS  E2 pinned house: ON returns its id, reads true (table and PA read), master unmoved; OFF returns its id and reads false
+   PASS  E3 switching OFF an unpinned house is allowed
+   PASS  E4 a bad id -> 'Station not found'
+   PASS  E5 only geofence_enabled moved; the department master switch is unchanged
+---- 8 passed, 0 failed, 0 skipped ----
+(this exception IS the rollback — nothing was changed)
+Station 20 after RETEST: [{"geofence_enabled":false,"lat":32.4,"radius_m":400}]
+BEFORE the migration -> function "public.pa_set_station_geofence(uuid, boolean)" does not exist
+M1 setter gate dropped -> migration refused: Post-condition: pa_set_station_geofence has no is_project_admin() gate
+M2 pin rule dropped ->    FAIL  E1 -> "OK" | ---- 7 passed, 1 failed, 0 skipped ----
+M3 pin rule reworded ->    FAIL  E1 -> "No pin." | ---- 7 passed, 1 failed, 0 skipped ----
+M4 setter also writes radius_m -> migration refused: Post-condition: pa_set_station_geofence writes a column other than geofence_enabled
+M5 setter writes the department master too ->    FAIL  E2 round-trip broke (the department master moved with the house) | ---- 7 passed, 1 failed, 0 skipped ----
+M6 grants not re-applied after DROP -> migration refused: Post-condition: anon can execute pa_department_stations
+M7 read omits geofence_enabled value (returns false) ->    FAIL  E2 round-trip broke (the PA read did not report the house ON) | ---- 7 passed, 1 failed, 0 skipped ----
+M8 not-found check dropped ->    FAIL  E4 -> "OK" | ---- 7 passed, 1 failed, 0 skipped ----
+M9 setter ignores p_enabled (always true) ->    FAIL  E2 round-trip broke (Give this house a location before switching its fence on.) |    FAIL  E3 -> "Give this house a location before switching its fence on." | ---- 6 passed, 2 failed, 0 skipped ----
+M10 read gate dropped -> migration refused: Post-condition: pa_department_stations has no is_project_admin() gate
+P1 unexpected live shape -> Precondition failed: pa_department_stations(uuid) is not the expected six-column shape (found: TABLE(station_id uuid)). Stop and re-read the live definition.

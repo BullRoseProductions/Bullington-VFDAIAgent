@@ -1890,6 +1890,17 @@ const moduleEnabled = (key, disabled) => {
    department_id is NOT sent: the RLS WITH CHECK requires it to equal my_department_id() anyway,
    and letting the client name a department invites the one mistake the policy exists to prevent.
    Instead it is read from my_department_id() so the row is explicit and the policy agrees. */
+/* ONE HOUSE'S AUTOMATIC-ARRIVAL STATE, in the words the Department Admin's station list has always used. Shared with the
+   PA department screen so both screens describe the same row the same way. Reads the house's OWN switch
+   (stations.geofence_enabled) and its pin; the department master switch is the caller's to say, because whether it is on
+   is a different fact from what this house is set to. tone: "nopin" | "on" | "off". */
+function stationFenceLine(r) {
+  if (r?.lat == null || r?.lng == null) return { tone: "nopin", text: "Not pinned — no automatic arrival" };
+  return r.geofence_enabled
+    ? { tone: "on", text: `Automatic arrival on · ${r.radius_m || 150} m` }
+    : { tone: "off", text: "Pinned · automatic arrival off" };
+}
+
 function StationsAdmin({ S, setDept }) {
   const [rows, setRows] = useState(null);          // null = loading
   const [adding, setAdding] = useState(false);
@@ -2093,10 +2104,8 @@ function StationsAdmin({ S, setDept }) {
                 <div style={{ fontSize: 12, color: r.address ? FIRE.textMuted : FIRE.textMuted2, marginTop: 2, fontStyle: r.address ? "normal" : "italic" }}>{r.address || "No address yet"}</div>
                 {/* Whether this house can record automatic arrivals, in one line. "Not pinned" is
                     the actionable state — it is why a fence cannot exist here yet. */}
-                <div style={{ fontSize: 12, marginTop: 2, color: r.lat == null || r.lng == null ? FIRE.textMuted2 : (r.geofence_enabled ? FIRE.greenText : FIRE.textMuted) }}>
-                  {r.lat == null || r.lng == null
-                    ? "Not pinned — no automatic arrival"
-                    : (r.geofence_enabled ? `Automatic arrival on · ${r.radius_m || 150} m` : "Pinned · automatic arrival off")}
+                <div style={{ fontSize: 12, marginTop: 2, color: { nopin: FIRE.textMuted2, on: FIRE.greenText, off: FIRE.textMuted }[stationFenceLine(r).tone] }}>
+                  {stationFenceLine(r).text}
                 </div>
               </div>
               {r.is_default && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, flexShrink: 0 }}>DEFAULT</span>}
@@ -28467,6 +28476,13 @@ function DepartmentAdmin({ S, role, target, notify, go }) {
   const [addonErr, setAddonErr] = useState(null);
   const [savingAddons, setSavingAddons] = useState(false);
   const [addonSaveState, setAddonSaveState] = useState("");   // "" | "ok" | "err"
+  /* THE MASTER VALUE THE SERVER LAST CONFIRMED, kept apart from the checkbox. The "none of these are live" note on the
+     station rows must follow what is SAVED, not a box someone has ticked and not yet saved. null = unknown (the read
+     failed), and an unknown master is said as unknown — never assumed on. */
+  const [geofenceSaved, setGeofenceSaved] = useState(null);
+  // Per-station switches (pa_set_station_geofence): which row is mid-save, and that row's outcome.
+  const [stFenceBusy, setStFenceBusy] = useState(null);   // station_id | null
+  const [stFenceMsg, setStFenceMsg] = useState(null);     // { id, ok, text } | null
   // PA-side stations for THIS department, read through pa_department_stations(deptId) — which
   // takes the department explicitly and gates on is_project_admin(). my_stations() still cannot
   // be used here: it answers for the CALLER's department, so it would show the PA their own
@@ -28539,8 +28555,8 @@ function DepartmentAdmin({ S, role, target, notify, go }) {
     // Same never-silent rule: on failure say so and fall back to OFF rather than leaving the toggle
     // showing a state it cannot vouch for. A wrong "on" here misrepresents what a station bought.
     supabase.rpc("pa_get_geofence_enabled", { p_department_id: deptId }).then(({ data, error }) => {
-      if (error) { setAddonErr(error.message); setGeofenceOn(false); return; }
-      setAddonErr(null); setGeofenceOn(!!data);
+      if (error) { setAddonErr(error.message); setGeofenceOn(false); setGeofenceSaved(null); return; }
+      setAddonErr(null); setGeofenceOn(!!data); setGeofenceSaved(!!data);
     });
     loadStations(deptId);
     loadMembers(deptId);
@@ -28592,7 +28608,25 @@ function DepartmentAdmin({ S, role, target, notify, go }) {
     const { error } = await supabase.rpc("pa_set_geofence_enabled", { p_department_id: deptId, p_enabled: !!geofenceOn });
     setSavingAddons(false);
     if (error) { setAddonSaveState("err"); notify?.({ kind: "error", title: "Couldn't save add-ons", text: error.message || "Please try again." }); return; }
+    setGeofenceSaved(!!geofenceOn);
     setAddonSaveState("ok"); setTimeout(() => setAddonSaveState(""), 2500);
+  }
+
+  /* ONE HOUSE'S OWN SWITCH — the flag phones obey (stations.geofence_enabled). Saved per row, straight away, through
+     pa_set_station_geofence, which is PA-gated, refuses to switch on a house with no pin, and writes that one column.
+     NEVER A FALSE "SAVED": an error is shown as the error, and a success must hand back THIS station's id — anything
+     else (null, another id) means nothing was written and is said so. The list is then re-read, so the row on screen
+     is the server's answer, not our guess. */
+  async function setStationFence(r, on) {
+    const id = r.station_id;
+    setStFenceBusy(id); setStFenceMsg(null);
+    const { data, error } = await supabase.rpc("pa_set_station_geofence", { p_station_id: id, p_enabled: !!on });
+    setStFenceBusy(null);
+    if (error) { setStFenceMsg({ id, ok: false, text: error.message || "Couldn't save. Please try again." }); return; }
+    if (data !== id) { setStFenceMsg({ id, ok: false, text: "Couldn't save — nothing was written. Please try again." }); return; }
+    setStRows((rows) => (rows || []).map((x) => (x.station_id === id ? { ...x, geofence_enabled: !!on } : x)));
+    setStFenceMsg({ id, ok: true, text: on ? "Saved — this house's switch is on." : "Saved — this house's switch is off." });
+    loadStations(deptId);
   }
 
   // Screen-level PA gate (nav already filters, but guard the render too — mirrors the DB self-gate)
@@ -28772,45 +28806,120 @@ function DepartmentAdmin({ S, role, target, notify, go }) {
         {mbMsg && <div style={{ fontSize: 12.5, color: /^Added/.test(mbMsg) ? FIRE.greenText : FIRE.redText, marginTop: 8 }}>{mbMsg}</div>}
       </Card>
 
-      {/* ---- PER-STATION ADD-ONS ----
-           THIS CARD CHANGES REAL BEHAVIOUR, which is what separates it from the one above. Module
-           visibility only hides navigation — nothing about the department actually works
-           differently. Flipping geofencing on turns BACKGROUND LOCATION into something this
-           department's members can be asked for. It is still double-gated (the VITE_GEOFENCE_ENABLED
-           build flag, and each member's own OS permission after the disclosure screen), but this is
-           the switch that makes any of it reachable, so it is worth reading twice before saving.
+      {/* ---- GEOFENCING (PAID ADD-ON) ----
+           THIS CARD CHANGES REAL BEHAVIOUR, which is what separates it from module visibility: it decides where a
+           phone may record arrivals by BACKGROUND LOCATION. It is still gated by the VITE_GEOFENCE_ENABLED build flag
+           and by each member's own OS permission after the disclosure screen.
 
-           ADD_ONS is a list so the next one — the after-call checklist, whatever follows — is a new
-           entry here and nothing else: same card, same save button, same RPC shape. */}
+           TWO SWITCHES, AND THE CARD SAYS SO. It used to be titled "Per-station add-ons" with ONE checkbox, and that
+           checkbox was the DEPARTMENT master (departments.geofence_enabled). The flag a phone actually obeys when it
+           builds its fences is each house's own (stations.geofence_enabled), which this screen could neither show nor
+           set — so a department read "ON" here for months while its only house was off and no phone held a fence
+           (North Hood, 2026-11). Now:
+             1. the master switch, labelled as exactly that, with its own Save (pa_set_geofence_enabled, unchanged);
+             2. a row per house from pa_department_stations, in the DA station list's own words (stationFenceLine),
+                each with its own switch saved straight away (pa_set_station_geofence).
+           A fence exists only where BOTH are on. With the master off, house rows that are on stay visible and are
+           marked not live — never hidden, never green. Pins and radius are not edited here; that is the Department
+           Admin's station editor.
+
+           ADD_ONS stays a list so the next add-on — the after-call checklist, whatever follows — is a new entry here;
+           the geofence entry is the one that carries the per-station block. */}
       {geofenceOn !== null && (() => {
+        const masterKnown = geofenceSaved !== null;
+        const masterLive = geofenceSaved === true;
+        const geofenceBlock = (
+          <div data-geofence-stations style={{ margin: "2px 0 4px 24px", display: "flex", flexDirection: "column", gap: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", color: FIRE.textMuted2, margin: "6px 0 2px" }}>EACH STATION&rsquo;S OWN SWITCH</div>
+            {masterKnown && !masterLive && (stRows || []).some((r) => r.geofence_enabled) && (
+              <div data-not-live style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.45, margin: "2px 0 4px" }}>
+                The department master switch is off, so none of these are live — no phone builds a fence until it is switched on and saved.
+              </div>
+            )}
+            {!masterKnown && (
+              <div style={{ fontSize: 12, color: FIRE.amberText, lineHeight: 1.45, margin: "2px 0 4px" }}>
+                The master switch couldn&rsquo;t be read, so whether these are live is unknown.
+              </div>
+            )}
+            {stRows === null && !stListErr && <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "4px 0" }}>Loading stations…</div>}
+            {stListErr && (
+              <div style={{ fontSize: 12.5, color: FIRE.amberText, padding: "4px 0", lineHeight: 1.45 }}>
+                Couldn&rsquo;t load this department&rsquo;s stations ({stListErr}), so their switches can&rsquo;t be shown.
+              </div>
+            )}
+            {stRows !== null && stRows.length === 0 && !stListErr && (
+              <div style={{ fontSize: 12.5, color: FIRE.textMuted, padding: "4px 0" }}>No stations yet — add one above.</div>
+            )}
+            {(stRows || []).map((r) => {
+              const line = stationFenceLine(r);
+              const pinned = line.tone !== "nopin";
+              const busy = stFenceBusy === r.station_id;
+              // Green only when it is genuinely live: this house on AND the saved master on.
+              const color = line.tone === "nopin" ? FIRE.textMuted2 : line.tone === "on" ? (masterLive ? FIRE.greenText : FIRE.amberText) : FIRE.textMuted;
+              const msg = stFenceMsg && stFenceMsg.id === r.station_id ? stFenceMsg : null;
+              return (
+                <div key={r.station_id} data-station-fence={r.station_id} style={{ padding: "7px 0", borderBottom: `1px solid ${FIRE.lineNoir}` }}>
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: pinned && !busy ? "pointer" : "default" }}>
+                    <input type="checkbox" aria-label={`Automatic arrival at ${r.name}`} checked={!!r.geofence_enabled} disabled={!pinned || busy || stFenceBusy !== null}
+                      onChange={(e) => setStationFence(r, e.target.checked)}
+                      style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red, marginTop: 2 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: FIRE.textPrimary }}>
+                        {r.name}{r.label && <span style={{ fontSize: 12, fontWeight: 400, color: FIRE.textMuted, marginLeft: 6 }}>{r.label}</span>}
+                        {r.is_active === false && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.amberText, marginLeft: 6 }}>RETIRED</span>}
+                      </span>
+                      <span data-fence-line style={{ display: "block", fontSize: 12, marginTop: 2, color }}>{line.text}</span>
+                      {line.tone === "on" && masterKnown && !masterLive && (
+                        <span style={{ display: "block", fontSize: 11.5, color: FIRE.amberText, marginTop: 2 }}>Not live — the department master switch is off.</span>
+                      )}
+                      {!pinned && (
+                        <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.45 }}>Needs a location first — a Department Admin sets it in the station editor.</span>
+                      )}
+                    </span>
+                    {busy && <Loader2 size={14} className="spin" style={{ flexShrink: 0, marginTop: 3 }} />}
+                  </label>
+                  {msg && <div role={msg.ok ? "status" : "alert"} style={{ fontSize: 12, marginTop: 4, marginLeft: 24, color: msg.ok ? FIRE.greenText : FIRE.redText, lineHeight: 1.45 }}>{msg.ok ? msg.text : `Couldn't save: ${msg.text}`}</div>}
+                </div>
+              );
+            })}
+          </div>
+        );
         const ADD_ONS = [
           {
             key: "geofence",
-            label: "Geofencing (paid add-on)",
-            sub: "Automatic station hours via background location. Turn on only for stations on the geofencing add-on.",
+            label: "Automatic arrival — department master switch",
+            sub: "Turning this on makes geofencing available to this department. No phone builds a fence until a station's own switch below is also on.",
             value: !!geofenceOn,
             set: setGeofenceOn,
+            after: geofenceBlock,
           },
         ];
         return (
           <Card padding="14px 16px" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 460, marginTop: 12 }}>
-            <CardHead icon={MapPin} title="Per-station add-ons" style={{ marginBottom: 2 }} />
+            <CardHead icon={MapPin} title="Geofencing (paid add-on)" style={{ marginBottom: 2 }} />
+            <div data-truth-line style={{ fontSize: 12.5, color: FIRE.textMuted, margin: "4px 0 4px", lineHeight: 1.5 }}>
+              Phones build a fence only where BOTH the department master switch and that station&rsquo;s own switch are on.
+            </div>
             {addonErr && <div style={{ fontSize: 12.5, color: FIRE.redText, marginTop: 6, lineHeight: 1.45 }}>Couldn't load add-ons: {addonErr} — showing everything off, which may not be accurate.</div>}
             {ADD_ONS.map((a) => (
-              <label key={a.key} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "8px 0", cursor: "pointer" }}>
-                <input type="checkbox" checked={a.value} onChange={(e) => a.set(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red, marginTop: 2 }} />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: a.value ? FIRE.textPrimary : FIRE.textMuted }}>{a.label}</span>
-                  <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.45 }}>{a.sub}</span>
-                </span>
-                {a.value && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.greenText, flexShrink: 0, marginTop: 3 }}>ON</span>}
-              </label>
+              <div key={a.key}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "8px 0", cursor: "pointer" }}>
+                  <input type="checkbox" checked={a.value} onChange={(e) => a.set(e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0, accentColor: FIRE.red, marginTop: 2 }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: a.value ? FIRE.textPrimary : FIRE.textMuted }}>{a.label}</span>
+                    <span style={{ display: "block", fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, lineHeight: 1.45 }}>{a.sub}</span>
+                  </span>
+                  {a.value && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: FIRE.greenText, flexShrink: 0, marginTop: 3 }}>ON</span>}
+                </label>
+                {a.after || null}
+              </div>
             ))}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
               <button style={{ ...FS.btnPrimary, opacity: savingAddons ? 0.7 : 1 }} onClick={saveAddons} disabled={savingAddons}>{savingAddons ? <><Loader2 size={16} className="spin" /> Saving…</> : <><CheckCircle2 size={16} /> Save add-ons</>}</button>
               {addonSaveState === "ok" && <span style={{ fontSize: 13, color: FIRE.greenText, fontWeight: 600 }}>Saved ✓</span>}
               {addonSaveState === "err" && <span style={{ fontSize: 13, color: FIRE.redText }}>Couldn't save — check your permissions.</span>}
             </div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted2, marginTop: 4, lineHeight: 1.45 }}>Station switches save as you tick them; this button saves the master switch only.</div>
           </Card>
         );
       })()}
