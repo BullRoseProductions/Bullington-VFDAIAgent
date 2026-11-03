@@ -27,10 +27,19 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 // ---------------------------------------------------------------- 1. shared/members.js
 const M = await import(pathToFileURL(join(root, "shared/members.js")).href);
 const P = (id, status, extra = {}) => ({ id, name: id, status, access: ["Member"], ...extra });
-const OWNER = "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4", TEST = "02c4a728-9d58-4e58-89b4-4f277aad2272", DEMO = "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f";
+const OWNER = "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4", DEMO = "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f";
+// The pilot stations' test accounts (skip-listed, not deleted — Ashlea's ruling 2026-11-02): "Test" (North Hood County),
+// "Test Five" (Granbury), "Test Admin" (Lipan). TEST is the first; all three are pinned below. The old "test account"
+// id 02c4a728-… had no member row and is gone from the list.
+const TEST_IDS = ["6c926026-5ef7-446f-8e0c-8778a6b5523c", "045f4d7a-7613-4bec-a421-9194ccd3a5b7", "1daddf8e-85f3-47d0-8fab-993e1004c5b9"];
+const TEST = TEST_IDS[0], STALE = "02c4a728-9d58-4e58-89b4-4f277aad2272";
 ok("B-1/B-2: Active and Probationary count; Inactive does not", M.isCountedMember(P("a", "Active")) && M.isCountedMember(P("p", "Probationary")) && !M.isCountedMember(P("i", "Inactive")));
 ok("B-3: Project Admin, owner, test and demo are out of the count AND the list", [P("pa", "Active", { access: ["Project Admin"] }), P(OWNER, "Active"), P(TEST, "Active"), P(DEMO, "Active", { access: ["Board Member"] })]
   .every((m) => !M.isCountedMember(m) && !M.isListedMember(m)));
+ok("B-3: every pilot test account (Test, Test Five, Test Admin) is out of the count AND the list — whatever its status or role",
+  TEST_IDS.every((id) => [P(id, "Active"), P(id, "Inactive"), P(id, "Active", { access: ["Department Admin"] })].every((m) => !M.isCountedMember(m) && !M.isListedMember(m))));
+ok("B-3: the list is exactly owner + demo + the three test accounts; the stale id (no member row) is gone",
+  M.STATS_EXCLUDED_IDS.size === 5 && [OWNER, DEMO, ...TEST_IDS].every((id) => M.STATS_EXCLUDED_IDS.has(id)) && !M.STATS_EXCLUDED_IDS.has(STALE));
 ok("B-4: a separated Active member is listed but not counted", M.isListedMember(P("s", "Active", { separated: true })) && !M.isCountedMember(P("s", "Active", { separated: true })));
 ok("masked fields (NULL — a non-leader's view) never exclude: status null / separated null still count", M.isCountedMember(P("x", null, { separated: null })) && M.isCountedMember(P("y", "Active", { separated: undefined })));
 const roster = [P("a1", "Active"), P("a2", "Active"), P("p1", "Probationary"), P("i1", "Inactive"), P("s1", "Active", { separated: true }), P("pa", "Active", { access: ["Project Admin"] }), P(OWNER, "Active")];
@@ -141,7 +150,7 @@ globalThis.__sb = { calls: [], writes: [], table: () => [], answer: () => ({ dat
 // ---------------------------------------------------------------- 2. HELPER PINS + E-2 + invariants
 const src = readFileSync(join(root, "src/App.jsx"), "utf8");
 const dig = readFileSync(join(root, "api/digest.js"), "utf8");
-const IDS = [OWNER, TEST, DEMO];
+const IDS = [OWNER, DEMO, ...TEST_IDS];
 ok("PIN: the owner/test/demo ids live ONLY in shared/members.js (not App.jsx, not digest.js)", IDS.every((id) => !src.includes(id) && !dig.includes(id)) && IDS.every((id) => readFileSync(join(root, "shared/members.js"), "utf8").includes(id)));
 ok("PIN App: imports isListedMember + isCountedMember + headcount from ../shared/members.js; no countsInStats / STATS_EXCLUDED_IDS of its own",
   src.includes('import { isListedMember, isCountedMember, headcount } from "../shared/members.js";') && !/const countsInStats\s*=/.test(src) && !/const STATS_EXCLUDED_IDS\s*=/.test(src) && !/countsInStats\(/.test(src) && !src.includes("filter(countsInStats)"));

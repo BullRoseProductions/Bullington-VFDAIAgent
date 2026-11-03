@@ -20,11 +20,18 @@
  */
 
 /* Owner, test and demo accounts — out of every count and every assignee picker. Was hard-coded TWICE (App.jsx and
-   api/digest.js, "MUST stay in sync"); now once. */
+   api/digest.js, "MUST stay in sync"); now once.
+   THE TEST ACCOUNTS STAY (Ashlea's ruling, 2026-11-02): they are her windows into the pilot stations, so they are
+   skip-listed here rather than deleted. Their attendance / hours rows stay as history; this list is what keeps them out
+   of a station's real numbers wherever the numbers go through isListedMember / isCountedMember (not everywhere yet —
+   see claude/B4C_TestAccounts_SkipList_Draft.md for the count sites that read raw rows). Ids from the read-only live
+   inventory of 2026-11-01. */
 export const STATS_EXCLUDED_IDS = new Set([
   "0ad3dc98-5af3-4ae5-8c04-f7902e0cf7c4",  // the owner (Member N)
-  "02c4a728-9d58-4e58-89b4-4f277aad2272",  // test account
-  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com)
+  "fc4a1a0f-f885-4ca9-baf9-ce47eb47448f",  // Demo Account (test@b4c.com) — North Hood County
+  "6c926026-5ef7-446f-8e0c-8778a6b5523c",  // "Test" — North Hood County
+  "045f4d7a-7613-4bec-a421-9194ccd3a5b7",  // "Test Five" — Granbury (a Department Admin: Ashlea's accepted risk)
+  "1daddf8e-85f3-47d0-8fab-993e1004c5b9",  // "Test Admin" — Lipan
 ]);
 
 const isProjectAdmin = (m) => Array.isArray(m?.access) && m.access.includes("Project Admin");
