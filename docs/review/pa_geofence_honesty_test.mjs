@@ -27,7 +27,7 @@ const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", nam
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "07377ed";                    // live main when this was drafted (industrial-noir-67)
-const REV = process.env.REV ?? "";         // "" = the working tree; pinned to the reviewed sha at promote
+const REV = process.env.REV ?? "951fb0a";   // pinned to the reviewed range 07377ed..951fb0a (gate PASS @951fb0a)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
