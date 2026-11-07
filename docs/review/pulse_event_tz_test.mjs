@@ -16,6 +16,9 @@
 //        (on the bug, 12:30 PM was the 1h band); 6:30 PM gives the 1h band; 7:30 PM gives nothing.
 //   3. Each layer holds alone. The fixed pulse with the OLD zoned-time is correct, and the OLD pulse with the NEW
 //      zoned-time is correct.
+//   2b. Commit 2, todayISOIn: under UTC at 7:00 PM Central, todayISOIn() (no tz) is the Central date, not tomorrow's;
+//      pulse's diag todayISO is the Central date; a task due today reads task_due_today, never task_overdue, at 7 PM
+//      and at 11:59 PM; a task due tomorrow reads task_due_tomorrow. At BASE the same task read overdue at 7 PM.
 //   4. The test catches the bug: origin/main's pulse + zoned-time (BASE) under the same UTC clock reads "at 1:00 PM".
 //   5. Fences: the files changed vs BASE are exactly api/pulse.js, shared/zoned-time.js and this test. api/_cron.js,
 //      vercel.json and sql/ are untouched; verified counts 132/32/14; Notify held.
@@ -55,6 +58,10 @@ ok("zonedInstantFrom(2026,11,5,19,0) with NO tz = the same Central instant",
   zt.zonedInstantFrom(2026, 11, 5, 19, 0).toISOString() === "2026-11-06T01:00:00.000Z");
 ok("in CDT the default is 5h, not 6: zonedInstant('2026-10-01','19:00') = 2026-10-02T00:00Z",
   zt.zonedInstant("2026-10-01", "19:00").toISOString() === "2026-10-02T00:00:00.000Z");
+ok("todayISOIn() with NO tz at 7:00 PM CT Nov 5 (01:00Z Nov 6) = 2026-11-05, not 2026-11-06",
+  zt.todayISOIn(undefined, new Date("2026-11-06T01:00:00Z")) === "2026-11-05", zt.todayISOIn(undefined, new Date("2026-11-06T01:00:00Z")));
+ok("todayISOIn(Central) explicit at the same moment = 2026-11-05; at 12:00 AM CT Nov 6 it rolls to 2026-11-06",
+  zt.todayISOIn(CT, new Date("2026-11-06T01:00:00Z")) === "2026-11-05" && zt.todayISOIn(CT, new Date("2026-11-06T06:00:00Z")) === "2026-11-06");
 ok("DEFAULT_TZ is exported as America/Chicago (duty-period.js's convention)", zt.DEFAULT_TZ === CT);
 
 // ---------------------------------------------------------------- the fakes
@@ -102,6 +109,10 @@ class PinnedDate extends RealDate {
 }
 globalThis.Date = PinnedDate;
 
+const TASKS = [
+  { id: "t-today", department_id: "d1", text: "Check SCBA", due_date: "2026-11-05", status: "open", assigned_to: "m1" },
+  { id: "t-tomorrow", department_id: "d1", text: "Hose test", due_date: "2026-11-06", status: "open", assigned_to: "m1" },
+];
 const SESSION = { id: "s-basics", department_id: "d1", title: "Back to the Basics", date: "2026-11-05", start_time: "19:00:00", audience: "all", done: false, status: "scheduled" };
 async function run(handler, nowISO) {
   FAKE_NOW = RealDate.parse(nowISO);
@@ -109,6 +120,7 @@ async function run(handler, nowISO) {
     training_sessions: [SESSION],
     members: [{ id: "m1", department_id: "d1", access: ["Member"], status: "Active" }],
     departments: [{ id: "d1", week_start_day: 1 }],
+    action_items: TASKS,
   } };
   const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
   const log = console.log, err = console.error; console.log = () => {}; console.error = () => {};
@@ -116,7 +128,9 @@ async function run(handler, nowISO) {
   finally { console.log = log; console.error = err; }
   const ev = (res.body?.would || []).filter((w) => w.subject_ref === `${SESSION.id}:${SESSION.date}`);
   const d = (res.body?.diag?.sessions || []).find((s) => s.id === SESSION.id);
-  return { code: res.code, writes: globalThis.__S.writes, types: ev.map((w) => w.type), bodies: ev.map((w) => w.body), startsAtUTC: d?.startsAtUTC, band: d?.band };
+  const task = (id) => (res.body?.would || []).filter((w) => w.subject_ref === id).map((w) => w.type);
+  return { code: res.code, writes: globalThis.__S.writes, types: ev.map((w) => w.type), bodies: ev.map((w) => w.body), startsAtUTC: d?.startsAtUTC, band: d?.band,
+           todayISO: res.body?.diag?.todayISO, taskToday: task("t-today"), taskTomorrow: task("t-tomorrow") };
 }
 
 // Moments, all CST (UTC-6) on 2026-11-05.
@@ -154,6 +168,18 @@ const NOW = await load("now", null, null);
     JSON.stringify(a.types) === '["event_24h"]' && JSON.stringify(b.types) === '["event_1h"]', `${a.types}/${b.types}`);
 }
 
+// ---------------------------------------------------------------- 2b. todayISOIn in pulse (commit 2)
+{
+  const r = await run(NOW, "2026-11-06T01:00:00Z");   // 7:00 PM CT Nov 5
+  ok("pulse (fixed) at 7:00 PM CT: diag todayISO = 2026-11-05 (the Central date, not tomorrow's)", r.todayISO === "2026-11-05", r.todayISO);
+  ok("pulse (fixed) at 7:00 PM CT: a task due today → task_due_today, NOT task_overdue", JSON.stringify(r.taskToday) === '["task_due_today"]', JSON.stringify(r.taskToday));
+  ok("pulse (fixed) at 7:00 PM CT: a task due tomorrow → task_due_tomorrow, not due today", JSON.stringify(r.taskTomorrow) === '["task_due_tomorrow"]', JSON.stringify(r.taskTomorrow));
+  const s = await run(NOW, "2026-11-06T05:59:00Z");   // 11:59 PM CT Nov 5
+  ok("pulse (fixed) at 11:59 PM CT: still 2026-11-05, the task due today is still due today", s.todayISO === "2026-11-05" && JSON.stringify(s.taskToday) === '["task_due_today"]', `${s.todayISO} ${s.taskToday}`);
+  const u = await run(NOW, "2026-11-06T06:00:00Z");   // 12:00 AM CT Nov 6
+  ok("pulse (fixed) at 12:00 AM CT Nov 6: rolls over, yesterday's task is now overdue (the real boundary)", u.todayISO === "2026-11-06" && JSON.stringify(u.taskToday) === '["task_overdue"]', `${u.todayISO} ${u.taskToday}`);
+}
+
 // ---------------------------------------------------------------- 3. each layer alone
 {
   const fixOnly = await load("fix-only", null, BASE);       // fixed pulse, the OLD zoned-time (no default)
@@ -175,6 +201,9 @@ const NOW = await load("now", null, null);
     `${r.startsAtUTC} ${JSON.stringify(r.types)} ${JSON.stringify(r.bodies)}`);
   const s = await run(OLD, AT_1830);
   ok(`at ${BASE}, by 6:30 PM CT the session already reads 'past': the real 1h window got no reminder`, s.types.length === 0 && s.band === "past", s.band);
+  const o = await run(OLD, "2026-11-06T01:00:00Z");
+  ok(`the today bug reproduces at ${BASE}: at 7:00 PM CT todayISO = 2026-11-06 and the task due today reads task_overdue`,
+    o.todayISO === "2026-11-06" && JSON.stringify(o.taskToday) === '["task_overdue"]' && JSON.stringify(o.taskTomorrow) === '["task_due_today"]', `${o.todayISO} ${o.taskToday} ${o.taskTomorrow}`);
 }
 globalThis.Date = RealDate;
 

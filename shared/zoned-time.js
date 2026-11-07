@@ -18,11 +18,12 @@
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
-/* DEFAULT ZONE. zonedInstant and zonedInstantFrom default to Central, the same convention as
+/* DEFAULT ZONE. zonedInstant, zonedInstantFrom and todayISOIn default to Central, the same convention as
    duty-period.js's DEFAULT_TZ. Before this default existed, a call that left out tz handed
    `undefined` to Intl.DateTimeFormat, which quietly fell back to the PROCESS zone: correct on a
    Central-zone Mac, six hours wrong on Vercel. That is how api/pulse.js sent "at 1:00 PM" for a
-   7:00 PM session from the day the converter moved here (2026-08-22) until the hotfix
+   7:00 PM session, and how its bare todayISOIn() called a task due today "overdue" from 6 PM to
+   midnight Central, from the day the converter moved here (2026-08-22) until the hotfix
    (fix/pulse-event-tz). A fixed default, even one a future non-Central department will outgrow, is
    better than one that changes with the machine.
    This is part of the standing one-decision timezone plan: these defaults, duty-period.js's
@@ -72,7 +73,7 @@ export function zonedInstant(dateISO, timeHHMM, tz = DEFAULT_TZ) {
 
 /* Today, as the department experiences it. A plain date compared against a UTC "today" would roll
    over six hours early and call things overdue on the evening before. */
-export function todayISOIn(tz, now = new Date()) {
+export function todayISOIn(tz = DEFAULT_TZ, now = new Date()) {
   const c = civil(now, tz);
   return `${c.y}-${pad2(c.m)}-${pad2(c.d)}`;
 }

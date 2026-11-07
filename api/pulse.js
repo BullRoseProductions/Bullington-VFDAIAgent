@@ -226,7 +226,7 @@ export default async function handler(req, res) {
      Reads only. Produces candidate rows; nothing here writes or sends.
      -------------------------------------------------------------------------------------------- */
   const nowMs = Date.now();
-  const todayISO = todayISOIn();
+  const todayISO = todayISOIn(TZ);   // explicit: bare, this was UTC on Vercel, so 6 PM-midnight CT read "today" as tomorrow
   const tomorrowISO = addDaysISO(todayISO, 1);
 
   const detected = [];
