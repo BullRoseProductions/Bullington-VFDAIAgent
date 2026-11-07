@@ -304,7 +304,12 @@ export default async function handler(req, res) {
         continue;
       }
 
-      const startsAt = zonedInstant(sess.date, sess.start_time);
+      /* TZ is passed EXPLICITLY. Without it this call ran in the process zone — UTC on Vercel — and
+         put every session 5-6 hours early: "Back to the Basics at 1:00 PM" for a 7:00 PM session,
+         with both reminder bands opening early too. shared/zoned-time.js now defaults to Central as a
+         backstop, but the department zone is a decision this file makes, so it says so here.
+         Pinned by docs/review/pulse_event_tz_test.mjs, which runs under a forced TZ=UTC. */
+      const startsAt = zonedInstant(sess.date, sess.start_time, TZ);
       const hoursUntil = (startsAt.getTime() - nowMs) / 3_600_000;
 
       let type = null, severity = null, why = null;

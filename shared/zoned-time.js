@@ -17,6 +17,19 @@
  */
 
 const pad2 = (n) => String(n).padStart(2, "0");
+
+/* DEFAULT ZONE. zonedInstant and zonedInstantFrom default to Central, the same convention as
+   duty-period.js's DEFAULT_TZ. Before this default existed, a call that left out tz handed
+   `undefined` to Intl.DateTimeFormat, which quietly fell back to the PROCESS zone: correct on a
+   Central-zone Mac, six hours wrong on Vercel. That is how api/pulse.js sent "at 1:00 PM" for a
+   7:00 PM session from the day the converter moved here (2026-08-22) until the hotfix
+   (fix/pulse-event-tz). A fixed default, even one a future non-Central department will outgrow, is
+   better than one that changes with the machine.
+   This is part of the standing one-decision timezone plan: these defaults, duty-period.js's
+   DEFAULT_TZ, pulse's TZ and the hardcoded America/Chicago SQL sites all become the
+   departments.timezone column when it ships. Callers should still pass tz explicitly. */
+export const DEFAULT_TZ = "America/Chicago";
+
 const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
 /* An instant, expressed as the calendar date it falls on IN A GIVEN ZONE. Callers do integer
@@ -43,7 +56,7 @@ export function tzOffsetMs(date, tz) {
    TWO PASSES, deliberately. The first offset is computed at the GUESSED instant, which is wrong for
    any wall time near a DST transition; re-deriving the offset at that corrected instant settles it.
    Verified against both 2026 transitions and both standard offsets. */
-export function zonedInstantFrom(y, m, d, hh, mm, tz) {
+export function zonedInstantFrom(y, m, d, hh, mm, tz = DEFAULT_TZ) {
   const guess = Date.UTC(y, m - 1, d, hh, mm, 0);
   let inst = guess - tzOffsetMs(new Date(guess), tz);
   inst = guess - tzOffsetMs(new Date(inst), tz);
@@ -51,7 +64,7 @@ export function zonedInstantFrom(y, m, d, hh, mm, tz) {
 }
 
 /* The form api/pulse.js uses: an ISO date string plus "HH:MM" (a session's date + start_time). */
-export function zonedInstant(dateISO, timeHHMM, tz) {
+export function zonedInstant(dateISO, timeHHMM, tz = DEFAULT_TZ) {
   const [Y, M, D] = String(dateISO).split("-").map(Number);
   const [h, m] = String(timeHHMM || "00:00").slice(0, 5).split(":").map(Number);
   return zonedInstantFrom(Y, M, D, h, m, tz);
