@@ -25,6 +25,7 @@
  *                               and no fake compliance rows are needed.
  */
 import { createClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import { requireCron } from "./_cron.js";
 import { pulseOutcome } from "../shared/cron-outcome.js";   // cron honesty: a failed run answers 5xx
 // The WRITER only. sendPush stays unimported — this slice must remain incapable of sending.
@@ -55,6 +56,20 @@ import { overdueOnly, startOfToday } from "../shared/maint-due.js";
    ellipsis — "+3 more" tells an officer how much they are not seeing, which "…" does not. Three is
    enough to recognise the trucks without turning a push into a paragraph. */
 const MAINT_SUMMARY_MAX = 3;
+
+/* Maintenance summary identity (fix/maint-renag). See the MAINTENANCE block for the rule. */
+const MAINT_RESEND_DAYS = 7;
+function maintFingerprint(overdue) {
+  const ids = overdue.map((o) => String(o.subject_ref)).sort();   // subject_ref = the maintenance row id
+  return createHash("sha256").update(ids.join(",")).digest("hex").slice(0, 12);
+}
+/* "<dept>:<fp>:<YYYY-MM-DD>" → { fp, day }; the legacy "<dept>:<YYYY-MM-DD>" → { fp: null, day }. */
+function parseMaintRef(ref) {
+  const parts = String(ref || "").split(":");
+  const day = parts[parts.length - 1];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  return { fp: parts.length >= 3 ? parts[parts.length - 2] : null, day };
+}
 function maintSummaryBody(names) {
   if (names.length <= MAINT_SUMMARY_MAX) return names.join(", ");
   const shown = names.slice(0, MAINT_SUMMARY_MAX).join(", ");
@@ -582,11 +597,28 @@ export default async function handler(req, res) {
   }
 
   /* ---- MAINTENANCE (overdue only) -------------------------------------------------------------
-     ONE SUMMARY PER OFFICER/ADMIN PER DEPARTMENT PER DAY. subject_ref carries the day key, so the
-     dedupe index (member_id, type, subject_ref) makes every later run the same day a harmless
-     no-op and lets it fire again tomorrow while the task is still overdue. That is the duty_summary
-     pattern, for the same reason: an hourly cron must nag daily, not hourly, and one summary beats
-     one push per item — a department with fifteen overdue tasks should buzz a phone once.
+     ONE SUMMARY PER OFFICER/ADMIN PER DEPARTMENT, SENT WHEN THE OVERDUE SET CHANGES, ELSE WEEKLY.
+     One summary beats one push per item: a department with fifteen overdue tasks buzzes a phone once.
+
+     WHY NOT DAILY (fix/maint-renag, gate-approved 2026-11-11). This used to fire every day while
+     anything was overdue. In the field that meant North Hood's eight officers got "Brush 26 · Radio
+     Not Working" every single day for at least ten days (Nov 2-11): 80 identical pushes about a repair
+     filed as a weekly task. A notification that says the same thing every morning trains people to
+     swipe it away unread, which is the opposite of what an overdue-readiness alert is for.
+
+     THE RULE. The summary's identity is a FINGERPRINT of the overdue set (the sorted maintenance row
+     ids, hashed). A member gets a summary when:
+       - they have none for this department in the last week, or
+       - the fingerprint differs from the last one they got (something new went overdue, or
+         something was cleared and others remain), or
+       - the last one is 7+ Central days old (an unchanged set still reminds, weekly).
+     subject_ref = <dept>:<fingerprint>:<dayKey>. The day key keeps the weekly reminder a NEW row
+     (same set next week = new ref), and the dedupe index (member_id, type, subject_ref) still makes
+     every later run the same day a harmless no-op. History is read per member, so an officer added
+     today gets the current picture today even while everyone else is inside their week.
+     Legacy refs (<dept>:<dayKey>, no fingerprint) count as "unknown set": one summary in the new
+     format, then the rule applies. An unreadable history fails this family (detect:maint) rather
+     than guessing; the hourly cron retries. The weekly digest email is untouched.
 
      OVERDUE ONLY. maint_due stays digest-only: a daily nag about something due in six days is noise,
      and the weekly email already covers the warning tier.
@@ -629,10 +661,43 @@ export default async function handler(req, res) {
     const maintSummary = {};
     let maintPreviewShown = false;
 
+    // The last summary each member got, per department, within the re-send window.
+    const overdueByDept = new Map([...byDept].map(([deptId, rows]) => [deptId, overdueOnly(rows, today)]));
+    const histDepts = [...overdueByDept].filter(([, o]) => o.length).map(([d]) => d);
+    const lastSent = new Map();   // `${member}\u0000${dept}` -> { fp, day }
+    if (histDepts.length) {
+      const since = new Date(nowMs - MAINT_RESEND_DAYS * 86_400_000 - 2 * 86_400_000).toISOString();   // +2d slack; the day compare decides
+      const { data: hist, error: hErr } = await sb.from("notifications")
+        .select("member_id, department_id, type, subject_ref, created_at")
+        .eq("type", "maint_summary")
+        .in("department_id", histDepts)
+        .gte("created_at", since);
+      if (hErr) throw new Error(`maint history: ${hErr.message}`);
+      for (const h of hist || []) {
+        if (h.type !== "maint_summary" || !histDepts.includes(h.department_id)) continue;   // belt and braces over the filters
+        const ref = parseMaintRef(h.subject_ref);
+        if (!ref) continue;
+        const k = `${h.member_id}\u0000${h.department_id}`;
+        const prev = lastSent.get(k);
+        if (!prev || ref.day > prev.day || (ref.day === prev.day && ref.fp && !prev.fp)) lastSent.set(k, ref);
+      }
+    }
+    const resendOnOrBefore = addDaysISO(dayKey, -MAINT_RESEND_DAYS);
+
     for (const [deptId, rows] of byDept) {
-      const overdue = overdueOnly(rows, today);
-      const recips = leaders.filter((m) => m.department_id === deptId).map((m) => m.id);
-      maintSummary[deptId] = { overdueItems: overdue.length, opsLeaders: recips.length, fanOut: overdue.length ? recips.length : 0 };
+      const overdue = overdueByDept.get(deptId);
+      const allRecips = leaders.filter((m) => m.department_id === deptId).map((m) => m.id);
+      const fp = overdue.length ? maintFingerprint(overdue) : null;
+      const why = {};
+      const recips = allRecips.filter((id) => {
+        const last = lastSent.get(`${id}\u0000${deptId}`);
+        const reason = !last ? "first" : last.fp !== fp ? "set-changed" : last.day <= resendOnOrBefore ? "weekly" : null;
+        if (reason) why[id] = reason;
+        return !!reason;
+      });
+      maintSummary[deptId] = { overdueItems: overdue.length, opsLeaders: allRecips.length, fingerprint: fp,
+                               fanOut: overdue.length ? recips.length : 0,
+                               suppressedSameSetThisWeek: overdue.length ? allRecips.length - recips.length : 0 };
       if (!overdue.length || !recips.length) continue;
 
       const names = overdue.map((o) => `${o.apparatus} · ${o.task}`).sort();   // stable text across runs
@@ -645,11 +710,11 @@ export default async function handler(req, res) {
           department_id: deptId,
           family: "maint",                            // already in FAMILIES, so is_muted() needs no change
           type: "maint_summary",                      // prefix "maint" -> ICON["maint"] = Wrench
-          subject_ref: `${deptId}:${dayKey}`,         // one summary per member per department per day
+          subject_ref: `${deptId}:${fp}:${dayKey}`,   // set fingerprint + day: new set → new row; same set → weekly
           title,
           body,
           severity: "critical",                       // overdue maintenance is a readiness problem
-          why: `${overdue.length} overdue as of ${dayKey}`,
+          why: `${overdue.length} overdue as of ${dayKey} (${why[memberId]})`,
         });
       }
 
@@ -657,7 +722,7 @@ export default async function handler(req, res) {
       if (!maintPreviewShown) {
         diag.maintSummaryPreview = {
           member_id: recips[0], department_id: deptId,
-          title, body, subject_ref: `${deptId}:${dayKey}`,
+          title, body, subject_ref: `${deptId}:${fp}:${dayKey}`,
           type: "maint_summary", family: "maint",
           items: names,
         };

@@ -219,12 +219,14 @@ const NOW = await load("now", null, null);
 globalThis.Date = RealDate;
 
 // ---------------------------------------------------------------- 5. fences
-// Working tree vs BASE (pin to the reviewed sha in the promote push: docs memory "slice test fences go stale").
+// PINNED to the reviewed range BASE..REV (gate PASS @328b918, deployed 2026-11-11). "vs the working tree" went red as soon
+// as the next slice (fix/maint-renag) landed on top: slice test fences go stale.
+const REV = "328b918";
 const sh = (c) => execSync(c, { cwd: root }).toString().trim();
-const changed = [...new Set([...sh(`git diff --name-only ${BASE}`).split("\n"), ...sh("git ls-files --others --exclude-standard -- api shared src docs/review sql vercel.json").split("\n")])].filter(Boolean).sort();
+const changed = sh(`git diff --name-only ${BASE} ${REV}`).split("\n").filter(Boolean).sort();
 const allowed = ["api/pulse.js", "docs/review/pulse_event_tz_test.mjs", "shared/zoned-time.js"];
 ok("files changed vs BASE are exactly api/pulse.js, shared/zoned-time.js, this test", JSON.stringify(changed) === JSON.stringify(allowed), JSON.stringify(changed));
-ok("api/_cron.js, vercel.json, sql/ untouched", sh(`git diff --name-only ${BASE} -- api/_cron.js vercel.json sql`) === "");
-const tok = (p) => ((execSync(`cat ${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString()).match(new RegExp("verifie" + "d", "gi")) || []).length;
+ok("api/_cron.js, vercel.json, sql/ untouched", sh(`git diff --name-only ${BASE} ${REV} -- api/_cron.js vercel.json sql`) === "");
+const tok = (p) => ((execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString()).match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("verified counts: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
