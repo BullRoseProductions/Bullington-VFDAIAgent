@@ -18,8 +18,9 @@
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
-/* DEFAULT ZONE. zonedInstant, zonedInstantFrom and todayISOIn default to Central, the same convention as
-   duty-period.js's DEFAULT_TZ. Before this default existed, a call that left out tz handed
+/* DEFAULT ZONE. Every function here that takes a zone (civil, tzOffsetMs, zonedInstantFrom,
+   zonedInstant, todayISOIn) defaults it to Central, the same convention as duty-period.js's
+   DEFAULT_TZ, so none of them can mean "whatever zone the server is in". Before this default existed, a call that left out tz handed
    `undefined` to Intl.DateTimeFormat, which quietly fell back to the PROCESS zone: correct on a
    Central-zone Mac, six hours wrong on Vercel. That is how api/pulse.js sent "at 1:00 PM" for a
    7:00 PM session, and how its bare todayISOIn() called a task due today "overdue" from 6 PM to
@@ -36,7 +37,7 @@ const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 /* An instant, expressed as the calendar date it falls on IN A GIVEN ZONE. Callers do integer
    arithmetic on these civil values, so once the civil date is known no DST transition can move a
    boundary — the arithmetic never touches an instant again. */
-export function civil(date, tz) {
+export function civil(date, tz = DEFAULT_TZ) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz, hour12: false, weekday: "short",
     year: "numeric", month: "2-digit", day: "2-digit",
@@ -45,7 +46,7 @@ export function civil(date, tz) {
   return { y: +p.year, m: +p.month, d: +p.day, wd: WD[p.weekday] };
 }
 
-export function tzOffsetMs(date, tz) {
+export function tzOffsetMs(date, tz = DEFAULT_TZ) {
   const dtf = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false,
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const p = Object.fromEntries(dtf.formatToParts(date).map((x) => [x.type, x.value]));

@@ -19,10 +19,11 @@
 //   2b. Commit 2, todayISOIn: under UTC at 7:00 PM Central, todayISOIn() (no tz) is the Central date, not tomorrow's;
 //      pulse's diag todayISO is the Central date; a task due today reads task_due_today, never task_overdue, at 7 PM
 //      and at 11:59 PM; a task due tomorrow reads task_due_tomorrow. At BASE the same task read overdue at 7 PM.
+//   2c. Commit 3: civil() and tzOffsetMs() with no tz are Central too, and no exported function takes tz without a default.
 //   4. The test catches the bug: origin/main's pulse + zoned-time (BASE) under the same UTC clock reads "at 1:00 PM".
 //   5. Fences: the files changed vs BASE are exactly api/pulse.js, shared/zoned-time.js and this test. api/_cron.js,
 //      vercel.json and sql/ are untouched; verified counts 132/32/14; Notify held.
-import { mkdtempSync, existsSync } from "fs";
+import { mkdtempSync, existsSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync, spawnSync } from "child_process";
@@ -62,6 +63,16 @@ ok("todayISOIn() with NO tz at 7:00 PM CT Nov 5 (01:00Z Nov 6) = 2026-11-05, not
   zt.todayISOIn(undefined, new Date("2026-11-06T01:00:00Z")) === "2026-11-05", zt.todayISOIn(undefined, new Date("2026-11-06T01:00:00Z")));
 ok("todayISOIn(Central) explicit at the same moment = 2026-11-05; at 12:00 AM CT Nov 6 it rolls to 2026-11-06",
   zt.todayISOIn(CT, new Date("2026-11-06T01:00:00Z")) === "2026-11-05" && zt.todayISOIn(CT, new Date("2026-11-06T06:00:00Z")) === "2026-11-06");
+{ // commit 3: the last two helpers. 7:00 PM CT Nov 5 = 01:00Z Nov 6, so a UTC fallback would say Nov 6 / offset 0.
+  const at = new Date("2026-11-06T01:00:00Z"), c = zt.civil(at);
+  ok("civil(7:00 PM CT Nov 5) with NO tz = { y:2026, m:11, d:5, wd:4 } (Thursday in Central), not Nov 6",
+    c.y === 2026 && c.m === 11 && c.d === 5 && c.wd === 4, JSON.stringify(c));
+  ok("tzOffsetMs with NO tz = -6h in CST and -5h in CDT, not 0",
+    zt.tzOffsetMs(at) === -6 * 3600e3 && zt.tzOffsetMs(new Date("2026-10-02T00:00:00Z")) === -5 * 3600e3, String(zt.tzOffsetMs(at)));
+}
+ok("no function in shared/zoned-time.js takes a tz without a default",
+  !/\btz\s*[,)]/.test((readFileSync(join(root, "shared/zoned-time.js"), "utf8").match(/^export function [^\n]*\(([^)]*)\)/gm) || []).join("\n")),
+  (readFileSync(join(root, "shared/zoned-time.js"), "utf8").match(/^export function [^\n]*/gm) || []).filter((l) => /\btz\b/.test(l)).length + " tz-taking functions");
 ok("DEFAULT_TZ is exported as America/Chicago (duty-period.js's convention)", zt.DEFAULT_TZ === CT);
 
 // ---------------------------------------------------------------- the fakes
