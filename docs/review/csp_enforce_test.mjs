@@ -6,6 +6,9 @@
 //   3. every other header block, the crons and the rewrites are identical to BASE
 //   4. index.html (the source Vite builds from) has no inline <script> — an inline boot script would die under script-src 'self'
 //   fences: only vercel.json (+ this test, the note) changed; no src / api / sql; verified 132/32/14; Notify held
+// LATER (2026-11-12, csp_realtime_wss slice): the enforced value gained exactly `wss://ifeptqnlucmvhlvadcpj.supabase.co` in
+// connect-src for Live Data 1b. This test stays PINNED to d377999..b6bb821 (the enforce step itself); the wss addition is
+// guarded by docs/review/csp_realtime_wss_test.mjs and m3_headers_test §4.
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";

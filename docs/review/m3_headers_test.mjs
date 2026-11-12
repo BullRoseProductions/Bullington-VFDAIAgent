@@ -6,7 +6,8 @@
 //      frame-ancestors 'none', base-uri + form-action 'self'
 //   4. DERIVED FROM WHAT THE APP LOADS: every external origin literal in src/ + shared/ is either allowed in the directive
 //      that loads it or classified as navigation-only (a link, never fetched); the Supabase project origin is the one
-//      supabase-js talks to; the pdf.js worker is a same-origin Vite asset; no realtime channel (so no wss:)
+//      supabase-js talks to; the pdf.js worker is a same-origin Vite asset; the one realtime channel (src/liveData.js) is
+//      allowed by exactly the project's wss origin in today's enforced CSP (csp_realtime_wss slice, 2026-11-12)
 //   5. verified 132/32/14, Notify held, only vercel.json + this test + the review record changed vs the base
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { join } from "path";
@@ -64,7 +65,14 @@ ok(`every external origin in src/ + shared/ is classified (${origins.length} fou
 ok("the loaded ones are allowed where they load: Google Fonts CSS in style-src, its font files in font-src, app.b4thecall.com (native API base) in connect-src",
   has("style-src", "https://fonts.googleapis.com") && has("font-src", "https://fonts.gstatic.com") && has("connect-src", "https://app.b4thecall.com") && /@import url\('https:\/\/fonts\.googleapis\.com\/css2/.test(src));
 ok("the Supabase project origin (REST/auth/storage fetch + signed image URLs) is in connect-src and img-src", has("connect-src", "'self'", SUPABASE) && has("img-src", SUPABASE));
-ok("no realtime channel in the client, so no wss: is allowed (add it if a .channel() ever lands)", !/supabase\.channel\(|\.channel\("/.test(src) && !Object.values(CSP).flat().some((s) => s.startsWith("wss:")));
+// Realtime landed with Live Data 1b (src/liveData.js, private dept:<id> channel). The released report-only CSP (REL) had no wss:
+// and still has none; TODAY's enforced CSP (working-tree vercel.json, csp_realtime_wss slice) allows exactly the project's wss origin.
+const NOW = Object.fromEntries((JSON.parse(readFileSync(join(root, "vercel.json"), "utf8")).headers.flatMap((b) => b.headers).find((h) => h.key === "Content-Security-Policy")?.value || "").split(";").map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+const chanFiles = files.filter((p) => /supabase\.channel\(|\.channel\(/.test(readFileSync(join(root, p), "utf8")));
+ok("the only realtime channel in the client is src/liveData.js", JSON.stringify(chanFiles) === JSON.stringify(["src/liveData.js"]), JSON.stringify(chanFiles));
+ok("the released report-only CSP had no wss:", !Object.values(CSP).flat().some((s) => s.startsWith("wss:")));
+ok("today's enforced CSP allows exactly one wss: origin — the Supabase project's — and only in connect-src",
+  JSON.stringify(Object.entries(NOW).flatMap(([d, v]) => v.filter((s) => s.startsWith("wss:")).map((s) => d + " " + s))) === JSON.stringify(["connect-src wss://ifeptqnlucmvhlvadcpj.supabase.co"]));
 ok("data:/blob: only where the app needs them — img (QR canvas, signatures, data-URI logos, mammoth images, object URLs), font (pdf.js embedded fonts), worker (pdf.js)",
   has("img-src", "data:", "blob:") && has("font-src", "data:") && has("worker-src", "'self'", "blob:") && !has("script-src", "data:") && !has("script-src", "blob:") && !has("connect-src", "data:"));
 ok("the pdf.js worker is a same-origin Vite asset (?url import), so worker-src 'self' covers it", /import PDF_WORKER_URL from "pdfjs-dist\/build\/pdf\.worker\.min\.mjs\?url"/.test(src));

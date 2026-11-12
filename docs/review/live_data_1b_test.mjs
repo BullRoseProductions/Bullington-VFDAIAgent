@@ -26,6 +26,7 @@ const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", nam
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "17153e2";   // the build-18 re-cut sha this slice is cut from
+const REV = "cdf1d37";    // gate PASS @cdf1d37 (2026-11-12): fences pinned to the released range BASE..REV
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
 const { Window } = hdReq("happy-dom");
 const win = new Window({ url: "https://app.test/" });
@@ -228,12 +229,12 @@ ok("8. kill switch reads VITE_LIVE_DATA_ENABLED !== \"0\"", /import\.meta\.env\?
 const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("8. verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("8. Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const untracked = execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n").filter(Boolean);
+const changed = execSync(`git diff --name-only ${BASE} ${REV}`, { cwd: root, maxBuffer: 1 << 27 }).toString().trim().split("\n").filter(Boolean);
+const untracked = [];   // pinned range: committed files only
 const files = [...new Set([...changed, ...untracked])].filter((f) => f !== ".env" && f !== "node_modules").sort();
 const EXPECT = ["docs/review/field_requests_ui_test.mjs", "docs/review/live_data_1b_BUILD_ORDER.md", "docs/review/live_data_1b_test.mjs", "src/App.jsx", "src/liveData.js", "src/useReconnect.js"];   // + the field-requests test's maxBuffer fix (ENOBUFS on git show of App.jsx)
 ok("8. files changed vs 17153e2: exactly the 1b set", JSON.stringify(files) === JSON.stringify(EXPECT), JSON.stringify(files));
-const untouched = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim() === "";
+const untouched = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim() === "";
 ok("8. no ios/, android/, package, api/, sql/, shared/, vercel.json, api/_cron.js changes", ["ios", "android", "package.json", "package-lock.json", "api", "sql", "shared", "vercel.json", "api/_cron.js"].every(untouched));
 ok("8. supabase-js (realtime) is an existing dependency — nothing added", /"@supabase\/supabase-js"/.test(readFileSync(join(root, "package.json"), "utf8")));
 console.info = realInfo;
