@@ -24,7 +24,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { authedFetch, isNative } from "./apiBase";
 import { useReconnect, useAutoRefresh, useEditorOpen, looksOffline } from "./useReconnect";
-import NotificationCenter, { NotificationBell } from "./Notifications";
+import NotificationCenter, { NotificationBell, markNotificationReadFromPush } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
 import { geofenceConsentAvailable, geofenceAvailable, readGeofenceConsent, writeGeofenceConsent, clearGeofenceConsent, requestGeofencePermission, getGeofencePermission, stopGeofence, startStationGeofence, isStationGeofenceActive, subscribeGeofenceConsent, drainGeofenceQueue, bootstrapGeofence } from "./geofence";
@@ -3086,7 +3086,8 @@ export default function App() {
     if (!myMemberId) return;
     let cancelled = false;
     (async () => {
-      await initPush({ onOpen: () => go("notifications") });
+      // Opening a push marks THAT notification read (fix/notif-clearing): the payload's own id, uuid-checked inside.
+      await initPush({ onOpen: (id) => { go("notifications"); markNotificationReadFromPush(id); } });
       if (!cancelled) await syncDeviceRegistration();
     })();
     return () => { cancelled = true; };

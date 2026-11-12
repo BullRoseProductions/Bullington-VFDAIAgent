@@ -51,10 +51,16 @@ const MOCKS = {
       return { my_member_id: me().id, my_department_id: "d-1", is_dept_admin: da, is_department_admin: da, is_leader: lead, is_leadership: lead, is_canmanage: lead, is_canmanage_ops: lead, is_project_admin: a.includes("Project Admin"), has_password: true,
         my_open_station_session: [], my_stations: [], dept_cert_types: [], my_read_sign_queue: [] }; };
     function q(table) {
-      const f = { single: false }; const b = {};
+      const f = { single: false, head: false, where: [] }; const b = {};
       for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "gte", "lte", "lt", "gt", "or", "not", "range", "filter", "match", "contains", "overlaps", "ilike", "like", "textSearch", "insert", "update", "delete", "upsert"]) b[m] = () => b;
+      // fix/notif-clearing: a HEAD-only count (the shared unread count) honours eq / is like PostgREST; every other read is
+      // unchanged (unfiltered fixtures), so no earlier assertion moves.
+      b.select = (_c, o) => { if (o && o.head) f.head = true; return b; };
+      b.eq = (c, v) => { f.where.push((r) => r[c] === v); return b; };
+      b.is = (c, v) => { f.where.push((r) => (r[c] ?? null) === v); return b; };
       b.single = () => { f.single = true; return b; }; b.maybeSingle = () => { f.single = true; return b; };
       b.then = (res, rej) => { const t = { members: [me()], departments: [{ name: "Test VFD", disabled_modules: [] }], ...(FX().tables || {}) }; const rows = t[table] || [];
+        if (f.head) { const n = rows.filter((r) => f.where.every((w) => w(r))).length; return Promise.resolve({ data: null, error: null, count: n }).then(res, rej); }
         return Promise.resolve(f.single ? { data: rows[0] || null, error: null } : { data: rows, error: null, count: rows.length }).then(res, rej); };
       return b;
     }

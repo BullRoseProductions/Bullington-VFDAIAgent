@@ -199,13 +199,16 @@ for (const [ago, expectSent] of [[1, false], [6, false], [7, true], [8, true]]) 
 globalThis.Date = RealDate;
 
 // ---------------------------------------------------------------- 8. fences
+// PINNED to the reviewed range BASE..REV (gate PASS @64399b3, deployed 2026-11-11): "vs the working tree" went stale once
+// fix/notif-clearing landed on top.
+const REV = "64399b3";
 const sh = (c) => execSync(c, { cwd: root }).toString().trim();
-const changed = [...new Set([...sh(`git diff --name-only ${BASE}`).split("\n"), ...sh("git ls-files --others --exclude-standard -- api shared src docs/review sql vercel.json").split("\n")])].filter(Boolean).sort();
+const changed = sh(`git diff --name-only ${BASE} ${REV}`).split("\n").filter(Boolean).sort();
 // + pulse_event_tz_test.mjs: its working-tree fence pinned to its released range (cae3f78..328b918), fence lines only.
 ok("files changed vs 328b918 are exactly api/pulse.js, this test, and the tz test's fence pin",
   JSON.stringify(changed) === JSON.stringify(["api/pulse.js", "docs/review/maint_renag_test.mjs", "docs/review/pulse_event_tz_test.mjs"]), JSON.stringify(changed));
 ok("weekly email untouched: api/digest.js, shared/maint-due.js byte-identical; api/_cron.js, vercel.json, sql/ untouched",
-  sh(`git diff --name-only ${BASE} -- api/digest.js shared api/_cron.js vercel.json sql`) === "");
-const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
+  sh(`git diff --name-only ${BASE} ${REV} -- api/digest.js shared api/_cron.js vercel.json sql`) === "");
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("verified counts: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock, ChevronRight, ArrowLeft, Clock } from "lucide-react";
+import { Bell, CheckCheck, AlertTriangle, Award, HardHat, Wrench, CalendarClock, ClipboardCheck, ClipboardList, Settings, Lock, ArrowLeft, Clock } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { useAutoRefresh } from "./useReconnect";
 import { FIRE } from "./theme.js";
@@ -45,25 +45,76 @@ async function fetchNotifications(limit = 50) {
   return data || [];
 }
 
+/* ---------------- THE ONE UNREAD COUNT (fix/notif-clearing) ----------------
+   Ashlea, 2026-11-11: opened notifications "don't clear", and the bell said 4 while the header and
+   Unread tab said 7. Two causes, both fixed here:
+     - Each surface counted its OWN window: the bell filtered the newest 50 rows, the centre the
+       newest 100. A leader also loads every department-wide row, so their own older unread items
+       fell out of the bell's 50 while still inside the centre's 100. Same predicate, different
+       window, different number.
+     - The bell re-read only on mount and on visibilitychange, so marking rows read in the centre
+       left the badge (and the sidebar Today count fed from it) stale until the app was
+       backgrounded and brought back.
+   Now there is ONE number, counted by the server (head-only count of YOUR rows with read_at NULL;
+   no window), held here and shared by the bell, the sidebar (via onCount), the header "N new" and
+   the Unread tab. Every action that changes it (a tap, "Mark all read", opening a push) updates it
+   immediately and then re-counts. A failed count keeps the last-known number, never zero. */
+const unreadStore = { meId: null, n: null, subs: new Set() };
+const listSubs = new Set();   // centre list reloads when something outside it (a push open) marks a row read
+const emitUnread = () => unreadStore.subs.forEach((f) => f());
+
+export async function refreshUnreadCount(meId = unreadStore.meId) {
+  if (!meId) return;
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("member_id", meId)
+    .is("read_at", null);
+  if (error || typeof count !== "number") return;              // keep the last-known count on a failed read
+  unreadStore.meId = meId;
+  unreadStore.n = count;
+  emitUnread();
+}
+function bumpUnread(delta) {                                    // optimistic, corrected by the re-count that follows
+  if (typeof unreadStore.n !== "number") return;
+  unreadStore.n = Math.max(0, unreadStore.n + delta);
+  emitUnread();
+}
+function useUnreadCount(meId) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const f = () => tick((x) => x + 1);
+    unreadStore.subs.add(f);
+    return () => { unreadStore.subs.delete(f); };
+  }, []);
+  return meId && unreadStore.meId === meId && typeof unreadStore.n === "number" ? unreadStore.n : 0;
+}
+
+/* Mark one notification read from OUTSIDE the centre — the push-open path. The id comes from our
+   own push payload (api/_push.js data.notification_id); it is checked as a uuid and handed only to
+   mark_notification_read, which touches read_at on the caller's own row and nothing else. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export async function markNotificationReadFromPush(id) {
+  if (!id || !UUID_RE.test(String(id))) return false;
+  const { error } = await supabase.rpc("mark_notification_read", { p_id: String(id) });
+  if (!error) listSubs.forEach((f) => f());
+  await refreshUnreadCount();
+  return !error;
+}
+
 /* The bell + unread count for the app chrome. */
-/* onCount (optional): told the same unread number the bell shows, after each successful read — the grouped sidebar
-   surfaces it on its Today header. It reuses THIS read; it never triggers one of its own. */
+/* onCount (optional): told the shared unread number whenever it changes — the grouped sidebar surfaces it on its Today
+   header. It never triggers a read of its own. */
 export function NotificationBell({ meId, onOpen, onCount }) {
-  const [unread, setUnread] = useState(0);
-  const load = useCallback(async () => {
-    const rows = await fetchNotifications(50);
-    if (rows === null) return;                                   // keep the last-known count on a failed read
-    const n = rows.filter((r) => !r.read_at && r.member_id === meId).length;   // badge counts YOUR items only
-    setUnread(n);
-    if (onCount) onCount(n);
-  }, [meId, onCount]);
+  const unread = useUnreadCount(meId);
+  useEffect(() => { if (onCount) onCount(unread); }, [unread, onCount]);
 
   useEffect(() => {
-    load();
-    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    refreshUnreadCount(meId);
+    const onVis = () => { if (document.visibilityState === "visible") refreshUnreadCount(meId); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [load]);
+  }, [meId]);
 
   return (
     <button
@@ -240,13 +291,16 @@ export default function NotificationCenter({ S, meId, back }) {
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("all");   // All / Unread / Training / Gear — display only
 
+  const unreadMine = useUnreadCount(meId);   // the shared server count — header and Unread tab (see THE ONE UNREAD COUNT)
   const load = useCallback(async () => {
     const data = await fetchNotifications(100);
     setLoaded(true);
+    refreshUnreadCount(meId);
     if (data === null) { setErr("Couldn't load your notifications. Pull again in a moment."); return; }   // keep prior rows
     setErr(""); setRows(data);
-  }, []);
+  }, [meId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { listSubs.add(load); return () => { listSubs.delete(load); }; }, [load]);   // a push open marked one read
   /* Resume-refresh the inbox. The bell above already re-reads on every visibilitychange with no
      throttle, deliberately — a badge count is one cheap select and wants to be instant. The list
      is the heavier read, so it takes the shared throttle instead of a second ad-hoc listener. */
@@ -254,14 +308,17 @@ export default function NotificationCenter({ S, meId, back }) {
 
   async function markRead(id) {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, read_at: r.read_at || new Date().toISOString() } : r)));   // optimistic
+    bumpUnread(-1);                                               // the bell, header, tab and sidebar move NOW
     const { error } = await supabase.rpc("mark_notification_read", { p_id: id });
-    if (error) load();                                            // server refused → resync rather than lie
+    if (error) { load(); return; }                                // server refused → resync rather than lie (load re-counts)
+    refreshUnreadCount(meId);
   }
   async function markAll() {
     setBusy(true);
     const { error } = await supabase.rpc("mark_all_notifications_read");
     setBusy(false);
     if (error) { setErr("Couldn't mark those read. Please try again."); return; }
+    bumpUnread(-Infinity);                                        // 0 at once; load() re-counts from the server
     load();
   }
 
@@ -273,7 +330,6 @@ export default function NotificationCenter({ S, meId, back }) {
 
   const mine = rows.filter((r) => r.member_id === meId);
   const dept = rows.filter((r) => r.member_id !== meId);          // leaders only — RLS returns nothing here for a plain member
-  const unreadMine = mine.filter((r) => !r.read_at).length;
 
   /* THE CENTER, built to b4c_notifications_center_noir.html: typed colour tiles, unread rows with a red left
      accent + status dot, OVERDUE / IN 1 HR style pills read off the stored type, Today / Earlier groups and
@@ -332,7 +388,8 @@ export default function NotificationCenter({ S, meId, back }) {
             <span>· {when(n)}{!n.read_at || dim ? "" : " · read"}</span>
           </div>
         </div>
-        {unread && <ChevronRight size={16} color={FIRE.textMuted} style={{ alignSelf: "center", flexShrink: 0 }} />}
+        {/* No chevron. A tap marks the row read and goes nowhere; an arrow promising navigation would be a lie
+            (gate ruling, fix/notif-clearing). Deep-linking to the subject is a separate decision. */}
       </div>
     );
   };
