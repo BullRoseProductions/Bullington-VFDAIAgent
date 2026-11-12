@@ -9,7 +9,7 @@ import {
   Truck, Award, CalendarCheck, BarChart3, UserPlus, Phone, Mail, ClipboardCheck,
   Palette, Image as ImageIcon, Camera, MapPin, List, Wand2, QrCode, RefreshCw, Trash2, BookOpen,
   Maximize2, RotateCcw, Globe, LifeBuoy, Lock, HeartHandshake, Printer, ExternalLink, HardHat, ArrowLeftRight, Check, ChevronLeft,
-  Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell, ShieldCheck, Activity, CreditCard,
+  Settings as SettingsIcon, BadgeCheck, Grid3x3, Bell, ShieldCheck, Activity, CreditCard, Shirt,
 } from "lucide-react";
 import { FIRE, AUTH } from "./theme.js";
 import { downloadDepartmentReport, downloadCapitalPlan, downloadApparatusCheck, downloadFleetCheck, downloadStationHoursReport } from "./report.js";
@@ -958,6 +958,73 @@ function YourSix({ S, role, meId, members, notify }) {
 // Member's optional "reach out" person — private, self-only. Reads the current value via a
 // self-read (RLS allows a member to read their own row); writes via the tightly-scoped
 // set_reach_out_person RPC (own row + reach_out_member_id column only).
+/* SHIRT SIZE (field request, gate S-1 2026-11-12): lives in member_private beside birthday/address — private by
+   default. DA/PA edit it in the Edit member form (same upsert, existing table policies); each member reads and sets
+   ONLY their own through my_shirt_size() / set_my_shirt_size(p_size) (SECURITY DEFINER, keyed by my_member_id()).
+   The list mirrors member_private_shirt_size_chk exactly; the server upper-cases and refuses anything else (BAD_SIZE). */
+const SHIRT_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "W-XS", "W-S", "W-M", "W-L", "W-XL", "W-2XL", "Y-S", "Y-M", "Y-L"];
+const SHIRT_GROUPS = [["Adult", SHIRT_SIZES.slice(0, 8)], ["Women's", SHIRT_SIZES.slice(8, 14)], ["Youth", SHIRT_SIZES.slice(14)]];
+function ShirtSizeSelect({ value, onChange, disabled, style, id }) {
+  return (
+    <select id={id} style={style} value={value || ""} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— Not set —</option>
+      {SHIRT_GROUPS.map(([g, list]) => <optgroup key={g} label={g}>{list.map((z) => <option key={z} value={z}>{z}</option>)}</optgroup>)}
+    </select>
+  );
+}
+/* MY INFO — the member's own shirt size. A FAILED READ IS NOT "NOT SET": the size stays undefined (loading) or keeps the
+   last-known value and shows a Retry; the dropdown is disabled until a read has actually succeeded, so a hiccup can never
+   be saved back as a blank. */
+function MyInfo({ notify }) {
+  const [size, setSize] = useState(undefined);   // undefined = not loaded yet, null = nothing on file, "M" = on file
+  const [readErr, setReadErr] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  async function load() {
+    const { data, error } = await supabase.rpc("my_shirt_size");
+    if (!alive.current) return;
+    if (error) { setReadErr(true); return; }                          // keep last-known; never fall back to "not set"
+    setReadErr(false); setSize(data || null);
+  }
+  useEffect(() => { load(); }, []);
+  async function choose(next) {
+    const prev = size;
+    setSaving(true);
+    const { data, error } = await supabase.rpc("set_my_shirt_size", { p_size: next || null });
+    if (!alive.current) return;
+    setSaving(false);
+    if (error) {
+      const msg = String(error.message || "");
+      const text = msg.startsWith("BAD_SIZE") ? "That size isn't on the list. Pick one from the menu."
+        : msg.startsWith("NO_MEMBER") ? "Your login isn't matched to an active member record. Ask your Department Admin."
+        : "Something went wrong saving that. Please try again.";
+      notify({ kind: "error", title: "Couldn't save your shirt size", text, details: error.message });
+      setSize(prev); return;
+    }
+    setSize(data || null);
+    notify({ kind: "success", text: data ? `Shirt size saved: ${data}.` : "Shirt size cleared." });
+  }
+  const loaded = size !== undefined;
+  return (
+    <PageShell band watermark="MY INFO" kicker="MY INFO" title="My info" sub="Details your department uses for gear and uniforms.">
+      <NoirSkin>
+      <div style={{ ...NOIR_INSET, padding: "10px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 9 }}>
+        <Lock size={14} color={FIRE.greenText} style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.4 }}><b style={{ color: FIRE.textPrimary }}>Private.</b> Only you and your Department Admins can see this.</span>
+      </div>
+      <div style={{ ...FS.cardNoir, padding: "14px 16px" }}>
+        <label htmlFor="b4c-my-shirt" style={{ display: "block", fontSize: 12, fontWeight: 600, color: FIRE.textSecondary, marginBottom: 6 }}>Shirt size</label>
+        {!loaded && !readErr && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: FIRE.textMuted }}><Loader2 size={14} className="spin" /> Loading…</div>}
+        {(loaded || readErr) && (
+          <ShirtSizeSelect id="b4c-my-shirt" style={{ ...FS.input, maxWidth: 220 }} value={size} disabled={saving || !loaded} onChange={choose} />
+        )}
+        {readErr && <ReadRetry what="your shirt size" onRetry={() => load()} />}
+      </div>
+      </NoirSkin>
+    </PageShell>
+  );
+}
 function ReachOutPersonPicker({ S, members, meId, notify }) {
   const [current, setCurrent] = useState(undefined);   // undefined = loading, null = none, uuid = set
   const [saving, setSaving] = useState(false);
@@ -1729,6 +1796,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
   );
   if (view === "dept") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<DeptSettings S={S} dept={dept} setDept={setDept} setBrand={setBrand} /></div>;
   if (view === "person") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<ReachOutPersonPicker S={S} members={members} meId={meId} notify={notify} /></div>;
+  if (view === "myinfo") return <div style={{ padding: "4px 2px 0" }}>{backBtn}<MyInfo notify={notify} /></div>;
   if (view === "about") return (
     <PageShell band above={backBtn} kicker={<>SETTINGS &amp; SUPPORT</>} title="About">
       <NoirSkin>
@@ -1775,6 +1843,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
     <NoirSkin>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(250px, 100%), 1fr))", gap: 12 }}>
       {card("person", HeartHandshake, FIRE.greenText, "Your person", "Choose who you'd reach out to first in a hard moment — private to you.")}
+      {card("myinfo", Shirt, FIRE.blueText, "My info", "Your shirt size for gear and uniforms — private to you and your Department Admins.")}
       {isDA && card("dept", Building2, "#8C9AAB", "Department Settings", "Your department's name, station number, and details.")}
       {card("brand", Palette, FIRE.redBright, "Brand Kit", isDA ? "Colors, logo, font, voice — used across the app's tools." : "Your department's colors, logo, and voice (view-only).")}
       {/* DOUBLE-GATED, and invisible today on both counts: VITE_GEOFENCE_ENABLED is unset, and
@@ -12461,7 +12530,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
   const [privErr, setPrivErr] = useState(false);
   const [notesErr, setNotesErr] = useState(false);
   function loadPrivate(isAlive = () => true) {
-    supabase.from("member_private").select("birthday, address, joined_date").eq("member_id", member.id).maybeSingle()
+    supabase.from("member_private").select("birthday, address, joined_date, shirt_size").eq("member_id", member.id).maybeSingle()
       .then(({ data, error }) => { if (!isAlive()) return; if (error) { setPrivErr(true); return; } setPrivErr(false); setPriv(data || {}); });
   }
   function loadNotes(isAlive = () => true) {
@@ -12469,7 +12538,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
       .then(({ data, error }) => { if (!isAlive()) return; if (error || !data) { setNotesErr(true); return; } setNotesErr(false); setNotes(data); });
   }
   function startEditForm() {
-    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", mentor_id: member.mentorId || "", prob_start: probStart || "" });
+    setForm({ name: member.name || "", phone: member.phone === "—" ? "" : (member.phone || ""), status: member.status || "Active", access: (Array.isArray(member.access) ? member.access : ["Member"]).filter((r) => GRANTABLE_ROLES.includes(r)), role: member.role || "", email: member.email || "", birthday: priv?.birthday || "", address: priv?.address || "", joined_date: priv?.joined_date || "", shirt_size: priv?.shirt_size || "", mentor_id: member.mentorId || "", prob_start: probStart || "" });
     setEditing(true);
   }
   async function toggleActive() {
@@ -12500,8 +12569,8 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     if (e1) { setSaving(false); notify({ kind: "error", title: "Couldn't save the member", text: "Something went wrong saving those changes. Please try again.", details: e1.message }); return; }
     const { data: deptId, error: deptErr } = await supabase.rpc("my_department_id");   // authoritative dept id (the member_private with_check compares to my_department_id())
     if (deptErr || !deptId) { setSaving(false); notify({ kind: "error", title: "Couldn't find your department", text: "Please try again.", details: deptErr?.message }); return; }
-    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd }, { onConflict: "member_id" });
-    if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date failed. Please try again.", details: e2.message }); return; }
+    const { error: e2 } = await supabase.from("member_private").upsert({ member_id: member.id, department_id: deptId, birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd, shirt_size: form.shirt_size || null }, { onConflict: "member_id" });
+    if (e2) { setSaving(false); notify({ kind: "error", title: "Profile saved, personal details didn't", text: "The main fields saved, but birthday/address/join date/shirt size failed. Please try again.", details: e2.message }); return; }
     if (canSetProbStart && probStart !== undefined && (form.prob_start || null) !== (probStart || null)) {
       const { data: pr, error: e3 } = await supabase.rpc("set_member_probation", { p_member_id: member.id, p_started_on: form.prob_start || null, p_note: null });
       if (e3) { setSaving(false); notify({ kind: "error", title: "Profile saved, probation start didn't", text: e3.message || "Please try again." }); return; }
@@ -12509,7 +12578,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
     }
     setSaving(false);
     onUpdate({ ...member, name: form.name.trim(), phone: form.phone.trim() || "—", status: form.status, access, role: form.role.trim() || null, joined: joinedYear, joinedOn: jd, mentorId: form.mentor_id || null, email });
-    setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd });
+    setPriv({ birthday: form.birthday || null, address: form.address.trim() || null, joined_date: jd, shirt_size: form.shirt_size || null });
     setEditing(false);
     notify({ kind: "success", text: "Member updated." });
   }
@@ -12686,6 +12755,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                 ["Joined", fmtLongDate(priv?.joined_date) || (member.joined ? `${member.joined} (year on file)` : "—")],
                 ["Birthday", fmtLongDate(priv?.birthday) || "—"],
                 ["Address", priv?.address || "—"],
+                ["Shirt size", priv?.shirt_size || "—"],
               ].map(([l, v]) => (
                 <div key={l} style={l === "Email" || l === "Address" ? { gridColumn: "1 / -1" } : undefined}>
                   <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".1em", color: FIRE.textMuted }}>{l}</div>
@@ -12727,6 +12797,7 @@ function MemberDetail({ S, member, role, back, onUpdate, sessions, notify, membe
                   <span style={{ fontSize: 11, color: FIRE.textMuted, marginTop: 3 }}>{form.prob_start ? "Day 1 of their 180-day probation." : "Not set — their path shows \u201cProbation start not set\u201d."}</span></label>
               )}
               <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Birthday</span><input type="date" style={FS.input} value={form.birthday || ""} onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))} /></label>
+              <label style={S.field}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Shirt size</span><ShirtSizeSelect style={FS.input} value={form.shirt_size} onChange={(v) => setForm((f) => ({ ...f, shirt_size: v }))} /></label>
               <label style={{ ...S.field, gridColumn: "1 / -1" }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Address</span><input style={FS.input} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></label>
             </div>
             <div style={{ fontSize: 12, color: FIRE.textMuted, margin: "8px 0 12px" }}>Email is the member's login identity (stored lowercase). Changing it re-links their sign-in — for someone who already logs in, only change it alongside their auth email. Access changes take effect on their next sign-in.</div>
@@ -17192,6 +17263,54 @@ function RigMaintenanceLog({ rig, canManage, meId, meName, notify }) {
     </div>
   );
 }
+/* MOVE TO STATION (field request, gate A-1 2026-11-12). DA + PA only — isDeptAdmin(role) is the house DA|PA gate,
+   matching the RPC's is_dept_admin() OR is_project_admin(). Shown only when the department has 2+ ACTIVE stations
+   (the same my_stations() list the picker reads); a single-house department never sees it. The move goes through
+   move_apparatus_to_station() ONLY — the apparatus_station_guard trigger refuses any direct station_id write, so
+   this component never writes that column. Checks, maintenance, photos and service history are keyed by the rig,
+   not the station, so they travel with it. */
+function RigMoveStation({ rig, notify, onMoved }) {
+  const [stations, setStations] = useState(null);   // null = unknown (loading or failed) → render nothing
+  const [target, setTarget] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let off = false;
+    supabase.rpc("my_stations").then(({ data, error }) => { if (!off && !error && Array.isArray(data)) setStations(data); });
+    return () => { off = true; };
+  }, []);
+  const active = (stations || []).filter((st) => st.is_active !== false);
+  if (active.length < 2) return null;
+  const nameOf = (id) => { const st = (stations || []).find((x) => x.station_id === id); return st ? (st.label ? `${st.name} (${st.label})` : st.name) : "another station"; };
+  const choices = active.filter((st) => st.station_id !== rig.station_id);
+  async function move() {
+    if (!target) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("move_apparatus_to_station", { p_apparatus: rig.id, p_station: target });
+    setBusy(false);
+    if (error) { notify({ kind: "error", title: `Couldn't move ${rig.name}`, text: error.message || "Please try again." }); return; }
+    setConfirming(false); setTarget("");
+    if (data && data.moved === false) { notify({ kind: "info", text: `${rig.name} is already at ${nameOf(target)}.` }); return; }
+    notify({ kind: "success", title: `${rig.name} moved`, text: `Moved to ${nameOf(target)} — its checks and history went with it.` });
+    if (onMoved) onMoved();
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      <span style={{ fontSize: 12, color: FIRE.textSecondary }}>Station: <b style={{ color: FIRE.textPrimary, fontWeight: 600 }}>{nameOf(rig.station_id)}</b></span>
+      {!confirming ? (<>
+        <select aria-label={`Move ${rig.name} to station`} value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)} style={{ ...FS.input, width: "auto", minWidth: 150, fontSize: 12.5, padding: "6px 8px" }}>
+          <option value="">Move to station…</option>
+          {choices.map((st) => <option key={st.station_id} value={st.station_id}>{st.label ? `${st.name} (${st.label})` : st.name}</option>)}
+        </select>
+        <button disabled={!target || busy} onClick={() => setConfirming(true)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, opacity: !target ? 0.5 : 1 }}><ArrowLeftRight size={13} /> Move</button>
+      </>) : (<>
+        <span style={{ fontSize: 12.5, color: FIRE.textPrimary }}>Move {rig.name} to {nameOf(target)}? Its checks and history go with it.</span>
+        <button disabled={busy} onClick={move} style={{ ...FS.btnPrimary, padding: "6px 10px", fontSize: 12 }}>{busy ? <Loader2 size={13} className="spin" /> : "Yes, move it"}</button>
+        <button disabled={busy} onClick={() => setConfirming(false)} style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }}>Cancel</button>
+      </>)}
+    </div>
+  );
+}
 function Apparatus({ S, role, members, meId, notify, dept }) {
   const activeStationId = useActiveStation();   // undefined = still loading
   const [rigs, setRigs] = useState([]);
@@ -17537,6 +17656,7 @@ function Apparatus({ S, role, members, meId, notify, dept }) {
             <button style={FS.btn} onClick={() => setEditingRigId(null)}>Cancel</button>
           </Card>
         )}
+        {isDeptAdmin(role) && <RigMoveStation rig={r} notify={notify} onMoved={loadRigs} />}
         {/* Mock order (b4c_apparatus_noir.html): photo strip → [checklist | maintenance log] → check history →
             service history → capital tiles. Same components, same gates — only their order and dress changed. */}
         {canManage && <ApparatusPhotos S={S} rig={r} meId={meId} notify={notify} />}
@@ -23236,20 +23356,61 @@ function ProbItemTags({ it }) {
     {kind && tag(kind, FIRE.blueText, "79,144,214")}
   </>);
 }
+/* ONBOARDING CERT NAMES (field request, gate C-1 / AL-1..3, 2026-11-12). The server matches a member's cert to an item
+   when lower(btrim(cert name)) equals the item's cert_name OR any of its cert_aliases (probation_item_states). Members'
+   certs are spelled many ways (IS-100, Ics-100, FEMA IS 100 …), so the editor offers the names actually on file —
+   the department's cert types plus members' cert names, most-held first — and lets the DA accept several spellings.
+   Limits mirror onboarding_items_cert_aliases_chk: ≤25 names, each non-blank after trim and ≤120 characters. */
+const CERT_ALIAS_MAX = 25, CERT_NAME_MAX = 120;
+const certKey = (n) => String(n || "").trim().toLowerCase();
+function buildCertSuggestions(typeNames, certRows) {
+  const by = new Map();   // key -> { name, holders:Set }
+  for (const r of certRows || []) {
+    const k = certKey(r?.name); if (!k) continue;
+    if (!by.has(k)) by.set(k, { name: String(r.name).trim(), holders: new Set() });
+    if (r.member_id) by.get(k).holders.add(r.member_id);
+  }
+  for (const t of typeNames || []) {
+    const k = certKey(t); if (!k) continue;
+    if (!by.has(k)) by.set(k, { name: String(t).trim(), holders: new Set() });
+  }
+  return [...by.values()].sort((a, b) => b.holders.size - a.holders.size || a.name.localeCompare(b.name)).map((x) => ({ name: x.name, holders: x.holders.size }));
+}
+// null = OK to add; otherwise the reason it can't be added (shown to the DA).
+function certAliasProblem(aliases, certName, candidate) {
+  const v = String(candidate || "").trim();
+  if (!v) return "Type or pick a name first.";
+  if (v.length > CERT_NAME_MAX) return `Names can be at most ${CERT_NAME_MAX} characters.`;
+  if ((aliases || []).length >= CERT_ALIAS_MAX) return `An item can accept at most ${CERT_ALIAS_MAX} names.`;
+  if (certKey(v) === certKey(certName) || (aliases || []).some((a) => certKey(a) === certKey(v))) return "That name is already accepted.";
+  return null;
+}
+// AL-1: an item with no cert name AND no accepted names is "not configured" on the server — it can never clear.
+const certWontAutoClear = (it) => it?.kind === "cert" && !String(it.cert_name || "").trim() && !((it.cert_aliases || []).some((a) => String(a || "").trim()));
 /* DA item config (edit mode): in the gate? which phase? how is it satisfied? An ack item points at a document that
    already requires a signature (Read & Sign); hours at a target + source; cert at a cert name. The mentor item stays a
    manual item (the database refuses anything else). */
-function ProbItemConfig({ it, docs, busy, onSave }) {
+function ProbItemConfig({ it, docs, busy, onSave, certNames = [] }) {
   const [target, setTarget] = useState(it.hours_target ?? "");
   const [cert, setCert] = useState(it.cert_name || "");
   useEffect(() => { setTarget(it.hours_target ?? ""); setCert(it.cert_name || ""); }, [it.hours_target, it.cert_name]);
+  const [aliasBuf, setAliasBuf] = useState("");
+  const [aliasErr, setAliasErr] = useState("");
+  const aliases = Array.isArray(it.cert_aliases) ? it.cert_aliases : [];
+  const listId = `b4c-cert-names-${it.id}`;
+  function addAlias() {
+    const why = certAliasProblem(aliases, it.cert_name, aliasBuf);
+    if (why) { setAliasErr(why); return; }
+    setAliasErr(""); setAliasBuf("");
+    onSave({ cert_aliases: [...aliases, aliasBuf.trim()] });
+  }
   const sel = { ...FS.input, padding: "4px 8px", fontSize: 12, width: "auto" };
   const lab = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: FIRE.textSecondary };
   return (
     <div style={{ flexBasis: "100%", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", padding: "4px 0 6px 74px" }}>
       <label style={lab}><input type="checkbox" checked={!!it.clears_to_run} disabled={busy} onChange={(e) => onSave({ clears_to_run: e.target.checked })} /> Required to run calls</label>
       <label style={lab}>Phase <select style={sel} value={it.phase || "onboarding"} disabled={busy} onChange={(e) => onSave({ phase: e.target.value })}><option value="onboarding">Onboarding</option><option value="probation">Probation task</option></select></label>
-      <label style={lab}>Done when <select style={sel} value={it.kind || "manual"} disabled={busy || it.is_mentor} onChange={(e) => onSave({ kind: e.target.value })}>
+      <label style={lab}>Done when <select style={sel} value={it.kind || "manual"} disabled={busy || it.is_mentor} onChange={(e) => onSave(e.target.value !== "cert" && aliases.length ? { kind: e.target.value, cert_aliases: [] } : { kind: e.target.value })}>
         <option value="manual">An officer signs it off</option><option value="ack">A document is signed (Read &amp; Sign)</option><option value="hours">Hours / nights reach a target</option><option value="cert">A current cert is on file</option></select></label>
       {it.kind === "ack" && <label style={lab}>Document <select style={sel} value={it.ack_series_id || ""} disabled={busy} onChange={(e) => onSave({ ack_series_id: e.target.value || null })}>
         <option value="">— Pick a document that requires a signature —</option>
@@ -23260,7 +23421,25 @@ function ProbItemConfig({ it, docs, busy, onSave }) {
         <label style={lab}>Counts <select style={sel} value={it.hours_source || ""} disabled={busy} onChange={(e) => onSave({ hours_source: e.target.value || null })}><option value="">— Pick —</option>{Object.entries(PROB_HOURS_SOURCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label style={lab}>Target <input type="number" min="0.5" step="0.5" style={{ ...sel, width: 70 }} value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)} onBlur={() => { if (String(target) !== String(it.hours_target ?? "")) onSave({ hours_target: target === "" ? null : Number(target) }); }} /> {it.hours_source === "training_nights" ? "nights" : "hr"}</label>
       </>)}
-      {it.kind === "cert" && <label style={lab}>Cert name <input style={{ ...sel, width: 160 }} maxLength={120} value={cert} disabled={busy} placeholder="e.g. Firefighter I" onChange={(e) => setCert(e.target.value)} onBlur={() => { if (cert.trim() !== (it.cert_name || "")) onSave({ cert_name: cert.trim() || null }); }} /></label>}
+      {it.kind === "cert" && (<>
+        <label style={lab}>Cert name <input list={listId} style={{ ...sel, width: 200 }} maxLength={CERT_NAME_MAX} value={cert} disabled={busy} placeholder="Pick from your department's certs" onChange={(e) => setCert(e.target.value)} onBlur={() => { if (cert.trim() !== (it.cert_name || "")) onSave({ cert_name: cert.trim() || null }); }} /></label>
+        <datalist id={listId}>{certNames.map((c) => <option key={c.name} value={c.name}>{c.holders ? `${c.holders} on file` : "cert type"}</option>)}</datalist>
+        {certWontAutoClear(it) && <span role="status" style={{ fontSize: 11.5, fontWeight: 600, color: FIRE.amberText, background: "rgba(204,158,82,.1)", border: "1px solid rgba(204,158,82,.4)", borderRadius: 6, padding: "2px 8px" }}>Won't auto-clear — pick a cert name</span>}
+        <div style={{ flexBasis: "100%", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11.5, color: FIRE.textSecondary }}>Also accept:</span>
+          {aliases.map((a, i) => (
+            <span key={`${a}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: FIRE.textPrimary, background: FIRE.card2Noir, border: `1px solid ${FIRE.lineNoir}`, borderRadius: 999, padding: "2px 4px 2px 9px" }}>
+              {a}
+              <button aria-label={`Stop accepting ${a}`} disabled={busy} onClick={() => onSave({ cert_aliases: aliases.filter((_, j) => j !== i) })} style={{ border: "none", background: "transparent", color: FIRE.textMuted, cursor: "pointer", padding: "0 3px", fontSize: 13, lineHeight: 1 }}>×</button>
+            </span>
+          ))}
+          {aliases.length < CERT_ALIAS_MAX && (<>
+            <input list={listId} aria-label="Another accepted cert name" style={{ ...sel, width: 170 }} maxLength={CERT_NAME_MAX} value={aliasBuf} disabled={busy} placeholder="Another spelling…" onChange={(e) => { setAliasBuf(e.target.value); setAliasErr(""); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAlias(); } }} />
+            <button disabled={busy || !aliasBuf.trim()} onClick={addAlias} style={{ ...FS.btn, padding: "3px 9px", fontSize: 11.5 }}><Plus size={12} /> Add</button>
+          </>)}
+          {aliasErr && <span style={{ fontSize: 11.5, color: FIRE.amberText }}>{aliasErr}</span>}
+        </div>
+      </>)}
     </div>
   );
 }
@@ -23537,7 +23716,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
     .then(({ data, error }) => { if (error) { setLoadErr(true); return; } setDeptId(data || null); });
   useEffect(() => { loadDeptId(); }, []);
   async function loadItems() {   // RLS scopes to my_department_id(); re-fetched after every edit
-    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order, clears_to_run, phase, kind, ack_series_id, hours_target, hours_source, cert_name, requires_doc, approver_kind, approver_role, approver_member_id").order("sort_order", { ascending: true });
+    const { data, error } = await supabase.from("onboarding_items").select("id, category, label, is_mentor, sort_order, clears_to_run, phase, kind, ack_series_id, hours_target, hours_source, cert_name, cert_aliases, requires_doc, approver_kind, approver_role, approver_member_id").order("sort_order", { ascending: true });
     if (error || !data) { setLoadErr(true); return; }   // a failed READ is not "no checklist"
     setLoadErr(false); setItems(data);
   }
@@ -23626,6 +23805,19 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
   // DA config: which items clear a member to run calls, their phase, and how each is satisfied. Direct update of
   // onboarding_items through its existing DA policy — the same write path as rename / reorder.
   const [rsDocs, setRsDocs] = useState([]);
+  /* Cert-name suggestions for cert items: the department's cert types + members' cert names on file (RLS scopes both
+     to the department). A failed read just leaves the list empty — the field still takes free text. */
+  const [certNames, setCertNames] = useState([]);
+  useEffect(() => {
+    if (!editMode || !probOn) return;
+    let off = false;
+    Promise.all([supabase.from("cert_types").select("name"), supabase.from("certs").select("name, member_id")]).then(([t, c]) => {
+      if (off) return;
+      if (t.error && c.error) return;
+      setCertNames(buildCertSuggestions((t.data || []).map((r) => r.name), c.data || []));
+    });
+    return () => { off = true; };
+  }, [editMode, probOn]);
   useEffect(() => {
     if (!editMode || !probOn) return;
     supabase.from("document_series").select("series_id, title, current_version").eq("requires_ack", true).gt("current_version", 0).order("title")
@@ -23854,7 +24046,7 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
                       {it.is_mentor
                         ? <button style={{ ...FS.btn, padding: "5px 9px", opacity: 0.45, cursor: "not-allowed" }} disabled title="Required — reflects the assigned mentor">Remove</button>
                         : canDeleteShared ? <button style={{ ...FS.btn, padding: "5px 9px", color: FIRE.deleteRed }} onClick={() => removeItem(it)} disabled={busy}>Remove</button> : null}
-                      {probOn && !editing && <ProbItemConfig it={it} docs={rsDocs} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
+                      {probOn && !editing && <ProbItemConfig it={it} docs={rsDocs} certNames={certNames} busy={busy} onSave={(patch) => setItemConfig(it, patch)} />}
                       {!editing && oicEligible(it) && <OicItemConfig it={it} members={members} busy={busy} onSave={(c) => setApproverConfig(it, c)} />}
                     </>)}
                   </div>
