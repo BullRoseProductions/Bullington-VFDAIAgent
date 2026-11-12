@@ -218,19 +218,18 @@ ok("3. AL-1 marker: only blank name AND no aliases; a blank name WITH aliases is
 ok("3. onboarding_items select includes cert_aliases; suggestions load cert_types + certs only in edit mode", /cert_name, cert_aliases, requires_doc/.test(src) && /supabase\.from\("cert_types"\)\.select\("name"\), supabase\.from\("certs"\)\.select\("name, member_id"\)/.test(src));
 
 // ---------------------------------------------------------------- 4. FENCES
-const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const untracked = execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n").filter(Boolean);
-const files = [...new Set([...changed, ...untracked])].filter((f) => f !== ".env" && f !== "node_modules").sort();
+const REV = "269fb0b";   // gate PASS @269fb0b (2026-11-12): fences pinned to the released range BASE..REV, so later slices can't stale them
+const files = execSync(`git diff --name-only ${BASE} ${REV}`, { cwd: root }).toString().trim().split("\n").filter(Boolean).sort();
 const NATIVE_B18 = ["android/app/build.gradle", "android/app/src/main/AndroidManifest.xml", "docs/review/ws1_capacitor_DEP_DIFF.patch",
   "docs/review/ws1_npm_audit_AFTER.txt", "docs/review/ws1_npm_audit_BEFORE.txt", "ios/App/App.xcodeproj/project.pbxproj",
   "ios/App/CapApp-SPM/Package.swift", "package-lock.json", "package.json"];   // WS-1 Capacitor 8.5.3, L-6 allowBackup, 3.2 (18) / vc16
 const EXPECT = [...NATIVE_B18, "docs/review/field_requests_ui_test.mjs", "docs/review/notif_clearing_test.mjs", "src/App.jsx"].sort();
 ok("4. changed vs 7b609f4: exactly the build-18 native set + src/App.jsx + this test + the notif test's fence pin", JSON.stringify(files) === JSON.stringify(EXPECT), JSON.stringify(files));
-const untouched = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim() === "";
+const untouched = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim() === "";
 ok("4. no api/, sql/, shared/, vercel.json, api/_cron.js changes", ["api", "sql", "shared", "vercel.json", "api/_cron.js"].every(untouched));
-const nat = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+const nat = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 ok("4. ios/, android/, package changes are only the build-18 native files", [...nat("ios"), ...nat("android"), ...nat("package.json"), ...nat("package-lock.json")].every((f) => NATIVE_B18.includes(f)));
-const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("4. verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("4. Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
 process.exit(process.exitCode || 0);
