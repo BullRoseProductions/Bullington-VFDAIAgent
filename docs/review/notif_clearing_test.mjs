@@ -220,13 +220,16 @@ const NOW = await bundle("now");
 }
 
 // ---------------------------------------------------------------- 8. fences
+// PINNED to the reviewed range BASE..REV (gate PASS @7b609f4, deployed 2026-11-12): "vs the working tree" went stale once
+// the next slice (feat/notif-otherdept-db) landed on top.
+const REV = "7b609f4";
 const sh = (c) => execSync(c, { cwd: root }).toString().trim();
-const changed = [...new Set([...sh(`git diff --name-only ${BASE}`).split("\n"), ...sh("git ls-files --others --exclude-standard -- api shared src docs/review sql vercel.json ios android package.json").split("\n")])].filter(Boolean).sort();
+const changed = sh(`git diff --name-only ${BASE} ${REV}`).split("\n").filter(Boolean).sort();
 // + maint_renag_test.mjs: its working-tree fence pinned to its released range (328b918..64399b3), fence lines only.
 const allowed = ["docs/review/maint_renag_test.mjs", "docs/review/notif_clearing_test.mjs", "docs/review/sidebar_ai_framing_test.mjs", "src/App.jsx", "src/Notifications.jsx"];
 ok("8. files changed vs 64399b3 = src/Notifications.jsx, src/App.jsx, this test, the sidebar test's fake, the re-nag test's fence pin", JSON.stringify(changed) === JSON.stringify(allowed), JSON.stringify(changed));
-ok("8. no api/, sql/, shared/, vercel.json, ios/, android/, package changes", sh(`git diff --name-only ${BASE} -- api sql shared vercel.json ios android package.json package-lock.json`) === "");
-const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
+ok("8. no api/, sql/, shared/, vercel.json, ios/, android/, package changes", sh(`git diff --name-only ${BASE} ${REV} -- api sql shared vercel.json ios android package.json package-lock.json`) === "");
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("8. verified counts: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14, `${tok("src/App.jsx")}/${tok("api/digest.js")}/${tok("api/assistant.js")}`);
 ok("8. Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
 

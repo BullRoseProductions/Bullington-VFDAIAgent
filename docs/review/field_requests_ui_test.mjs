@@ -11,8 +11,10 @@
 //   3. CERT FIELD: suggestions = cert types + names on file, case-insensitive de-dupe, most-held first; the alias limits
 //      (≤25, non-blank, ≤120, no duplicates incl. the cert name); the "won't auto-clear" marker only for blank name AND no
 //      aliases (AL-1); chips add/remove through onSave({cert_aliases}); leaving the cert kind clears aliases; datalist wired.
-//   4. FENCES: only src/App.jsx + this test changed vs 376d6c0 (build 18's sha); no ios/, android/, package changes;
-//      verified 132 / 32 / 14; Notify held; api/_cron.js and vercel.json unchanged.
+//   4. FENCES vs main 7b609f4 (gate ruling 2026-11-12: build 18's re-cut is rebased onto main and carries notification
+//      clearing + the build-18 native commits + these three features): the branch differs from 7b609f4 in EXACTLY the
+//      build-18 native set (Capacitor 8.5.3, allowBackup=false, version bumps, their review files) + src/App.jsx + this test
+//      + the notif_clearing_test fence pin; no api/, sql/, shared/, vercel.json change; verified 132 / 32 / 14; Notify held.
 import { mkdtempSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -23,7 +25,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const BASE = "376d6c0";   // build 18's sha — this branch is deliberately NOT main (notification clearing rides build 19)
+const BASE = "7b609f4";   // origin/main at the rebase (gate ruling 2026-11-12: the build-18 re-cut rides main)
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
 const { Window } = hdReq("happy-dom");
 const win = new Window({ url: "https://app.test/" });
@@ -219,9 +221,15 @@ ok("3. onboarding_items select includes cert_aliases; suggestions load cert_type
 const changed = execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const untracked = execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const files = [...new Set([...changed, ...untracked])].filter((f) => f !== ".env" && f !== "node_modules").sort();
-ok("4. changed vs 376d6c0: only src/App.jsx + this test", JSON.stringify(files) === JSON.stringify(["docs/review/field_requests_ui_test.mjs", "src/App.jsx"]), JSON.stringify(files));
+const NATIVE_B18 = ["android/app/build.gradle", "android/app/src/main/AndroidManifest.xml", "docs/review/ws1_capacitor_DEP_DIFF.patch",
+  "docs/review/ws1_npm_audit_AFTER.txt", "docs/review/ws1_npm_audit_BEFORE.txt", "ios/App/App.xcodeproj/project.pbxproj",
+  "ios/App/CapApp-SPM/Package.swift", "package-lock.json", "package.json"];   // WS-1 Capacitor 8.5.3, L-6 allowBackup, 3.2 (18) / vc16
+const EXPECT = [...NATIVE_B18, "docs/review/field_requests_ui_test.mjs", "docs/review/notif_clearing_test.mjs", "src/App.jsx"].sort();
+ok("4. changed vs 7b609f4: exactly the build-18 native set + src/App.jsx + this test + the notif test's fence pin", JSON.stringify(files) === JSON.stringify(EXPECT), JSON.stringify(files));
 const untouched = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim() === "";
-ok("4. no ios/, android/, package, api/, sql/, shared/, vercel.json changes", ["ios", "android", "package.json", "package-lock.json", "api", "sql", "shared", "vercel.json", "api/_cron.js"].every(untouched));
+ok("4. no api/, sql/, shared/, vercel.json, api/_cron.js changes", ["api", "sql", "shared", "vercel.json", "api/_cron.js"].every(untouched));
+const nat = (p) => execSync(`git diff --name-only ${BASE} -- ${p}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
+ok("4. ios/, android/, package changes are only the build-18 native files", [...nat("ios"), ...nat("android"), ...nat("package.json"), ...nat("package-lock.json")].every((f) => NATIVE_B18.includes(f)));
 const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("4. verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("4. Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
