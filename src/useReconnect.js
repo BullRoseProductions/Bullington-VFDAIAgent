@@ -217,12 +217,16 @@ export function useAutoRefresh(loader, { minIntervalMs = 60000, skipWhen } = {})
   const skipRef = useRef(skipWhen);   skipRef.current = skipWhen;
   const inFlightRef = useRef(false);          // concurrency guard
   const lastSuccessRef = useRef(Date.now());  // the throttle window — mount seeds it
+  const pendingRef = useRef(null);            // a scheduled live run (see THE TRIGGER)
+  const aliveRef = useRef(true);
 
-  useReconnect(() => {
-    if (inFlightRef.current) return;                                              // already running
-    if (Date.now() - lastSuccessRef.current < minIntervalMs) return;              // too soon
-    if (editingOrJustFinished()) return;                                          // someone is mid-form
-    if (skipRef.current && skipRef.current()) return;                             // screen-specific hold
+  // One gate, shared by the resume path and the trigger. Returns why it did not run, or "ran".
+  const attemptRef = useRef(null);
+  if (attemptRef.current === null) attemptRef.current = (intervalMs) => {
+    if (inFlightRef.current) return "busy";                                       // already running
+    if (Date.now() - lastSuccessRef.current < intervalMs) return "soon";          // too soon
+    if (editingOrJustFinished()) return "editing";                                // someone is mid-form
+    if (skipRef.current && skipRef.current()) return "skip";                      // screen-specific hold
     inFlightRef.current = true;
     // inFlightRef stays true across the retries, so the whole bounded sequence counts as ONE
     // refresh — a second resume mid-retry cannot start a parallel one.
@@ -230,7 +234,31 @@ export function useAutoRefresh(loader, { minIntervalMs = 60000, skipWhen } = {})
       .then(() => { lastSuccessRef.current = Date.now(); })   // AFTER, never before
       .catch(() => { /* keep last-known data; the loader owns its own error surface */ })
       .finally(() => { inFlightRef.current = false; });
-  });
+    return "ran";
+  };
+
+  useReconnect(() => { attemptRef.current(minIntervalMs); });
+
+  /* THE TRIGGER (Live Data 1b). useAutoRefresh now RETURNS a function that asks for a refresh "as soon as it is
+     allowed" — the change-signal path. Unlike the resume path it never drops a request: too soon waits out the
+     window, an open editor (or its grace period), a screen hold or a load already in flight re-checks every second,
+     and when the gate opens it runs exactly once. Repeated triggers while one is pending coalesce. Existing callers
+     ignore the return value, so this is backwards compatible. */
+  const triggerRef = useRef(null);
+  if (triggerRef.current === null) triggerRef.current = ({ minIntervalMs: liveMs = 5000 } = {}) => {
+    if (pendingRef.current) return;                                               // one pending run is enough
+    const tick = () => {
+      pendingRef.current = null;
+      if (!aliveRef.current) return;
+      const why = attemptRef.current(liveMs);
+      if (why === "ran") return;
+      const wait = why === "soon" ? Math.max(50, liveMs - (Date.now() - lastSuccessRef.current)) : 1000;
+      pendingRef.current = setTimeout(tick, wait);
+    };
+    tick();
+  };
+  useEffect(() => () => { aliveRef.current = false; clearTimeout(pendingRef.current); pendingRef.current = null; }, []);
+  return triggerRef.current;
 }
 
 // navigator.onLine is only trustworthy in the negative: false reliably means no network, true just

@@ -229,7 +229,7 @@ const untouched = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`,
 ok("4. no api/, sql/, shared/, vercel.json, api/_cron.js changes", ["api", "sql", "shared", "vercel.json", "api/_cron.js"].every(untouched));
 const nat = (p) => execSync(`git diff --name-only ${BASE} ${REV} -- ${p}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 ok("4. ios/, android/, package changes are only the build-18 native files", [...nat("ios"), ...nat("android"), ...nat("package.json"), ...nat("package-lock.json")].every((f) => NATIVE_B18.includes(f)));
-const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
+const tok = (p) => (execSync(`git show ${REV}:${p}`, { cwd: root, maxBuffer: 64 * 1024 * 1024 }).toString().match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("4. verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14);
 ok("4. Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
 process.exit(process.exitCode || 0);

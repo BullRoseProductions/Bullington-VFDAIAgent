@@ -24,6 +24,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { authedFetch, isNative } from "./apiBase";
 import { useReconnect, useAutoRefresh, useEditorOpen, looksOffline } from "./useReconnect";
+import { useLiveRefresh } from "./liveData";
 import NotificationCenter, { NotificationBell, markNotificationReadFromPush } from "./Notifications";
 import { initPush, syncDeviceRegistration, unregisterPush } from "./push";
 import { startDeepLinks } from "./deeplink";
@@ -2854,7 +2855,7 @@ export default function App() {
      Silent and throttled; see useAutoRefresh. No skipWhen: these feed read-only dashboards, and
      the screens that own editable forms guard themselves individually. */
   useAutoRefresh(loadMembers);
-  useAutoRefresh(loadSessions);
+  useLiveRefresh(["trainings"], loadSessions);   // Live Data 1b: the same resume refresh as before, plus the department change signal (src/liveData.js)
   useAutoRefresh(loadPlans);
   const [checkinResult, setCheckinResult] = useState(null);
   const [pendingCheckin, setPendingCheckin] = useState(null);
