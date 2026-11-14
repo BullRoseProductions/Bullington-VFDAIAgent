@@ -2776,17 +2776,20 @@ export default function App() {
   // "Add to my plans": pull_library_drill copies a PUBLISHED drill into this department's drill plans as a DRAFT (its
   // officer approves before it can be attached). Gate = is_training_manager() at the DB; canManageTraining is its twin.
   const [libAddedNonce, setLibAddedNonce] = useState(0);   // tells a mounted Training Plans to re-read its list
+  // Library S2: the copy pull_library_drill just made (it returns the copy's id) — Training Plans opens it on that re-read,
+  // so a library draft lands with its category picker showing (Step 0 §2: copies arrive with category NULL).
+  const [libAddedId, setLibAddedId] = useState(null);
   async function addLibraryDrill(libraryId) {
-    const { error } = await supabase.rpc("pull_library_drill", { p_library_id: libraryId });
+    const { data, error } = await supabase.rpc("pull_library_drill", { p_library_id: libraryId });
     if (error) {
       const m = String(error.message || "");
       if (/^ALREADY_PULLED/.test(m)) { lib.markPulled(libraryId); notify({ kind: "info", title: "Already in your plans", text: "This drill is already in Training Plans." }); return false; }
       notify({ kind: "error", title: "Couldn't add the drill", text: m.replace(/^[A-Z_]+:\s*/, "") || "Something went wrong — please try again.", details: m });
       return false;
     }
-    lib.markPulled(libraryId); setLibAddedNonce((n) => n + 1);
+    lib.markPulled(libraryId); setLibAddedId(typeof data === "string" ? data : null); setLibAddedNonce((n) => n + 1);
     notify({ kind: "success", title: "Added to Training Plans", text: "It's a draft in your plans — an officer approves it before it can be attached to a session." });
-    return true;
+    return typeof data === "string" ? data : true;
   }
   const [trainingSessions, setTrainingSessions] = useState([]);
   // Bret's packet buttons: "Schedule this" / "Attach to a session" hand the department's APPROVED copy to Training, which
@@ -3522,7 +3525,7 @@ export default function App() {
           {/* ONE library (L0/L1): the "library" screen (no sidebar entry since the fold — deep links, go("library"), packet-back) opens Training on its Library tab — the same view as the tab.
               keyed by screen so moving between Training and the library alias lands on the right tab. */}
           {(screen === "training" || screen === "library") && <Training key={screen} initialView={screen === "library" ? "library" : "schedule"} S={S} role={role} plan={trainingPlan} setPlan={setTrainingPlan} loadPlans={loadPlans} sessions={visibleSessions} setSessions={setTrainingSessions} loadSessions={loadSessions} sessionsErr={sessionsErr} members={members} meId={myMemberId} notify={notify} dept={dept} addFeedback={addFeedback} isTrainingOfficer={isTrainingOfficer} onTrainingOfficersChanged={() => setTrainingOfficersTick((t) => t + 1)}
-            lib={lib} handoff={trainingHandoff} onHandoffDone={() => setTrainingHandoff(null)} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} />}
+            lib={lib} handoff={trainingHandoff} onHandoffDone={() => setTrainingHandoff(null)} openPacket={openPacket} onAddLibrary={addLibraryDrill} libAddedNonce={libAddedNonce} libAddedId={libAddedId} />}
           {screen === "study" && <StudySession S={S} />}
           {screen === "qanda" && <StationQA S={S} />}
           {/* Ask B4C — a NON-MODAL side panel + its right-edge handle. The app stays fully usable beside it. It does NOT
@@ -3566,7 +3569,7 @@ export default function App() {
             ? <Reports S={S} role={role} members={members} sessions={trainingSessions} dept={dept} meId={myMemberId} notify={notify} />
             : <BoardStats S={S} role={role} members={members} sessions={trainingSessions} dept={dept} />)}
           {screen === "settings" && <SettingsHub S={S} role={role} brand={brand} setBrand={setBrand} setDept={setDept} dept={dept} requests={requests} setRequests={setRequests} members={members} setMembers={setMembers} meId={myMemberId} notify={notify} />}
-          {screen === "admin" && <Admin S={S} feedback={feedback} />}
+          {screen === "admin" && <Admin S={S} feedback={feedback} lib={lib} notify={notify} />}
           {screen === "adddept" && <AddDepartment S={S} role={role} notify={notify} go={go} />}
           {screen === "department" && <DepartmentAdmin S={S} role={role} target={navArg} notify={notify} go={go} />}
           </ErrorBoundary>
@@ -24925,7 +24928,7 @@ function TrainingCategoriesCard({ S, categories, loadPlans, notify }) {
     </div>
   );
 }
-function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan, reloadNonce, focus }) {
+function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, members, notify, dept, categories, viewToggle, loadPlans, onScheduleWithPlan, reloadNonce, focus, reloadFocusId, lib, onAddLibrary, openPacket, onSeeLibrary }) {
   const canWrite = !!canManageTraining;   // set / approve / unapprove / delete / attach: is_training_manager() (a Department Admin or a training officer)
   const [plans, setPlans] = useState(null);             // null = not loaded yet; a failed READ keeps the last-known list
   const [loadErr, setLoadErr] = useState("");
@@ -24957,8 +24960,22 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     setLoadErr(""); setPlans(data); return { error: null };
   }
   useEffect(() => { load(); }, []);
-  // A drill added from the Library (pull_library_drill) lands here as a draft — re-read when one is added.
-  useEffect(() => { if (reloadNonce) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [reloadNonce]);
+  // A drill added from the Library (pull_library_drill) lands here as a draft — re-read when one is added, and (Library S2)
+  // open that copy so its category picker shows. Never while a plan is being edited or written: switching the selection
+  // under an open editor would save one plan's text onto another.
+  const editingRef = useRef(false);
+  editingRef.current = editing || creating;
+  useEffect(() => {
+    if (!reloadNonce) return;
+    load().then((r) => {
+      if (r.error || !reloadFocusId || editingRef.current) return;
+      setSelId(reloadFocusId); setAttachOpen(false); setLastAttached(null);
+      setTimeout(() => featRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    });
+  }, [reloadNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Library S2: a library draft arrives with no category (categories are department-local). The detail shows a picker
+  // for it; saving goes through set_drill_plan with every other field as it is.
+  const [pickCat, setPickCat] = useState("");
   useReconnect(() => { if (loadErr) load(); });
 
   const list = plans || [];
@@ -24969,6 +24986,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   const cats = [...new Set(list.map((p) => p.category).filter(Boolean))].sort();
   const shown = list.filter((p) => (!catFilter || p.category === catFilter) && (!q.trim() || `${p.title} ${p.category || ""} ${p.audience || ""}`.toLowerCase().includes(q.trim().toLowerCase())));
   const select = (id) => { setSelId(id); setEditing(false); setAttachOpen(false); setLastAttached(null); setTimeout(() => featRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  useEffect(() => { setPickCat(""); }, [sel?.id]);
   // Bug B2: "Plans by category" drives the library's existing category filter. Picking a category clears the search too,
   // so every plan in it lists; picking the active one again shows all. Opening a plan from it also filters to its category.
   const showCategory = (c) => { setCatFilter(catFilter === c ? "" : c); setQ(""); setTimeout(() => libRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
@@ -25037,6 +25055,17 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     const r = await act("attach", "attach_drill_plan_to_session", { p_plan_id: p.id, p_session_id: s.id }, `Attached to ${s.title}.`);
     if (!r.error) { setAttachOpen(false); setAttachSess(""); setLastAttached(r.data || null); loadSessions && loadSessions(); }
   }
+  async function setCategory(p, c) {
+    if (!c) return;
+    await act("category", "set_drill_plan", { p_id: p.id, p_title: p.title, p_category: c, p_duration_min: p.duration_min ?? null, p_audience: p.audience ?? null, p_content: p.content || {}, p_source: p.source }, `Filed under ${c}.`);
+  }
+  // Library S2 — FROM B4C (ruling R5): the newest three published drills from the same catalog read the Library tab uses
+  // (useLibraryCatalog: no new query), with "Add to my plans" (the same pull_library_drill path) and the whole-library link.
+  async function addFromB4C(it) {
+    if (busy || !onAddLibrary) return;
+    setBusy(`lib:${it.libraryId}`);
+    try { await onAddLibrary(it.libraryId); } finally { setBusy(null); }
+  }
   async function remove(p) {
     if (!(await confirmDestructive({ noun: "drill plan", name: p.title,
       impact: p.attached_sessions ? `${p.attached_sessions} session${p.attached_sessions === 1 ? " has" : "s have"} it attached — they keep their copy of the plan; it's only unlinked from the library.` : "It isn't attached to any session." }))) return;
@@ -25087,6 +25116,43 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
           <div id="tp-start-blank" style={{ marginBottom: 18 }}>
             <div style={tpSecLab}><Pencil size={16} color={FIRE.redBright} />Start a plan from scratch</div>
             <DrillPlanEditForm S={S} p={{ title: "", category: "", duration_min: null, audience: "", content: { summary: "", objectives: [], run_of_show: [], materials: [], safety: [] } }} categories={categories} busy={busy === "create"} saveLabel="Save draft" onSave={saveNew} onCancel={() => setCreating(false)} />
+          </div>
+        )}
+
+        {lib && lib.items.length > 0 && (
+          <div data-from-b4c style={{ marginBottom: 18 }}>
+            <div style={tpSecLab}><Sparkles size={16} color={FIRE.redBright} />From B4C
+              <span style={{ fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>Newest in the shared B4C library</span>
+              {onSeeLibrary && <button type="button" data-see-library onClick={onSeeLibrary} style={{ marginLeft: "auto", background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, color: FIRE.redText, display: "inline-flex", alignItems: "center", gap: 2 }}>See the whole library <ChevronRight size={14} /></button>}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 260px), 1fr))", gap: 10 }}>
+              {lib.items.slice(0, 3).map((it) => {
+                const T = TRACKS[it.track] || TRACKS.Operations;
+                const have = !!lib.pulled?.has(it.libraryId);
+                const copyId = lib.copies?.[it.libraryId]?.id || list.find((p) => p.library_id === it.libraryId)?.id || null;
+                const adding = busy === `lib:${it.libraryId}`;
+                return (
+                  <div key={it.libraryId} data-from-b4c-drill={it.libraryId} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 14px", borderTop: `3px solid ${T.accent}`, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button type="button" onClick={() => openPacket && openPacket(it.id)} title="Open the packet"
+                      style={{ background: "none", border: 0, padding: 0, cursor: openPacket ? "pointer" : "default", fontFamily: "inherit", textAlign: "left", display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: ".05em", color: T.accent, textTransform: "uppercase" }}><T.Icon size={13} color={T.accent} />{T.label}{it.time ? <span style={{ color: FIRE.textMuted, fontWeight: 600, ...FS.num }}>· {it.time}</span> : null}</span>
+                      <span style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, lineHeight: 1.2, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{it.title}</span>
+                      {it.objective && <span style={{ fontSize: 12, lineHeight: 1.45, color: FIRE.textMuted, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{it.objective}</span>}
+                    </button>
+                    <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5 }}>
+                      {have
+                        ? (copyId
+                          ? <button type="button" style={{ ...FS.btn, padding: "6px 10px", fontSize: 12 }} onClick={() => { setCatFilter(""); setQ(""); select(copyId); }}><CheckCircle2 size={13} color={FIRE.greenText} /> In your plans · open</button>
+                          : <span style={{ color: FIRE.greenText, fontWeight: 600 }}>In your plans</span>)
+                        : (canWrite && onAddLibrary
+                          ? <button type="button" style={{ ...FS.btn, padding: "6px 10px", fontSize: 12, opacity: adding ? 0.7 : 1 }} disabled={!!busy} onClick={() => addFromB4C(it)}>{adding ? <Loader2 size={13} className="spin" /> : <Plus size={13} color={FIRE.btnIcon} />} Add to my plans</button>
+                          : null)}
+                      {libUsageText(lib.usage?.[it.libraryId]) && <span style={{ marginLeft: "auto", color: FIRE.textMuted }}>{libUsageText(lib.usage[it.libraryId])}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -25186,6 +25252,15 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                 )}
               </div>
               <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${sel.source === "ai" ? "drafted with AI" : sel.source === "library" ? "added from the library" : "written"}${nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
+              {canWrite && !editing && sel.status === "draft" && sel.source === "library" && !sel.category && (
+                <div data-library-category-picker style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Pick a category for this plan</span>
+                    <select style={FS.input} value={pickCat} onChange={(e) => setPickCat(e.target.value)} aria-label="Category for this plan"><option value="">Choose a category…</option>
+                      {(categories || []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}</select></label>
+                  <button style={{ ...FS.btnPrimary, opacity: busy === "category" ? 0.7 : 1 }} disabled={!pickCat || !!busy} onClick={() => setCategory(sel, pickCat)}>{busy === "category" ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Save category</button>
+                  <div style={{ fontSize: 12, color: FIRE.textMuted, width: "100%" }}>Drills from the B4C library arrive without a category, because categories are your department's own.{(categories || []).length === 0 ? " Add one under Training categories below first." : ""}</div>
+                </div>
+              )}
               {attachOpen && canWrite && (
                 <div style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Attach to session</span>
@@ -25360,7 +25435,8 @@ function Training(props) {
   const canManageTraining = hasAny(props.role, ["Department Admin"]) || !!props.isTrainingOfficer;
   return (<>
     <div style={view === "schedule" ? undefined : { display: "none" }}><TrainingSchedule {...props} canManageTraining={canManageTraining} viewToggle={toggle} onDraftPlan={() => goPlans()} onManageCategories={() => goPlans("tp-categories")} schedulePrefill={schedPrefill} onScheduledReturn={() => goPlans()} /></div>
-    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} focus={plansFocus} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} reloadNonce={props.libAddedNonce} /></div>}
+    {plansSeen && <div style={view === "plans" ? undefined : { display: "none" }}><TrainingPlans S={props.S} role={props.role} canManageTraining={canManageTraining} sessions={props.sessions} loadSessions={props.loadSessions} members={props.members} notify={props.notify} dept={props.dept} focus={plansFocus} categories={props.plan} viewToggle={toggle} loadPlans={props.loadPlans} onScheduleWithPlan={goSchedule} reloadNonce={props.libAddedNonce}
+      reloadFocusId={props.libAddedId} lib={props.lib} onAddLibrary={props.onAddLibrary} openPacket={props.openPacket} onSeeLibrary={() => { setView("library"); setLibrarySeen(true); }} /></div>}
     {librarySeen && props.lib && <div style={view === "library" ? undefined : { display: "none" }}><Library S={props.S} library={props.lib.items} openPacket={props.openPacket} viewToggle={toggle}
       usage={props.lib.usage} pulled={props.lib.pulled} loaded={props.lib.loaded} err={props.lib.err} reload={props.lib.reload} /></div>}
   </>);
@@ -28273,18 +28349,202 @@ function RequestForm({ S, requests, setRequests, extra, embedded }) {   // extra
   );
 }
 
+/* ---------------- Library S2: the curator (Project Admin) ---------------- */
+/* Weekly Training Content slice 2 (Step 0 §3, gate PASS @2a0768c; DB live 2026-11-04 @0235cf2). A Project Admin writes a
+   B4C drill (pa_put_library_drill → 'submitted', origin 'b4c'), previews it as departments will see it (libRowToPacket,
+   the Library's own mapper), publishes it (pa_publish_library_drill) and can withdraw it (pa_withdraw_library_drill).
+   Every write is one of those RPCs — never a table write; each is gated on is_project_admin() INSIDE the function.
+   Reads: pa_library_queue() (submitted + withdrawn, which the published-only policy hides; a non-PA gets no rows) and
+   the published catalog from useLibraryCatalog (the same read the Library tab makes). A failed queue read keeps the
+   last-known list. Published drills are final (L5 snapshots): no Edit on them — withdraw, then add a new one. */
+const CUR_ORIGIN = { seed: "Original packet", b4c: "Written by B4C", shared: "Shared by a department", ai_drop: "AI drop" };
+const CUR_BLANK = { id: null, title: "", track: "Fire", level: "", duration: "", audience: "", summary: "", objectives: "", run: "",
+  materials: "", safety: "", guide: "", scenario: "", discussion: "", evaluation: "", debrief: "", base: {} };
+const curStr = (v) => (typeof v === "string" ? v : "");
+function curFormFrom(row) {
+  const c = (row && row.content && typeof row.content === "object") ? row.content : {};
+  return { id: row.id, title: row.title || "", track: TRACKS[row.track] ? row.track : "Fire", level: row.level || "",
+    duration: row.duration_min ? String(row.duration_min) : "", audience: row.audience || "",
+    summary: curStr(c.summary), objectives: tpLines(strList(c.objectives)), run: runToText(c.run_of_show),
+    materials: tpLines(strList(c.materials)), safety: tpLines(strList(c.safety)), guide: curStr(c.instructor_guide),
+    scenario: curStr(c.scenario), discussion: tpLines(strList(c.discussion)), evaluation: tpLines(strList(c.evaluation)),
+    debrief: tpLines(strList(c.debrief)), base: c };
+}
+// The form → library_drills.content: the drill_plans keys (so a department's copy edits like any plan) + the packet keys.
+// Keys the form doesn't know about (base) are carried through untouched.
+const curContent = (f) => ({ ...(f.base || {}), summary: f.summary.trim(), objectives: tpSplit(f.objectives), run_of_show: runFromText(f.run),
+  materials: tpSplit(f.materials), safety: tpSplit(f.safety), instructor_guide: f.guide.trim(), scenario: f.scenario.trim(),
+  discussion: tpSplit(f.discussion), evaluation: tpSplit(f.evaluation), debrief: tpSplit(f.debrief) });
+
+// The drill as a department will see it — the Packet's sections, in the Packet's order, empty ones skipped.
+function LibraryDrillPreview({ p }) {
+  const txt = { fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.55 };
+  const sec = (title, body) => (body ? <div style={{ marginTop: 12 }}><div style={tpPsl}>{title}</div>{body}</div> : null);
+  const ul = (items) => (items && items.length ? <ul style={{ ...txt, margin: 0, paddingLeft: 18 }}>{items.map((x, i) => <li key={i}>{x}</li>)}</ul> : null);
+  const para = (t) => (t ? <div style={{ ...txt, whiteSpace: "pre-wrap" }}>{t}</div> : null);
+  const steps = p.steps || [];
+  return (
+    <div data-curator-preview style={{ ...NOIR_INSET, padding: "12px 14px", marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: FIRE.textMuted }}>Preview — as departments will see it in the Library</div>
+      {sec("Objective", para(p.objective))}
+      {sec("Required equipment", ul(p.equipment))}
+      {sec("Instructor guide", para(p.instructorGuide))}
+      {sec("Step-by-step lesson plan", steps.length ? <ol style={{ ...txt, margin: 0, paddingLeft: 18 }}>{steps.map((st, i) => <li key={i}><b style={{ color: FIRE.textPrimary }}>{st.t}</b>{st.m ? ` (${st.m} min)` : ""}{st.d ? ` — ${st.d}` : ""}</li>)}</ol> : null)}
+      {sec("Scenario / drill setup", para(p.scenario))}
+      {sec("Safety considerations", ul(p.safety))}
+      {sec("Discussion questions", ul(p.discussion))}
+      {sec("Evaluation checklist", ul(p.evaluation))}
+      {sec("Debrief questions", ul(p.debrief))}
+    </div>
+  );
+}
+
+function LibraryCurator({ S, lib, notify }) {
+  const [queue, setQueue] = useState(null);     // null = not loaded yet
+  const [qErr, setQErr] = useState(false);
+  const [form, setForm] = useState(null);       // null = closed; { id: null } = a new drill; { id } = editing a submitted one
+  const [formErr, setFormErr] = useState("");
+  const [busy, setBusy] = useState(null);
+  const [open, setOpen] = useState(null);       // the drill whose preview is open
+  useEditorOpen(!!form);                        // a half-written drill: an auto-update must not drop it
+  async function loadQueue() {
+    const { data, error } = await supabase.rpc("pa_library_queue");
+    if (error || !Array.isArray(data)) { console.error("[curator] queue read failed — keeping last-known:", error); setQErr(true); return false; }
+    setQueue(data); setQErr(false); return true;
+  }
+  useEffect(() => { loadQueue(); }, []);
+  useReconnect(() => { if (qErr) loadQueue(); });
+  async function run(kind, rpc, args, okText) {
+    setBusy(kind);
+    const { data, error } = await supabase.rpc(rpc, args);
+    if (error) { setBusy(null); notify({ kind: "error", title: "Couldn't update the library", text: error.message || "Please try again." }); return null; }
+    await Promise.all([loadQueue(), lib?.reload ? lib.reload() : null]);
+    setBusy(null);
+    if (okText) notify({ kind: "success", text: okText });
+    return data || true;
+  }
+  const up = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  async function save() {
+    if (!form || busy) return;
+    const title = form.title.trim();
+    if (!title) { setFormErr("Give the drill a title."); return; }
+    const dur = form.duration.trim() === "" ? null : Number(form.duration);
+    if (dur != null && !(Number.isInteger(dur) && dur >= 1 && dur <= 1440)) { setFormErr("The length must be between 1 and 1440 minutes."); return; }
+    setFormErr("");
+    const r = await run("save", "pa_put_library_drill", { p_id: form.id, p_title: title, p_track: form.track, p_level: form.level.trim() || null,
+      p_duration_min: dur, p_audience: form.audience.trim() || null, p_content: curContent(form) },
+      form.id ? "Drill updated — it's still waiting to publish." : "Saved — it's waiting to publish. Preview it, then publish.");
+    if (r) { setForm(null); if (typeof r === "string") setOpen(r); }
+  }
+  async function publish(row) {
+    if (busy) return;
+    if (!(await noirConfirm({ title: `Publish “${row.title}” to every department?`,
+      body: "It shows in every department's Library, and under From B4C in Training Plans, straight away. A published drill can't be edited: to change it, withdraw it and add a new one. Departments that add it keep their own copy.",
+      confirmLabel: "Publish" }))) return;
+    await run(`pub:${row.id}`, "pa_publish_library_drill", { p_id: row.id }, `Published — “${row.title}” is in every department's library.`);
+  }
+  async function withdraw(p) {
+    if (busy) return;
+    if (!(await noirConfirm({ title: `Withdraw “${p.title}”?`,
+      body: "It leaves every department's Library and can't be added any more. Departments that already added it keep their copy. You can publish it again later.",
+      confirmLabel: "Withdraw", danger: true }))) return;
+    await run(`wd:${p.libraryId}`, "pa_withdraw_library_drill", { p_id: p.libraryId }, "Withdrawn — departments that added it keep their copy.");
+  }
+  const waiting = (queue || []).filter((r) => r.state === "submitted");
+  const withdrawn = (queue || []).filter((r) => r.state === "withdrawn");
+  const published = (lib && lib.items) || [];
+  const small = { ...FS.btn, padding: "6px 10px", fontSize: 12 };
+  const head = (Icon, title, n) => <div style={{ ...tpSecLab, marginTop: 16 }}><Icon size={16} color={FIRE.redBright} />{title}<span style={{ color: FIRE.textMuted, fontWeight: 400, fontSize: 12, ...FS.num }}>{n}</span></div>;
+  const drillRow = (p, state, actions) => {
+    const T = TRACKS[p.track] || TRACKS.Operations;
+    return (
+      <div key={p.id} data-curator-drill={p.id} data-state={state} style={{ ...FS.cardNoir, borderRadius: 12, padding: "12px 14px", marginBottom: 8, borderLeft: `3px solid ${T.accent}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div data-curator-title style={{ fontWeight: 600, fontSize: 14, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{p.title}</div>
+            <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 2, ...FS.num }}>{[T.label, p.time, p.level, CUR_ORIGIN[p.origin] || p.origin].filter(Boolean).join(" · ")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" style={small} aria-expanded={open === p.id} onClick={() => setOpen(open === p.id ? null : p.id)}><Eye size={13} color={FIRE.btnIcon} /> {open === p.id ? "Hide preview" : "Preview"}</button>
+            {actions}
+          </div>
+        </div>
+        {open === p.id && <LibraryDrillPreview p={p} />}
+      </div>
+    );
+  };
+  const lbl = (t) => <span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>{t}</span>;
+  const area = (k, t, h = 64) => <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl(t)}<textarea style={{ ...FS.input, minHeight: h, resize: "vertical" }} value={form[k]} onChange={up(k)} /></label>;
+  return (
+    <div data-library-curator>
+      <div style={{ ...S.formCard, ...FS.cardNoir, padding: "14px 16px", gap: 8 }}>
+        <CardHead icon={FileText} title="The B4C drill library"
+          right={!form ? <button type="button" style={FS.btnPrimary} disabled={!!busy} onClick={() => { setForm({ ...CUR_BLANK }); setFormErr(""); }}><Plus size={14} /> Add a drill</button> : null} />
+        <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>Drills you add wait here until you publish them — nothing reaches a department before that. A published drill can't be edited: withdraw it and add a new one. Departments that added a drill keep their own copy either way.</div>
+        {form && (
+          <div data-curator-form style={{ ...NOIR_INSET, padding: 14, marginTop: 6 }}>
+            <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, marginBottom: 10 }}>{form.id ? "Edit the drill" : "A new drill"}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: 10 }}>
+              <label style={{ ...S.field, gridColumn: "1 / -1" }}>{lbl("Title")}<input style={FS.input} value={form.title} onChange={up("title")} placeholder="e.g. Primary Search & Rescue" /></label>
+              <label style={S.field}>{lbl("Track")}<select style={FS.input} value={form.track} onChange={up("track")}>{Object.keys(TRACKS).map((k) => <option key={k} value={k}>{TRACKS[k].label}</option>)}</select></label>
+              <label style={S.field}>{lbl("Level")}<input style={FS.input} value={form.level} onChange={up("level")} placeholder="e.g. Intermediate" /></label>
+              <label style={S.field}>{lbl("Length (minutes)")}<input style={FS.input} inputMode="numeric" value={form.duration} onChange={up("duration")} placeholder="90" /></label>
+              <label style={S.field}>{lbl("Who it's for")}<input style={FS.input} value={form.audience} onChange={up("audience")} placeholder="e.g. Mixed crew" /></label>
+              {area("summary", "Objective / summary", 56)}
+              {area("objectives", "Objectives — one per line")}
+              {area("run", "Run of show — one step per line: \"Briefing — 15 min | what happens\"", 90)}
+              {area("materials", "Required equipment — one per line")}
+              {area("safety", "Safety — one per line")}
+              {area("guide", "Instructor guide", 56)}
+              {area("scenario", "Scenario / drill setup", 56)}
+              {area("discussion", "Discussion questions — one per line")}
+              {area("evaluation", "Evaluation checklist — one per line")}
+              {area("debrief", "Debrief questions — one per line")}
+            </div>
+            {formErr && <div role="alert" style={NOIR_ERR}>{formErr}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <button type="button" style={{ ...FS.btnPrimary, opacity: busy === "save" ? 0.7 : 1 }} disabled={!!busy} onClick={save}>{busy === "save" ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {form.id ? "Save changes" : "Save — don't publish yet"}</button>
+              <button type="button" style={FS.btn} disabled={busy === "save"} onClick={() => { setForm(null); setFormErr(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {qErr && <div role="alert" style={{ ...NOIR_ERR, display: "flex", alignItems: "center", gap: 8 }}>{queue ? "Couldn't refresh the queue — showing what was loaded." : "Couldn't load the queue."}
+        <button type="button" style={{ ...FS.btn, padding: "4px 9px", fontSize: 12 }} onClick={loadQueue}><RefreshCw size={13} color={FIRE.btnIcon} /> Retry</button></div>}
+
+      {head(Clock, "Waiting to publish", queue ? waiting.length : "")}
+      {!queue && !qErr && <div style={{ fontSize: 13, color: FIRE.textMuted, display: "flex", alignItems: "center", gap: 8 }}><Loader2 size={14} className="spin" /> Loading the queue…</div>}
+      {queue && waiting.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>Nothing waiting. Add a drill to start one.</div>}
+      {waiting.map((r) => drillRow(libRowToPacket(r), "submitted", <>
+        <button type="button" style={small} disabled={!!busy || !!form} onClick={() => { setForm(curFormFrom(r)); setFormErr(""); }}><Pencil size={13} color={FIRE.btnIcon} /> Edit</button>
+        <button type="button" style={{ ...FS.btnPrimary, padding: "6px 11px", fontSize: 12, opacity: busy === `pub:${r.id}` ? 0.7 : 1 }} disabled={!!busy} onClick={() => publish(r)}>{busy === `pub:${r.id}` ? <Loader2 size={13} className="spin" /> : <Send size={13} />} Publish</button>
+      </>))}
+
+      {head(Globe, "Published — every department sees these", published.length)}
+      {lib && lib.err && <div style={{ fontSize: 12, color: FIRE.amberText, marginBottom: 8 }}>Couldn't refresh the published list — showing what was loaded.</div>}
+      {published.length === 0 && <div style={{ fontSize: 13, color: FIRE.textMuted }}>{lib && !lib.loaded && !lib.err ? "Loading the library…" : "Nothing published yet."}</div>}
+      {published.map((p) => drillRow(p, "published",
+        <button type="button" style={{ ...small, color: FIRE.deleteRed }} disabled={!!busy} onClick={() => withdraw(p)}>{busy === `wd:${p.libraryId}` ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />} Withdraw</button>))}
+
+      {withdrawn.length > 0 && <>
+        {head(Lock, "Withdrawn — hidden from departments", withdrawn.length)}
+        {withdrawn.map((r) => drillRow(libRowToPacket(r), "withdrawn",
+          <button type="button" style={{ ...small, opacity: busy === `pub:${r.id}` ? 0.7 : 1 }} disabled={!!busy} onClick={() => publish(r)}>{busy === `pub:${r.id}` ? <Loader2 size={13} className="spin" /> : <Send size={13} color={FIRE.btnIcon} />} Publish again</button>))}
+      </>}
+    </div>
+  );
+}
+
 /* ---------------- Admin ---------------- */
 /* The old "Publish a packet" form here only prepended to in-memory React state — nothing was saved and a "published"
    packet vanished on reload. It is retired (Training Library slice 1): the library is now the real library_drills
-   catalog, and publishing becomes the Project Admin curator queue in slice 2. The field-signal list below is unchanged. */
-function Admin({ S, feedback }) {
+   catalog, and publishing is the Project Admin curator (LibraryCurator, Library S2 UI). The field-signal list below is unchanged. */
+function Admin({ S, feedback, lib, notify }) {
   return (
-    <PageShell band kicker="CONTENT ADMIN" title="Library & field signal" sub="The drill library (Training → Library tab) is now a real, shared catalog. Curating it (publishing shared and AI-drafted drills) arrives with the curator queue.">
+    <PageShell band kicker="CONTENT ADMIN" title="Library & field signal" sub="The shared B4C drill library — add a drill, preview it, publish it to every department, withdraw it — and what departments tell us about AI plans.">
       <NoirSkin>
-      <div style={{ ...S.formCard, ...FS.cardNoir, padding: "14px 16px", gap: 6 }}>
-        <CardHead icon={FileText} title="Publishing" />
-        <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5 }}>The six original packets now live in the shared library every department reads. Adding and curating drills (department shares, the monthly AI drop) is the next library slice — this form used to save nothing, so it has been removed rather than left to mislead.</div>
-      </div>
+      <LibraryCurator S={S} lib={lib} notify={notify} />
 
       <div style={{ marginTop: 16 }}>
         <CardHead icon={MessageSquare} title="Field signal · what we're learning" />

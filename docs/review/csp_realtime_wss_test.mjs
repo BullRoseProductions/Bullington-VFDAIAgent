@@ -18,7 +18,7 @@ import { fileURLToPath } from "url";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "cdf1d37";   // Live Data 1b, gate PASS
-const REV = process.env.REV ?? "";   // "" = working tree; pin to the passed sha on promotion
+const REV = process.env.REV ?? "37e3527";   // pinned to the released range cdf1d37..37e3527 (gate PASS @37e3527, merged 2026-11-12)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const PROJECT = "ifeptqnlucmvhlvadcpj.supabase.co";
 const TOKEN = `wss://${PROJECT}`;
