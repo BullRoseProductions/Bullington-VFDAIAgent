@@ -19,6 +19,7 @@ import { shiftSpan, shiftHoursText } from "../shared/shift-span.js";   // WS-4a 
 import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";   // WS-4b A: one "ready" for every screen + the email
 import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";
 import { DRILL_PLAN_SYSTEM, strList, oneLine, stepToRun, drillPlanToContent, parseDrillPlanReply } from "../shared/drill-prompt.js";   // weekly slice 5: the drill-plan prompt + parser, shared with the cron
+import { CADENCE_DAYS, trainingDue } from "../shared/training-due.js";   // weekly slice 7: the due-clock, shared with the cron
 import { isListedMember, isCountedMember, headcount } from "../shared/members.js";   // WS-4c B: one headcount for every screen + the email   // WS-4b F-2: the email's maintenance rule
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
@@ -1475,7 +1476,7 @@ function GeofenceConsentFlow({ meId, notify, onBack, onDone }) {
    a guard trigger refuses any other client write of the column. Turning it ON asks first and says exactly what the weekly
    run sends (Step 0 §5.5); turning it off deletes nothing. WEEKLY_DRAFT_RUN_LIVE is false until the weekly cron ships
    (slice 7) — until then the screen says the first draft comes when B4C's weekly run starts, never that one is coming Monday. */
-const WEEKLY_DRAFT_RUN_LIVE = false;
+const WEEKLY_DRAFT_RUN_LIVE = true;   // slice 7: api/weekly-drill.js runs Sunday evenings (Central); the "not started" note is gone
 const WEEKLY_DRAFT_SENDS = "Your department's training category names and how current each is, the titles of your last 8 weeks of sessions and plans (so it doesn't repeat them), your city, the week's date, and roughly how many active members you have. Never names, emails, notes, certs, hours, attendance or addresses.";
 function WeeklyDrillSettings({ dept, setDept, notify }) {
   const on = !!dept?.weekly_drill_draft_enabled;
@@ -24206,7 +24207,6 @@ function Onboarding({ S, members, setMembers, notify, role, dept, setDept, meId,
 }
 
 /* ---------------- Training Plan + Calendar ---------------- */
-const CADENCE_DAYS = { Weekly: 7, "Bi-weekly": 14, Monthly: 30, Quarterly: 90, "Semi-annual": 180, Annual: 365, Biennial: 730 };
 const N_FOR_CADENCE = { Weekly: 52, "Bi-weekly": 26, Monthly: 12, Quarterly: 4, "Semi-annual": 2, Annual: 1 };   // a year's worth (recurring default N)
 // Recurrence is by DAY-OF-WEEK, not calendar date — VFDs schedule "every Thursday" / "first Sunday",
 // which drift across dates. dow = 0..6 (Sun..Sat); ordinal = 1..4 or "last".
@@ -24274,16 +24274,12 @@ function CancelledPill() {
 }
 function dueInfo(item) {
   if (item.cadence === "One-off") return { label: item.lastISO ? "Done" : "Not logged", color: item.lastISO ? FIRE.green : FIRE.redText, rel: item.lastISO ? "one-off" : "never logged", nextLabel: "—", urgent: !item.lastISO };
-  const days = CADENCE_DAYS[item.cadence] || 30;
   if (!item.lastISO) return { label: "Not logged", color: FIRE.redText, rel: "never logged", nextLabel: "—", urgent: true };
-  const last = new Date(item.lastISO + "T00:00:00");
-  const next = new Date(last.getTime() + days * 86400000);
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diff = Math.round((next - today) / 86400000);
+  const { state, diff, next } = trainingDue(item, today);   // shared/training-due.js — the same clock the weekly drill cron reads
   const nextLabel = next.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  if (diff < 0) return { label: "Overdue", color: FIRE.redText, rel: `${-diff} day${-diff === 1 ? "" : "s"} overdue`, nextLabel, next, urgent: true };
-  const window = Math.min(Math.round(days * 0.25), 30);
-  if (diff <= window) return { label: "Due soon", color: FIRE.amberText, rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
+  if (state === "overdue") return { label: "Overdue", color: FIRE.redText, rel: `${-diff} day${-diff === 1 ? "" : "s"} overdue`, nextLabel, next, urgent: true };
+  if (state === "due_soon") return { label: "Due soon", color: FIRE.amberText, rel: `in ${diff} day${diff === 1 ? "" : "s"}`, nextLabel, next };
   return { label: "On track", color: FIRE.green, rel: `due ${nextLabel}`, nextLabel, next };
 }
 const TRAIN_PLAN_SEED = [

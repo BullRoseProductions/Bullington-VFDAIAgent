@@ -189,7 +189,7 @@ ok("the input caps (SYSTEM_MAX … inputProblem) are byte-identical to BASE", fn
 const gate = (s) => s.slice(s.indexOf("export default async function handler"), s.indexOf("  try {"));
 ok("the handler's gate (cors → POST → requireMember → key → inputProblem → chargeAiCall) is byte-identical to BASE", gate(baseClaude).length > 300 && gate(baseClaude) === gate(revClaude));
 for (const f of ["api/_auth.js", "api/_cors.js", "api/_cron.js", "vercel.json", "api/assistant.js", "api/concepts.js", "api/digest.js"])
-  ok(`${f} untouched`, readFileSync(join(root, f), "utf8") === execSync(`git show ${BASE}:${f}`, { cwd: root, maxBuffer: 1 << 26 }).toString());
+  ok(`${f} untouched`, (REV === "HEAD" ? readFileSync(join(root, f), "utf8") : execSync(`git show ${REV}:${f}`, { cwd: root, maxBuffer: 1 << 26 }).toString()) === execSync(`git show ${BASE}:${f}`, { cwd: root, maxBuffer: 1 << 26 }).toString());   // at the released REV, not the working tree (slice 7 changes vercel.json + digest by ruling)
 const count = (f) => (readFileSync(join(root, f), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("verified counts: App.jsx 132 · digest 32 · assistant 14", count("src/App.jsx") === 132 && count("api/digest.js") === 32 && count("api/assistant.js") === 14, `${count("src/App.jsx")}/${count("api/digest.js")}/${count("api/assistant.js")}`);
 ok("Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));

@@ -39,6 +39,7 @@ import { deptAttendance } from "../shared/attendance.js";
 import { isListedMember, isCountedMember } from "../shared/members.js";
 import { requireCron } from "./_cron.js";
 import { digestOutcome } from "../shared/cron-outcome.js";   // cron honesty: a failed run answers 5xx
+import { weeklyKeyFor } from "../shared/weekly-drill.js";      // weekly slice 7: the same week key the weekly drill cron writes
 
 // The test allow-list is configuration, not code (PII scrub): no personal address is compiled in. Empty when unset.
 const TEST_TO = (process.env.DIGEST_TEST_TO || "").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
@@ -530,7 +531,19 @@ export function libraryBlock(titles) {
     </td></tr>`;
 }
 
-function compose(deptName, groups, metrics, duties, { testMode, libraryTitles = [] } = {}) {
+/* WEEKLY AI DRILL — "waiting for an officer's review" (Weekly Training Content slice 7; Step 0 §4). Shown only to a
+   department that HAS this week's ai_weekly draft still in draft (one read for the run, keyed by weeklyKeyFor, the cron's
+   own week rule), so the line is true when it says so. No title, no content. NOT A FLAG, like the library line: it never
+   counts toward the send gate, the headline or the notification rows, so a quiet department is not mailed about it. */
+export function weeklyWaitingBlock(waiting) {
+  if (!waiting) return "";
+  return `<tr><td style="padding:22px 24px 0">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:${C.muted};font-weight:700">Weekly AI drill</div>
+      <div style="font-size:14px;color:${C.secondary};margin-top:6px;line-height:1.45">This week's AI-drafted drill is waiting for an officer's review in Training Plans.</div>
+    </td></tr>`;
+}
+
+function compose(deptName, groups, metrics, duties, { testMode, libraryTitles = [], weeklyWaiting = false } = {}) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
   const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
   const headline = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
@@ -554,7 +567,7 @@ function compose(deptName, groups, metrics, duties, { testMode, libraryTitles = 
       ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
       ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
       ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
-      ${dutiesBlock(duties)}${libraryBlock(libraryTitles)}
+      ${dutiesBlock(duties)}${libraryBlock(libraryTitles)}${weeklyWaitingBlock(weeklyWaiting)}
       <tr><td style="padding:24px 24px 4px">
         <a href="${APP_URL}" style="display:inline-block;background:${C.red};color:#fff;font-size:14px;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:8px">Open B4C &rarr;</a>
       </td></tr>
@@ -758,6 +771,18 @@ export default async function handler(req, res) {
   } catch (e) {
     libNew.error = String(e?.message || e);
   }
+  /* WEEKLY AI DRILL (slice 7): which departments have this week's weekly draft still awaiting review. ONE read, NON-FATAL
+     like the library read: on failure the line is left out, every email still goes, and the run reports 500 "weekly-read".
+     NOT A FLAG: read after the send gate's inputs, never seeds byDept. */
+  let weekly = { waiting: new Set(), error: null };
+  try {
+    const { data, error } = await sb.from("drill_plans").select("department_id")
+      .eq("weekly_key", weeklyKeyFor(new Date()).key).eq("source", "ai_weekly").eq("status", "draft");
+    if (error) throw new Error(error.message);
+    weekly = { waiting: new Set((data || []).map((r) => r.department_id)), error: null };
+  } catch (e) {
+    weekly.error = String(e?.message || e);
+  }
   // Member names for attribution. nameById above maps DEPARTMENT ids; this is a separate map.
   const memberNameById = new Map((mi.members || []).map((m) => [m.id, m.name]));
   // D4d: a department can now earn a send on duty activity ALONE. byDept is built from FLAGGED items,
@@ -885,7 +910,7 @@ export default async function handler(req, res) {
       skipped.push({ name, reason: membersError ? `member read failed: ${membersError}` : "no active Department Admin with an email address" });
       continue;
     }
-    const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend, libraryTitles: libNew.titles });
+    const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend, libraryTitles: libNew.titles, weeklyWaiting: weekly.waiting.has(deptId) });
     // DRY RUN stops here. Everything above ran for real — the same reads, the same grouping, the same
     // n===0 skip, the same recipient resolution, the same render. Only sendEmail is skipped (push was
     // skipped above). `wouldSendTo` is the genuine recipient list a real run would have used, which is
@@ -904,10 +929,10 @@ export default async function handler(req, res) {
   /* CRON HONESTY (shared/cron-outcome.js — the rule, incl. the partial-send case, is written out there). Any failed
      step answers 5xx so Vercel's cron monitoring sees it; the details go to the log; the response names the failed
      steps, how many departments were mailed, and which were NOT (names only). A clean run returns exactly as before. */
-  const outcome = digestOutcome({ membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, results, pushEnabled: PUSH_ENABLED });
+  const outcome = digestOutcome({ membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, weeklyError: weekly.error, results, pushEnabled: PUSH_ENABLED });
   if (outcome.status !== 200) {
     console.error(`[digest] FAILED ${outcome.status} steps=${outcome.failed.join(",")}`, JSON.stringify({
-      membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, notSent: outcome.notSent,
+      membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, weeklyError: weekly.error, notSent: outcome.notSent,
       sendErrors: results.filter((r) => r.error).map((r) => ({ name: r.name, error: r.error })),
       notifyErrors: results.filter((r) => r.notified && (r.notified.error || r.notified.push?.error)).map((r) => ({ name: r.name, error: r.notified.error || r.notified.push.error })) }));
     return res.status(outcome.status).json({ ok: false, failed: outcome.failed, sent: outcome.sent, notSent: outcome.notSent, ...(isDry ? { dryRun: true } : {}) });

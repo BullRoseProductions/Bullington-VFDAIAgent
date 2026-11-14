@@ -166,7 +166,9 @@ await render(hub(["Department Admin"], globalThis.__dept));
   ok("3. a Department Admin sees the card, with the Off badge and the Step 0 sub-line", hasCard() && /Weekly AI drill draft\s*Off/.test(norm(c?.textContent)) && /Once a week, B4C drafts one seasonal drill plan for your officers to review\. Nothing is used until an officer approves it\./.test(norm(c?.textContent)));
   await click(c);
   const sw = host.querySelector("[data-weekly-drill-switch]");
-  ok("3. the card opens the switch screen (OFF), with what it sends and the 'not started yet' note", !!sw && /OFF/.test(norm(sw.textContent)) && /Never names, emails, notes, certs, hours, attendance or addresses\./.test(norm(host.textContent)) && !!host.querySelector("[data-weekly-not-live]"));
+  // slice 7 flips WEEKLY_DRAFT_RUN_LIVE (the cron ships): the 'not started yet' note shows exactly while the constant is false.
+  const runLive = /^const WEEKLY_DRAFT_RUN_LIVE = true;/m.test(readFileSync(join(root, "src/App.jsx"), "utf8"));
+  ok("3. the card opens the switch screen (OFF), with what it sends, and the 'not started yet' note only while the run isn't live", !!sw && /OFF/.test(norm(sw.textContent)) && /Never names, emails, notes, certs, hours, attendance or addresses\./.test(norm(host.textContent)) && !!host.querySelector("[data-weekly-not-live]") === !runLive);
   globalThis.__confirmAnswer = false;
   await click(btn(sw, /^Turn on$/));
   ok("3. turning on asks first (sent data + approval stated) — cancelled: nothing written", globalThis.__confirms.length === 1 && /Drafted by B4C's weekly AI/.test(globalThis.__confirms[0].body) && /never used until an officer approves it/.test(globalThis.__confirms[0].body)

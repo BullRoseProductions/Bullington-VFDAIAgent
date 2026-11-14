@@ -46,10 +46,12 @@ export function pulseOutcome({ dbError = null, detectErrors = [], muteErrors = [
  *    of the metrics read, "still went out" is true — before that, a metric failure also blanked the recipients.)
  *  - the B4C library read failed → 500 "library-read". Like metrics, the emails still went, just without the
  *    "New in the B4C library this week" line (Library S3).
+ *  - the weekly AI drill read failed → 500 "weekly-read". The emails still went, without the "waiting for an
+ *    officer's review" line (Weekly Training Content slice 7).
  *  - a department's notification rows or push failed → 500 "notify" / "push" / "push-config".
  *  - NOT failures: a department deliberately skipped (no active DA email — config, already listed in `skipped`), a
  *    quiet week, per-device FCM rejections (delivery outcomes, counted in push.failed), and a dry run's unsent mail. */
-export function digestOutcome({ detectionError = null, membersError = null, metricsError = null, dutiesError = null, isoErrors = [], libraryError = null, results = [], pushEnabled = false } = {}) {
+export function digestOutcome({ detectionError = null, membersError = null, metricsError = null, dutiesError = null, isoErrors = [], libraryError = null, weeklyError = null, results = [], pushEnabled = false } = {}) {
   if (detectionError) return { status: 502, failed: ["detection-read"], sent: 0, notSent: [] };
   const failed = [];
   if (membersError) failed.push("members-read");
@@ -57,6 +59,7 @@ export function digestOutcome({ detectionError = null, membersError = null, metr
   if (dutiesError) failed.push("duties-read");
   if (isoErrors.length) failed.push("iso-hours");
   if (libraryError) failed.push("library-read");
+  if (weeklyError) failed.push("weekly-read");
   for (const r of results) {
     const n = r.notified;
     if (n && n.error) failed.push("notify");
@@ -68,4 +71,28 @@ export function digestOutcome({ detectionError = null, membersError = null, metr
   const sent = results.filter((r) => !r.dryRun && !r.error && r.sentTo).length;
   const uniq = [...new Set(failed)];
   return { status: uniq.length ? 500 : 200, failed: uniq, sent, notSent };
+}
+
+/** weekly-drill (Weekly Training Content slice 7; Step 0 §5.6): the weekly AI drill draft. Hourly inside a Monday
+ *  00:00–05:00 UTC window, idempotent per department-week, so the next slot retries whatever failed.
+ *  - db → 503: a read the run needs failed (the opted-in departments, this week's existing drafts, or the seed). Nothing
+ *    was spent: no backstop count, no model call, no write.
+ *  - gen:<n> → 500: n departments' generations failed this slot (provider error, network, a malformed reply, an input
+ *    refusal). Each wrote nothing and is retried next slot.
+ *  - write → 500: put_weekly_drill_draft errored for a department.
+ *  - cap → 500: the department backstop refused (or could not be checked, failing closed). Reported, not retried in
+ *    this slot; the model was not called.
+ *  - NOT failures: a department toggled off at write time ("disabled"), one that already has this week's draft
+ *    ("exists", found before any spend), a slot where everyone is done (200, no model call), a dry run, and departments
+ *    "deferred" past this slot's per-run limit (the next slot takes them).
+ *  The body is counts and step names only: no prompts, no model text, no provider messages, no department names. */
+export function weeklyDrillOutcome({ dbError = null, results = [], deferred = 0 } = {}) {
+  const n = (o) => results.filter((r) => r.outcome === o).length;
+  const counts = { departments: results.length + deferred, inserted: n("inserted"), exists: n("exists"), disabled: n("disabled"), deferred };
+  if (dbError) return { status: 503, failed: ["db"], ...counts };
+  const failed = [];
+  if (n("gen")) failed.push(`gen:${n("gen")}`);
+  if (n("write")) failed.push("write");
+  if (n("cap")) failed.push("cap");
+  return { status: failed.length ? 500 : 200, failed, ...counts };
 }
