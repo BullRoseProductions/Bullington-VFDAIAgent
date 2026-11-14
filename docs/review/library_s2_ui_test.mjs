@@ -25,7 +25,7 @@ const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", nam
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "37e3527";                  // main when the slice was cut (CSP wss, gate PASS)
-const REV = process.env.REV ?? "";       // "" = working tree; pin to the passed sha on promotion
+const REV = process.env.REV ?? "8dbb398";   // pinned to the released range 37e3527..8dbb398 (gate PASS @8dbb398, merged 2026-11-14)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
 const { Window } = hdReq("happy-dom");
