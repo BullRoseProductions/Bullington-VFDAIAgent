@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "195feec";                    // main 2a621b4 + its tests-only pin: the last commit before this slice
-const REV = process.env.REV ?? "HEAD";     // pin to the passed sha at promote time
+const REV = process.env.REV ?? "027bed8";  // pinned to the released range 195feec..027bed8 ("GATE PASS @ 027bed8", merged 2026-11-14)
 Object.assign(process.env, { SUPABASE_URL: "https://x.supabase.test", SUPABASE_ANON_KEY: "anon-test", ANTHROPIC_API_KEY: "sk-test" });
 
 // ---------------------------------------------------------------- the fakes (shared by both handlers)
