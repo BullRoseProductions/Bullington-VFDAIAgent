@@ -2,6 +2,7 @@
 // Set ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.
 import { cors } from "./_cors.js";
 import { requireMember, chargeAiCall } from "./_auth.js";
+import { callAnthropic } from "./_anthropic.js";
 
 /* WS-2 (D-6) INPUT CAPS — sized to the real callers, so no legitimate request is refused:
    · system ≤ 310,000 chars (string, or the total of its text blocks). Station Q&A stuffs every SOP in, capped by the
@@ -56,40 +57,11 @@ export default async function handler(req, res) {
   if (problem) return res.status(413).json({ error: problem });
   if (!await chargeAiCall(ctx, "claude", res)) return;   // WS-2: the daily cap — 429 / 503 already sent, the model is not called
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
-        // PROMPT CACHING on the system prompt. Station Q&A stuffs every department SOP into it, so
-        // the same very large block is re-sent on every turn of a conversation; cached, it is read
-        // back cheaply instead of re-billed as input each time.
-        //
-        // Backward compatible on purpose: only a non-empty STRING system is wrapped in the block
-        // form. Callers that pass an array (already block-shaped) or nothing at all fall through
-        // untouched, so the drill planner and every other caller behave exactly as before.
-        system: typeof system === "string" && system.trim()
-          ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
-          : system,
-        messages: Array.isArray(messages) && messages.length ? messages : [{ role: "user", content: user }],   // multi-turn if `messages` given; else the existing single-shot path
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      // WS-2 (L-5): the provider's own message goes to the server log, never to the caller.
-      console.error("api/claude: Anthropic error", r.status, data?.error?.type, data?.error?.message);
+    const out = await callAnthropic({ key, system, user, messages, logTag: "api/claude" });   // slice 6: the shared provider call (api/_anthropic.js)
+    if (!out.ok) {
       return res.status(502).json({ error: "The AI service couldn't answer just now — please try again." });
     }
-    const text = (data.content || [])
-      .map((c) => (c.type === "text" ? c.text : ""))
-      .join("")
-      .trim();
-    return res.status(200).json({ text });
+    return res.status(200).json({ text: out.text });
   } catch (e) {
     return res.status(500).json({ error: "AI request failed" });
   }
