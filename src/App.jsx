@@ -18,6 +18,7 @@ import { todayISOIn } from "../shared/zoned-time.js";
 import { shiftSpan, shiftHoursText } from "../shared/shift-span.js";   // WS-4a G: "Voided" / "< 1 min" on every shift row
 import { rigStatus, checkOverdue } from "../shared/apparatus-status.js";   // WS-4b A: one "ready" for every screen + the email
 import { maintStatus as maintRule, startOfToday } from "../shared/maint-due.js";
+import { DRILL_PLAN_SYSTEM, strList, oneLine, stepToRun, drillPlanToContent, parseDrillPlanReply } from "../shared/drill-prompt.js";   // weekly slice 5: the drill-plan prompt + parser, shared with the cron
 import { isListedMember, isCountedMember, headcount } from "../shared/members.js";   // WS-4c B: one headcount for every screen + the email   // WS-4b F-2: the email's maintenance rule
 import { createPortal } from "react-dom";
 import { QRCodeCanvas } from "qrcode.react";
@@ -1469,6 +1470,48 @@ function GeofenceConsentFlow({ meId, notify, onBack, onDone }) {
    error and no rows — not an error — so treating a falsy `error` as success would show a member a
    task that was never saved. This is the same guard the apparatus checklist and the week-start
    setter use, for the same reason. */
+/* WEEKLY AI DRILL DRAFT — the department's opt-in (Weekly Training Content slice 5; Step 0 §5.1, ruling R3: DA-owned).
+   The only write is set_weekly_drill_draft_enabled, which re-checks a REAL Department Admin of this department server-side;
+   a guard trigger refuses any other client write of the column. Turning it ON asks first and says exactly what the weekly
+   run sends (Step 0 §5.5); turning it off deletes nothing. WEEKLY_DRAFT_RUN_LIVE is false until the weekly cron ships
+   (slice 7) — until then the screen says the first draft comes when B4C's weekly run starts, never that one is coming Monday. */
+const WEEKLY_DRAFT_RUN_LIVE = false;
+const WEEKLY_DRAFT_SENDS = "Your department's training category names and how current each is, the titles of your last 8 weeks of sessions and plans (so it doesn't repeat them), your city, the week's date, and roughly how many active members you have. Never names, emails, notes, certs, hours, attendance or addresses.";
+function WeeklyDrillSettings({ dept, setDept, notify }) {
+  const on = !!dept?.weekly_drill_draft_enabled;
+  const [busy, setBusy] = useState(false);
+  async function setOn(next) {
+    if (busy) return;
+    if (next && !(await noirConfirm({ title: "Turn on the weekly AI drill draft?",
+      body: `Once a week, B4C drafts one seasonal drill plan for your officers to review. It lands in Training Plans as a draft marked "Drafted by B4C's weekly AI" and is never used until an officer approves it. To write it, the weekly run sends: ${WEEKLY_DRAFT_SENDS}`,
+      confirmLabel: "Turn on" }))) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("set_weekly_drill_draft_enabled", { p_enabled: next });
+    setBusy(false);
+    if (error) { notify?.({ kind: "error", title: "Couldn't change the weekly AI drill draft", text: error.message || "Please try again." }); return; }
+    setDept?.((d) => ({ ...(d || {}), weekly_drill_draft_enabled: !!data }));
+    notify?.({ kind: "success", text: data ? "Weekly AI drill draft on." : "Weekly AI drill draft off — nothing already drafted was deleted." });
+  }
+  return (
+    <PageShell band kicker={<>SETTINGS &amp; SUPPORT</>} title="Weekly AI drill draft" sub="One seasonal drill plan a week, drafted by B4C for your officers to review.">
+      <NoirSkin>
+      <div data-weekly-drill-switch style={{ ...FS.cardNoir, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+          <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary }}>Weekly AI drill draft <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", marginLeft: 6, color: on ? FIRE.greenText : FIRE.textMuted }}>{on ? "ON" : "OFF"}</span></div>
+          <div style={{ fontSize: 13, color: FIRE.textSecondary, lineHeight: 1.5, marginTop: 4 }}>Once a week, B4C drafts one seasonal drill plan for your officers to review. Nothing is used until an officer approves it.</div>
+        </div>
+        <button style={on ? FS.btn : FS.btnPrimary} disabled={busy} onClick={() => setOn(!on)}>{busy ? "Saving…" : on ? "Turn off" : "Turn on"}</button>
+      </div>
+      <div style={{ ...NOIR_INSET, padding: "12px 14px", marginTop: 12, fontSize: 12.5, color: FIRE.textSecondary, lineHeight: 1.55 }}>
+        <div style={{ fontWeight: 700, color: FIRE.textPrimary, marginBottom: 4 }}>What it sends to write the draft</div>
+        {WEEKLY_DRAFT_SENDS}
+        <div style={{ marginTop: 8 }}>The draft lands in Training → Training Plans marked "Drafted by B4C's weekly AI". An officer reviews, edits and approves it like any plan — or deletes it.</div>
+        {!WEEKLY_DRAFT_RUN_LIVE && <div data-weekly-not-live style={{ marginTop: 8, color: FIRE.amberText }}>B4C's weekly run hasn't started yet. If this is on, your department is included from its first week.</div>}
+      </div>
+      </NoirSkin>
+    </PageShell>
+  );
+}
 function AfterCallSettings({ S, role, dept, setDept, notify }) {
   const isDA = isDeptAdmin(role);
   const enabled = !!dept?.aftercall_enabled;
@@ -1827,6 +1870,7 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
      would walk somebody straight past it. */
   if (view === "former" && isDeptAdminOnly) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<FormerMembers S={S} members={members} setMembers={setMembers} meId={meId} notify={notify} /></div>;
   if (view === "aftercall" && canManage(role)) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<AfterCallSettings S={S} role={role} dept={dept} setDept={setDept} notify={notify} /></div>;
+  if (view === "weeklydrill" && isDeptAdminOnly) return <div style={{ padding: "4px 2px 0" }}>{backBtn}<WeeklyDrillSettings dept={dept} setDept={setDept} notify={notify} /></div>;
   const card = (key, Icon, acc, title, desc, badge) => (
     <Card key={key} padding="15px 16px" style={{ cursor: "pointer", borderTop: `3px solid ${acc}`, display: "flex", flexDirection: "column", gap: 8 }} onClick={() => setView(key)}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1864,6 +1908,11 @@ function SettingsHub({ S, role, brand, setBrand, setDept, dept, requests, setReq
           ? "The shared list of tasks crews complete after a call — add, rename or remove tasks."
           : "A shared list of tasks crews complete after a call (wash, fuel, restock). Off by default.",
         dept?.aftercall_enabled ? null : offBadge("Off"))}
+      {/* Weekly AI drill draft (Weekly Training Content slice 5, ruling R3): a REAL Department Admin's switch — the same gate as
+          set_weekly_drill_draft_enabled (not Project Admin), on the card AND the route. Off by default; the card says so. */}
+      {isDeptAdminOnly && card("weeklydrill", Sparkles, NOIR_AI.blue, "Weekly AI drill draft",
+        "Once a week, B4C drafts one seasonal drill plan for your officers to review. Nothing is used until an officer approves it.",
+        dept?.weekly_drill_draft_enabled ? null : offBadge("Off"))}
       {card("support", Mail, NOIR_AI.blue, "Support & Contact", "Get help, send feedback, or request custom training.")}
       {card("about", Award, "#8C9AAB", "About", "App info, build and copyright.")}
     </div>
@@ -2734,7 +2783,7 @@ export default function App() {
     if (!authEmail) { setDept(null); return; }
     supabase.rpc("my_department_id").then(({ data: id }) => {
       if (!id) return;
-      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled, aftercall_enabled, probation_enabled").eq("id", id).single().then(({ data }) => {
+      supabase.from("departments").select("name, station, city, primary_color, accent_color, font, tagline, voice, logo_url, disabled_modules, station_lat, station_lng, station_radius_m, week_start_day, geofence_enabled, aftercall_enabled, probation_enabled, weekly_drill_draft_enabled").eq("id", id).single().then(({ data }) => {
         if (!data) return;
         setDept(data);                                   // dept keeps name + logo_url (crest); extra cols are harmless
         setBrand({                                        // populate the real department brand (null cols fall back to DEFAULT_BRAND)
@@ -24691,22 +24740,12 @@ function PlanSummary({ regs, nameById, compact }) {
    DRILL_PLAN_SYSTEM is the inline planner's system prompt, verbatim (a test pins the two equal) — the builder reuses the
    same generation; only the user message carries this form. drillPlanToContent maps that generator's plan object onto
    the five drill_plans.content keys Slice A's attach serializer and the plan viewer read. */
-const DRILL_PLAN_SYSTEM = "You are an experienced volunteer fire/EMS training officer drafting a SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. For any high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), note in safetyNotes that it requires a qualified instructor and assigned safety officer plus authorization. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"summary\":string,\"objectives\":string[],\"durationMin\":number,\"equipment\":string[],\"safetyNotes\":string[],\"steps\":[{\"title\":string,\"minutes\":number,\"actions\":string[]}],\"talkingPoints\":string[],\"debriefQuestions\":string[],\"evaluationChecklist\":string[]}. Keep arrays to 3-6 concise items. Each step's \"actions\" are short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences. 3-6 actions per step. Realistic for the stated staffing and apparatus.";
+/* DRILL_PLAN_SYSTEM, strList, oneLine, stepToRun, drillPlanToContent and parseDrillPlanReply now live in shared/drill-prompt.js
+   (Weekly Training Content slice 5) — one definition for this client and the weekly cron; imported at the top, unchanged. */
 /* Per-step regenerate (StepRegen): rewrite ONE run-of-show step of a draft, the others untouched. The same guardrails as
    DRILL_PLAN_SYSTEM, narrowed to a single step, through the same gated /api/claude (WS-2: requireMember → input limits →
    chargeAiCall "claude"). The reply must be exactly one step in the drafting schema; parseStepReply fails closed. */
 const DRILL_STEP_SYSTEM = "You are an experienced volunteer fire/EMS training officer revising ONE step of an existing, SAFE, practical drill plan. You are NOT a substitute for certified instruction, medical direction, or the AHJ. Defer to local protocols, state requirements, and medical direction. If the step involves a high-risk evolution (live fire, hazmat, technical rescue, invasive medical skills), say in its actions that it requires a qualified instructor and an assigned safety officer, plus authorization. Rewrite ONLY the step marked >>> TARGET. Keep it consistent with the steps before and after it and with the plan's objectives, equipment and safety notes; do not repeat other steps' content; do not change the rest of the plan. Do not invent specifics the plan does not give (apparatus names or numbers, addresses, people, protocol or SOG numbers) — keep it appropriate to this department, realistic for the stated staffing and apparatus. Keep the minutes close to the original unless the officer's note asks otherwise. Respond with ONLY one valid JSON object, no markdown, no code fences. Schema: {\"title\":string,\"minutes\":integer,\"actions\":string[]}. 3-6 actions: short, concrete, imperative bullet points a crew member can follow at a glance — NOT prose sentences.";
-const strList = (a) => (Array.isArray(a) ? a.filter((x) => x != null && String(x).trim() !== "").map((x) => String(x)) : []);
-const oneLine = (x) => String(x ?? "").replace(/\s+/g, " ").trim();
-/* A drafted step { title, minutes, actions[] } → the stored run_of_show entry { t: "Title — N min", d: "a; b; c" }. Shared by
-   drillPlanToContent and the per-step rewrite so the two cannot drift. Single-line and pipe-free so it ROUND-TRIPS: the
-   editor writes "t | d" and splits back at the first "|" (runToText / runFromText), and libRowToPacket reads "— N min" as
-   an integer. For a normal step this is byte-for-byte what drillPlanToContent always produced. */
-function stepToRun(st) {
-  const title = oneLine(st.title || "Step").replace(/\|/g, "/") || "Step";
-  const mins = Number(st.minutes) > 0 ? Math.round(Number(st.minutes)) : 0;
-  return { t: title + (mins ? ` — ${mins} min` : ""), d: strList(st.actions).map(oneLine).filter(Boolean).join("; ") || (typeof st.detail === "string" ? oneLine(st.detail) : "") };
-}
 // The editor's run-of-show text: one step per line, "t | d" (d optional); parsed back at the FIRST "|".
 const runToText = (run) => (run || []).map((x) => (x && typeof x === "object" ? `${x.t || ""}${x.d ? ` | ${x.d}` : ""}` : String(x))).join("\n");
 const runFromText = (text) => tpSplit(text).map((l) => { const i = l.indexOf("|"); return i < 0 ? { t: l, d: "" } : { t: l.slice(0, i).trim(), d: l.slice(i + 1).trim() }; });
@@ -24723,22 +24762,22 @@ function parseStepReply(text) {
   if (!Array.isArray(o.actions) || !o.actions.length || !o.actions.every((a) => typeof a === "string" && oneLine(a))) return null;
   return { title: o.title, minutes: o.minutes, actions: o.actions };
 }
-function drillPlanToContent(plan) {
-  const p = plan || {};
-  return {
-    summary: typeof p.summary === "string" ? p.summary : "",
-    objectives: strList(p.objectives),
-    run_of_show: (Array.isArray(p.steps) ? p.steps : []).filter((s) => s && typeof s === "object").map(stepToRun),
-    materials: strList(p.equipment),
-    safety: strList(p.safetyNotes),
-  };
-}
 const TP_TYPES = ["Hands-on drill", "Classroom", "Tabletop", "Skills check"];
 const TP_DURATIONS = [["30", "~30 min"], ["60", "~1 hour"], ["90", "~90 min"], ["120", "~2 hours"], ["180", "~3 hours"]];
 const TP_LEVELS = ["New / probationary", "Intermediate", "Experienced", "Mixed crew"];
 const TP_SEEDS = ["SCBA air management", "Hose deployment & streams", "Ground ladders", "RIT / Mayday", "Search & rescue (VEIS)", "Tanker shuttle / rural water", "Pump operations & drafting", "Live fire (NFPA 1403)", "EMS airway", "Extrication"];
 const tpDur = (m) => (!m ? "" : m % 60 === 0 ? `${m / 60} hr${m === 60 ? "" : "s"}` : m > 60 ? `${Math.floor(m / 60)} hr ${m % 60} min` : `${m} min`);
 const tpDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+/* WHERE A PLAN CAME FROM — every Training Plans label reads it here (Weekly Training Content slice 5). The ai / library /
+   manual strings are exactly the ones these screens always showed. ai_weekly (the weekly AI draft, created_by NULL — no
+   person wrote it) always says "B4C's weekly AI": never a member's name (byPerson false), never plain "Draft". */
+const PLAN_SRC = {
+  ai:        { pill: "Draft · needs review", pillSel: "Draft · AI", card: "AI draft", head: "AI-drafted · needs an officer's approval", made: "drafted with AI", short: "Draft", byPerson: true },
+  library:   { pill: "Draft · from the library", pillSel: "Draft · library", card: "Draft", head: "From the library · needs an officer's approval", made: "added from the library", short: "Draft", byPerson: true },
+  manual:    { pill: "Draft", pillSel: "Draft", card: "Draft", head: "Draft · needs an officer's approval", made: "written", short: "Draft", byPerson: true },
+  ai_weekly: { pill: "Draft · B4C weekly AI", pillSel: "Draft · weekly AI", card: "Drafted by B4C's weekly AI", head: "Drafted by B4C's weekly AI · needs an officer's approval", made: "drafted by B4C's weekly AI", short: "Weekly AI draft", byPerson: false },
+};
+const planSrc = (p) => PLAN_SRC[p?.source] || PLAN_SRC.manual;
 const tpLabel = { fontSize: 10, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: FIRE.textMuted };
 const tpSecLab = { fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 15, color: FIRE.textPrimary, margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" };
 const tpPsl = { fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", color: FIRE.textMuted, textTransform: "uppercase", marginBottom: 10 };
@@ -25002,9 +25041,8 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
     const user = `${dept?.name ? `Department: ${dept.name}\n` : ""}Topic: ${topic}\nTraining type: ${form.type}\nTime: ${form.duration} minutes\n${form.category ? `Category: ${form.category}\n` : ""}${form.members.trim() ? `Members expected: ${form.members.trim()}\n` : ""}Skill level: ${form.level}${form.standard.trim() ? `\nStandard / SOG to align with: ${form.standard.trim()}` : ""}${form.focus.trim() ? `\nFocus & notes: ${form.focus.trim()}` : ""}`;
     let plan = null;
     try {
-      const t = (await callClaude(DRILL_PLAN_SYSTEM, user)).replace(/```json|```/g, "").trim();
-      try { plan = JSON.parse(t); } catch { const m = t.match(/\{[\s\S]*\}/); plan = m ? JSON.parse(m[0]) : null; }
-      if (!plan || typeof plan !== "object") throw new Error("parse");
+      plan = parseDrillPlanReply(await callClaude(DRILL_PLAN_SYSTEM, user));   // shared/drill-prompt.js — the cron parses with the same function
+      if (!plan) throw new Error("parse");
     } catch { setDrafting(false); setDraftErr("Couldn't generate a plan just now. Check the connection and try again."); return; }
     const audience = [form.level, form.members.trim() ? `${form.members.trim()} members` : ""].filter(Boolean).join(" · ");
     const dur = Number(plan.durationMin) > 0 ? Math.round(Number(plan.durationMin)) : Number(form.duration) || null;
@@ -25074,7 +25112,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
   }
 
   const field = (label, el, wide) => <label style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: wide ? "1 / -1" : undefined }}><span style={tpLabel}>{label}</span>{el}</label>;
-  const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={p.source === "ai" ? "Draft · needs review" : p.source === "library" ? "Draft · from the library" : "Draft"} tone="warn" />;
+  const statusPill = (p) => p.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={planSrc(p).pill} tone="warn" />;
   const upcoming = (sessions || []).filter((s) => !s.done && !s.cancelled && !isMeeting(s)).sort(sessSort);   // Slice 4: drill plans go on trainings — meetings take an agenda (their row's "Attach agenda")
 
   return (
@@ -25181,7 +25219,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                         <button key={p.id} type="button" onClick={() => openFromCategory(c, p.id)}
                           style={{ background: "none", border: 0, padding: "2px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 12.5, color: FIRE.textSecondary, display: "flex", gap: 6, alignItems: "baseline", minWidth: 0 }}>
                           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span>
-                          <span style={{ flexShrink: 0, fontSize: 10.5, color: p.status === "approved" ? FIRE.greenText : FIRE.amberText }}>{p.status === "approved" ? "Approved" : "Draft"}</span>
+                          <span style={{ flexShrink: 0, fontSize: 10.5, color: p.status === "approved" ? FIRE.greenText : FIRE.amberText }}>{p.status === "approved" ? "Approved" : planSrc(p).short}</span>
                         </button>
                       ))}
                     </div>
@@ -25210,7 +25248,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
             {shown.map((p) => {
               const on = !!sel && sel.id === p.id;   // a real boolean: aria-pressed must read "false", not vanish, when nothing is open
               const nObj = (p.content?.objectives || []).length;
-              const who = p.status === "approved" ? nameOf(p.approved_by) : nameOf(p.created_by);
+              const who = p.status === "approved" ? nameOf(p.approved_by) : (planSrc(p).byPerson ? nameOf(p.created_by) : null);
               return (
                 <button key={p.id} type="button" onClick={() => (on ? collapse() : select(p.id))} aria-pressed={on}
                   style={{ ...FS.cardNoir, textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 13, padding: "15px 16px", border: `1px solid ${on ? FIRE.redBright : FIRE.lineNoir}`, display: "block", width: "100%" }}>
@@ -25221,7 +25259,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                   </div>
                   <div style={{ fontSize: 11, color: FIRE.textMuted, marginBottom: 10, ...FS.num }}>{[p.category || "No category", `${nObj} objective${nObj === 1 ? "" : "s"}`, tpDur(p.duration_min)].filter(Boolean).join(" · ")}</div>
                   <div style={{ borderTop: `1px solid ${FIRE.lineNoir}`, paddingTop: 10, display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: FIRE.textMuted }}>
-                    <span style={{ color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.status === "approved" ? `Approved${who ? ` by ${who}` : ""} · ${tpDate(p.approved_at)}` : `${p.source === "ai" ? "AI draft" : "Draft"}${who ? ` · ${who}` : ""} · ${tpDate(p.created_at)}`}</span>
+                    <span style={{ color: FIRE.textSecondary, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.status === "approved" ? `Approved${who ? ` by ${who}` : ""} · ${tpDate(p.approved_at)}` : `${planSrc(p).card}${who ? ` · ${who}` : ""} · ${tpDate(p.created_at)}`}</span>
                     <span style={{ marginLeft: "auto", color: p.attached_sessions ? FIRE.redText : FIRE.textMuted, fontWeight: 600, flexShrink: 0, ...FS.num }}>{p.attached_sessions ? `Attached to ${p.attached_sessions} session${p.attached_sessions === 1 ? "" : "s"}` : "Not attached"}</span>
                   </div>
                 </button>
@@ -25233,11 +25271,11 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
         {sel && (
           <div ref={featRef}>
             <div style={tpSecLab}><ClipboardList size={16} color={FIRE.redBright} />{sel.status === "draft" ? "Awaiting review" : "Approved plan"}
-              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>{sel.status === "draft" ? (sel.source === "ai" ? "AI-drafted · needs an officer's approval" : sel.source === "library" ? "From the library · needs an officer's approval" : "Draft · needs an officer's approval") : `Approved${nameOf(sel.approved_by) ? ` by ${nameOf(sel.approved_by)}` : ""} · ${tpDate(sel.approved_at)}`}</span></div>
+              <span style={{ marginLeft: "auto", fontSize: 11.5, color: FIRE.textSecondary, fontWeight: 400 }}>{sel.status === "draft" ? planSrc(sel).head : `Approved${nameOf(sel.approved_by) ? ` by ${nameOf(sel.approved_by)}` : ""} · ${tpDate(sel.approved_at)}`}</span></div>
             <div style={{ border: `1px solid ${sel.status === "draft" ? `${FIRE.amberText}59` : FIRE.lineNoir}`, borderRadius: 14, background: FIRE.cardNoir, padding: "18px 20px", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 5, flexWrap: "wrap" }}>
                 <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.textPrimary, overflowWrap: "anywhere" }}>{sel.title}</div>
-                {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={sel.source === "ai" ? "Draft · AI" : sel.source === "library" ? "Draft · library" : "Draft"} tone="warn" />}
+                {sel.status === "approved" ? <RdPill label="Approved" tone="good" /> : <RdPill label={planSrc(sel).pillSel} tone="warn" />}
                 {!editing && <button type="button" style={{ ...FS.btn, marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={collapse} aria-label="Collapse this plan"><ChevronUp size={14} color={FIRE.btnIcon} /> Collapse</button>}
                 {canWrite && !editing && (
                   <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
@@ -25251,7 +25289,7 @@ function TrainingPlans({ S, role, canManageTraining, sessions, loadSessions, mem
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${sel.source === "ai" ? "drafted with AI" : sel.source === "library" ? "added from the library" : "written"}${nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
+              <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginBottom: 16, ...FS.num }}>{[sel.category, tpDur(sel.duration_min), sel.audience, `${planSrc(sel).made}${planSrc(sel).byPerson && nameOf(sel.created_by) ? ` by ${nameOf(sel.created_by)}` : ""} ${tpDate(sel.created_at)}`, sel.attached_sessions ? `attached to ${sel.attached_sessions} session${sel.attached_sessions === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</div>
               {canWrite && !editing && sel.status === "draft" && sel.source === "library" && !sel.category && (
                 <div data-library-category-picker style={{ ...NOIR_INSET, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <label style={{ ...S.field, minWidth: 220, flex: 1 }}><span style={{ ...S.fieldLabel, color: FIRE.textSecondary }}>Pick a category for this plan</span>
