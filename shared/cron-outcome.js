@@ -44,16 +44,19 @@ export function pulseOutcome({ dbError = null, detectErrors = [], muteErrors = [
  *  - a degraded read (metrics / duties / hours) → 500 "metrics-read" / "duties-read" / "iso-hours". The emails still
  *    went out with "—" tiles; the run is reported failed because the DB failed. (Since the member list was split out
  *    of the metrics read, "still went out" is true — before that, a metric failure also blanked the recipients.)
+ *  - the B4C library read failed → 500 "library-read". Like metrics, the emails still went, just without the
+ *    "New in the B4C library this week" line (Library S3).
  *  - a department's notification rows or push failed → 500 "notify" / "push" / "push-config".
  *  - NOT failures: a department deliberately skipped (no active DA email — config, already listed in `skipped`), a
  *    quiet week, per-device FCM rejections (delivery outcomes, counted in push.failed), and a dry run's unsent mail. */
-export function digestOutcome({ detectionError = null, membersError = null, metricsError = null, dutiesError = null, isoErrors = [], results = [], pushEnabled = false } = {}) {
+export function digestOutcome({ detectionError = null, membersError = null, metricsError = null, dutiesError = null, isoErrors = [], libraryError = null, results = [], pushEnabled = false } = {}) {
   if (detectionError) return { status: 502, failed: ["detection-read"], sent: 0, notSent: [] };
   const failed = [];
   if (membersError) failed.push("members-read");
   if (metricsError) failed.push("metrics-read");
   if (dutiesError) failed.push("duties-read");
   if (isoErrors.length) failed.push("iso-hours");
+  if (libraryError) failed.push("library-read");
   for (const r of results) {
     const n = r.notified;
     if (n && n.error) failed.push("notify");

@@ -505,7 +505,32 @@ function metricsBlock(m) {
     </td></tr>`;
 }
 
-function compose(deptName, groups, metrics, duties, { testMode } = {}) {
+/* LIBRARY S3 — "New in the B4C library this week" (Weekly Training Content slice 3; Step 0 §4, ruling R4).
+   newLibraryTitles narrows the run's ONE library_drills read to drills PUBLISHED inside the digest's own week window
+   (the same [Mon 00:00, Mon 00:00) Central as Station Duties), newest first, titles only, de-duplicated. The query
+   already filters; this repeats it so the line can never claim a drill outside the week or one that isn't published.
+   libraryBlock is purely a renderer: up to two titles and "(+N more)", or nothing at all. It is identical for every
+   department, and it is NOT a flag: it never counts toward the send gate, the headline or the notification rows. */
+export function newLibraryTitles(rows, week) {
+  const a = week.weekStart.getTime(), b = week.weekEnd.getTime();
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : [])
+    .filter((r) => r && r.state === "published" && r.published_at && Date.parse(r.published_at) >= a && Date.parse(r.published_at) < b)
+    .sort((x, y) => Date.parse(y.published_at) - Date.parse(x.published_at))
+    .map((r) => String(r.title || "").trim())
+    .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+}
+export function libraryBlock(titles) {
+  if (!Array.isArray(titles) || !titles.length) return "";
+  const shown = titles.slice(0, 2).map(esc).join(", ");
+  const more = titles.length > 2 ? ` (+${titles.length - 2} more)` : "";
+  return `<tr><td style="padding:22px 24px 0">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:${C.muted};font-weight:700">B4C library</div>
+      <div style="font-size:14px;color:${C.secondary};margin-top:6px;line-height:1.45">New in the B4C library this week: ${shown}${more} &mdash; add ${titles.length === 1 ? "it" : "them"} from Training &rarr; Library.</div>
+    </td></tr>`;
+}
+
+function compose(deptName, groups, metrics, duties, { testMode, libraryTitles = [] } = {}) {
   const total = groups.certs.length + groups.gear.length + groups.maint.length;
   const subject = `B4C — ${deptName}: ${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
   const headline = `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} attention`;
@@ -529,7 +554,7 @@ function compose(deptName, groups, metrics, duties, { testMode } = {}) {
       ${section("Certifications", groups.certs, (it) => `${esc(it.member)} &middot; ${esc(it.cert)} &middot;`)}
       ${section("Gear retirement", groups.gear, (it) => `${esc(it.item)} &middot;`)}
       ${section("Maintenance", groups.maint, (it) => `${esc(it.apparatus)} &middot; ${esc(it.task)} &middot;`)}
-      ${dutiesBlock(duties)}
+      ${dutiesBlock(duties)}${libraryBlock(libraryTitles)}
       <tr><td style="padding:24px 24px 4px">
         <a href="${APP_URL}" style="display:inline-block;background:${C.red};color:#fff;font-size:14px;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:8px">Open B4C &rarr;</a>
       </td></tr>
@@ -719,6 +744,20 @@ export default async function handler(req, res) {
   } catch (e) {
     du.error = String(e?.message || e);
   }
+  /* LIBRARY S3: what B4C published to the shared library in the reported week — ONE read for the whole run (the same
+     for every department), titles only. NON-FATAL, like the duties read: on failure the line is simply left out, every
+     email still goes, and the run reports 500 "library-read" (cron honesty). NOT A FLAG (ruling R4): it is read after
+     the send gate's inputs and never seeds byDept, so a quiet department is not mailed about content. */
+  let libNew = { titles: [], error: null };
+  try {
+    const { data, error } = await sb.from("library_drills").select("title, state, published_at")
+      .eq("state", "published").gte("published_at", week.weekStart.toISOString()).lt("published_at", week.weekEnd.toISOString())
+      .order("published_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    libNew = { titles: newLibraryTitles(data, week), error: null };
+  } catch (e) {
+    libNew.error = String(e?.message || e);
+  }
   // Member names for attribution. nameById above maps DEPARTMENT ids; this is a separate map.
   const memberNameById = new Map((mi.members || []).map((m) => [m.id, m.name]));
   // D4d: a department can now earn a send on duty activity ALONE. byDept is built from FLAGGED items,
@@ -846,7 +885,7 @@ export default async function handler(req, res) {
       skipped.push({ name, reason: membersError ? `member read failed: ${membersError}` : "no active Department Admin with an email address" });
       continue;
     }
-    const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend });
+    const { subject, html } = compose(name, groups, metrics, dutiesWeek, { testMode: isTestSend, libraryTitles: libNew.titles });
     // DRY RUN stops here. Everything above ran for real — the same reads, the same grouping, the same
     // n===0 skip, the same recipient resolution, the same render. Only sendEmail is skipped (push was
     // skipped above). `wouldSendTo` is the genuine recipient list a real run would have used, which is
@@ -865,10 +904,10 @@ export default async function handler(req, res) {
   /* CRON HONESTY (shared/cron-outcome.js — the rule, incl. the partial-send case, is written out there). Any failed
      step answers 5xx so Vercel's cron monitoring sees it; the details go to the log; the response names the failed
      steps, how many departments were mailed, and which were NOT (names only). A clean run returns exactly as before. */
-  const outcome = digestOutcome({ membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, results, pushEnabled: PUSH_ENABLED });
+  const outcome = digestOutcome({ membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, results, pushEnabled: PUSH_ENABLED });
   if (outcome.status !== 200) {
     console.error(`[digest] FAILED ${outcome.status} steps=${outcome.failed.join(",")}`, JSON.stringify({
-      membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, notSent: outcome.notSent,
+      membersError, metricsError: mi.error, dutiesError: du.error, isoErrors, libraryError: libNew.error, notSent: outcome.notSent,
       sendErrors: results.filter((r) => r.error).map((r) => ({ name: r.name, error: r.error })),
       notifyErrors: results.filter((r) => r.notified && (r.notified.error || r.notified.push?.error)).map((r) => ({ name: r.name, error: r.notified.error || r.notified.push.error })) }));
     return res.status(outcome.status).json({ ok: false, failed: outcome.failed, sent: outcome.sent, notSent: outcome.notSent, ...(isDry ? { dryRun: true } : {}) });
