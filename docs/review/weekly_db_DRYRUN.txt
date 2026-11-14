@@ -1,0 +1,111 @@
+pins: 14/14 — each equals the live-captured md5 AND the mock body 
+migration: applied. state row: {"triggers":["departments.departments_weekly_drill_draft_guard","drill_plans.drill_plans_human_approval"],"weekly_fns":["put_weekly_drill_draft(uuid,text,text,text,integer,text,jsonb)","record_dept_ai_call(uuid,text)","set_weekly_drill_draft_enabled(boolean)","tg_departments_weekly_drill_draft_guard()","tg_drill_plans_human_approval()"],"source_check":"CHECK ((source = ANY (ARRAY['ai'::text, 'manual'::text, 'library'::text, 'ai_weekly'::text])))","departments_on":0,"verified_presence":2,"plans_by_status_source":{"approved/manual":1}}
+re-run: refused -> PREFLIGHT: a slice-4 name already exists — the weekly DB slice looks applied. Refusing.
+RETEST:
+PASS  G0 toggle default off; source has ai_weekly; weekly_key CHECK + unique; approval CHECK + trigger; service-role-only put/record; DA toggle RPC; usage table sealed
+— actors from Alpha (mock)
+   PASS  T1 member refused (exact message); DA on -> off; a direct UPDATE never flips it
+   PASS  W1 toggle off -> disabled, nothing written
+   PASS  W2 toggle on -> inserted: draft, ai_weekly, keyed, no author, no approver, trimmed
+   PASS  W3 same week again -> exists, same id, one row, unchanged
+   PASS  W4 bad week / blank title / non-object / length 0 / unknown department -> the exact messages, nothing written
+   PASS  W5 a signed-in DA has no EXECUTE; a session without the service_role claim -> Not authorized
+   PASS  A1 service_role UPDATE / INSERT-approved and a claim-less UPDATE -> refused; still a draft
+   PASS  A2 approve_drill_plan: plain member refused; the DA approves, approved_by = the DA
+   PASS  A3 an approved plan edited through set_drill_plan: still approved, same approver, provenance kept
+   PASS  A4 service_role re-attributing an approved plan -> refused
+   PASS  A5 unapprove -> draft, approver cleared
+   PASS  A6 keyed manual / unkeyed ai_weekly refused by CHECK; set_drill_plan cannot create ai_weekly
+   PASS  R1 backstop counts (+1, +1); refuses at 1,500 members + cron (scope department); bad route; DA no EXECUTE; no claim -> Not authorized
+— fixtures rolled back (no ZZ RETEST / 2099 rows remain)
+PASS  V  station_presence.verified count unchanged (2)
+15 passed / 0 failed / 0 skipped
+drift "approve_drill_plan drifted": refused -> PREFLIGHT: public.approve_drill_plan(uuid) is missing or has drifted (pinned a01c872bc14561fcb633796353a4b694). Re-audit.
+drift "record_ai_call drifted": refused -> PREFLIGHT: public.record_ai_call(text) is missing or has drifted (pinned bc12991cbd6fd2c1efc6794affbb5e27). Re-audit.
+drift "source CHECK already widened": refused -> PREFLIGHT: drill_plans_source_chk is not the audited text. Re-audit.
+drift "drill_plans policy loosened": refused -> PREFLIGHT: drill_plans policies are not the audited department-scoped SELECT. Re-audit.
+drift "an unaudited drill_plans trigger": refused -> PREFLIGHT: drill_plans has a trigger the audit did not see. Re-audit.
+drift "an approved plan with no approver": refused -> PREFLIGHT: 1 approved drill plan(s) have no approver; the approval CHECK cannot be added. Re-audit.
+drift "a slice-4 name already taken": refused -> PREFLIGHT: a slice-4 name already exists — the weekly DB slice looks applied. Refusing.
+mutations:
+   M1 put callable by authenticated: migration REFUSED -> POST: expected 2 service-role-only functions (definer, search_path, role check, no anon/authenticated/PUBLIC); found 1.
+   M2 put's role check removed:
+      FAIL  W5 -> no-claim accepted
+      14 passed / 1 failed / 0 skipped
+   M3 put ignores the toggle:
+      FAIL  W1 -> {"id": "<uuid>", "result": "inserted"} / OK
+      FAIL  W2 -> {"id": "<uuid>", "result": "exists"} / OK
+      13 passed / 2 failed / 0 skipped
+   M4 put lands approved-looking (source ai):
+      FAIL  W2 -> {"id": "<uuid>", "result": "inserted"} / OK
+      FAIL  W3 -> {"id": "<uuid>", "result": "inserted"} / rows 0
+      12 passed / 3 failed / 0 skipped
+   M5 put records an author:
+      FAIL  W2 -> {"id": "<uuid>", "result": "inserted"} / OK
+      14 passed / 1 failed / 0 skipped
+   M6 put overwrites on conflict:
+      FAIL  W3 -> {"id": "<uuid>", "result": "inserted"} / rows 1
+      14 passed / 1 failed / 0 skipped
+   M7 approval trigger only checks non-null approver:
+      FAIL  A1 -> editor approved
+      FAIL  A4 -> accepted
+      13 passed / 2 failed / 0 skipped
+   M8 approval trigger skips INSERT:
+      FAIL  A1 -> born approved
+      14 passed / 1 failed / 0 skipped
+   M9 approval trigger ignores re-attribution:
+      FAIL  A4 -> accepted
+      14 passed / 1 failed / 0 skipped
+   M10 approval trigger never created:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  A1 -> editor approved
+      12 passed / 3 failed / 0 skipped
+   M11 weekly_key not required for ai_weekly:
+      FAIL  A6 -> unkeyed weekly
+      14 passed / 1 failed / 0 skipped
+   M12 no unique week per department:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  W3 -> {"id": "<uuid>", "result": "inserted"} / rows 2
+      13 passed / 2 failed / 0 skipped
+   M13 toggle RPC lets any member flip it:
+      FAIL  T1 -> a direct UPDATE flipped it
+      14 passed / 1 failed / 0 skipped
+   M14 toggle guard missing:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  T1 -> a direct UPDATE flipped it
+      13 passed / 2 failed / 0 skipped
+   M15 toggle defaults ON:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      14 passed / 1 failed / 0 skipped
+   M16 backstop ignores members' calls:
+      FAIL  R1 -> ceiling: {"allowed": true, "cron_used": 3, "dept_used": 3, "dept_ceiling": 1500} {"allowed": true, "cron_used": 4, "dept_used": 4, "dept_ceiling": 1500}
+      14 passed / 1 failed / 0 skipped
+   M17 backstop callable by authenticated: migration REFUSED -> POST: expected 2 service-role-only functions (definer, search_path, role check, no anon/authenticated/PUBLIC); found 1.
+   M18 usage table readable by service_role: migration REFUSED -> POST: ai_dept_call_usage is reachable by a client role.
+   M19 a pre-existing function touched: migration REFUSED -> POST: a pre-existing function or its grants changed.
+   M20 approval CHECK dropped:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      14 passed / 1 failed / 0 skipped
+post-apply drift (RETEST alone must catch):
+   D1 authenticated granted EXECUTE on put later:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 1 of 2)
+      FAIL  W5 -> Not authorized
+      13 passed / 2 failed / 0 skipped
+   D2 approval trigger disabled:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  A1 -> editor approved
+      12 passed / 3 failed / 0 skipped
+   D3 toggle guard dropped:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  T1 -> a direct UPDATE flipped it
+      13 passed / 2 failed / 0 skipped
+   D4 source CHECK reverted:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      FAIL  W2 -> - / new row for relation "drill_plans" violates check constraint "drill_plans_source_chk"
+      7 passed / 8 failed / 0 skipped
+   D5 usage table opened to authenticated:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      14 passed / 1 failed / 0 skipped
+   D6 approval CHECK dropped:
+      FAIL  G0 shape / rights not as expected (service-role fns ok: 2 of 2)
+      14 passed / 1 failed / 0 skipped
