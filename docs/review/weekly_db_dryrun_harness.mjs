@@ -93,7 +93,8 @@ INSERT INTO station_presence (department_id, verified) VALUES ('${A}', true), ('
 `;
 const firstLine = (e) => String(e.message || e).split("\n")[0];
 const report = (e) => String(e.message || e).split("\n").filter((l) => /PASS|FAIL|SKIP|passed|—/.test(l)).join("\n");
-const log = (s) => console.log(s);
+// Deterministic output: fixture ids are random per run, so every uuid is printed as <uuid> (DRYRUN.txt == this output, byte for byte).
+const log = (s) => console.log(String(s).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>"));
 const redOf = (e) => { const r = report(e); return { fails: r.split("\n").filter((l) => /FAIL/.test(l)), tail: r.split("\n").pop() }; };
 async function fresh() { const db = new PGlite(); await db.exec(schema); return db; }
 
