@@ -27,7 +27,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "013eeb8";                  // the Weekly DB record (main 6742304 + the S3 pin + the DB slice's files)
-const REV = process.env.REV ?? "";       // "" = working tree; pin to the passed sha on promotion
+const REV = process.env.REV ?? "2a621b4";   // pinned to the released range 013eeb8..2a621b4 ("GATE PASS @ 2a621b4", merged 2026-11-14)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const hdReq = createRequire(join(process.env.HAPPY_DOM_DIR || root, "package.json"));
 const { Window } = hdReq("happy-dom");
