@@ -34,6 +34,10 @@
          has_column_privilege('service_role', 'public.library_drills', 'published_at', 'SELECT') as svc_published_at;
   ```
   Expect `true / true`. (Service role bypasses RLS, so the published-only policy doesn't matter here.)
+- **✅ RAN 2026-11-14 on Ashlea's go: `svc_select = true`, `svc_published_at = true`.**
+  - Read-only, no errors.
+  - The editor text was SHA-256-checked in-page before Run (`5a1a9c72ce4de456b2a0f9cb7774a320f43de5c7a00c2a84214c22beacc452a7`, MATCH, 209 characters); the hash check and Run were separate steps.
+  - The digest's server key can read the table and `published_at`. This pre-merge check is closed.
 - **After deploy:** a `?dry=1` run (curl with the cron secret, which Ashlea runs) shows the line in each department's html, or none in a quiet week. It sends nothing and writes nothing.
 
 ## Tests
@@ -52,7 +56,7 @@
 - no RLS, grant or SQL change.
 
 ## After gate PASS (on Ashlea's go)
-1. Run the read-only live check above.
+1. ~~Run the read-only live check above.~~ Done 2026-11-14 (true / true).
 2. Pin this test's `REV` to the passed sha, then merge and push.
 3. Served-verify `version.json`.
 4. Optionally, a `?dry=1` digest run.
