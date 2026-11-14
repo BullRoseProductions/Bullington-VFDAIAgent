@@ -22,7 +22,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "4176cba";                  // main 8dbb398 (Library S2 UI, gate PASS) + its test-fence pin
-const REV = process.env.REV ?? "";       // "" = working tree; pin to the passed sha on promotion
+const REV = process.env.REV ?? "6742304";   // pinned to the released range 4176cba..6742304 (gate PASS @6742304, merged 2026-11-14)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const SECRET = "s3cret-cron-value-0123456789abcdef";
 Object.assign(process.env, { PULSE_ENABLED: "1", RESEND_API_KEY: "re-test", SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: "svc-test-key", CRON_SECRET: SECRET });
