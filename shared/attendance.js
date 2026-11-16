@@ -88,3 +88,22 @@ export const drillsScheduled = (sessions, range) => (sessions || []).filter((s) 
   const iso = toISODate(sessDate(s));
   return !isCancelled(s) && countsTowardRate(s) && !isMeetingSession(s) && iso >= range.from && iso <= range.to;
 });
+
+/* THE TOP RESPONDER — the roster's Crew Spotlight "Most sessions · 90 days" card. One rule with the rate: the sessions
+   counted are deptAttendance's (finalized, not cancelled, roll taken, everyone-audience, counting toward attendance,
+   on/after the member's join date), so a board meeting or an optional session never inflates it. Ties are explicit and
+   the order never depends on the roster's order: most recent counted attendance first, then name, then id.
+   → null (nobody attended) | { n, tied: [{ id, name, attended, lastISO }, …] } — tied has every member at the top count. */
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+export function topAttender(members, sessions, range, counted = () => true) {
+  const { rows, doneThisYear } = deptAttendance(members, sessions, null, range, counted);
+  const n = rows.reduce((top, r) => Math.max(top, r.attended), 0);
+  if (!n) return null;
+  const byId = new Map((members || []).map((m) => [m.id, m]));
+  const lastFor = (m) => doneThisYear.filter((s) => expectedAfterJoin(m, s) && (s.attendance || []).includes(m.id))
+    .reduce((last, s) => { const iso = toISODate(sessDate(s)); return iso > last ? iso : last; }, "");
+  const tied = rows.filter((r) => r.attended === n)
+    .map((r) => ({ id: r.id, name: r.name, attended: r.attended, lastISO: lastFor(byId.get(r.id)) }))
+    .sort((a, b) => cmp(b.lastISO, a.lastISO) || cmp(String(a.name || ""), String(b.name || "")) || cmp(String(a.id), String(b.id)));
+  return { n, tied };
+}

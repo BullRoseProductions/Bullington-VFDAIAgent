@@ -458,6 +458,7 @@ import { ymLabel, certDatesError } from "../shared/expiry.js";   // cert dates (
 // weekly email imports the same three, so "counts toward the rate" can't mean two things.
 import { isRestrictedEvent, isOptionalEvent, countsTowardRate, expectedAfterJoin, memberAttendance, drillsScheduled,
   deptAttendance as deptAttendanceShared } from "../shared/attendance.js";
+import { topAttender } from "../shared/attendance.js";   // the roster spotlight's "Most sessions · 90 days" — the rate's rule, ties explicit
 const rollFor = (s, m) => s?.audience === "board" ? isBoard(m?.access)
   : s?.audience === "leadership" ? isLeader(m?.access)
   : true;
@@ -12340,30 +12341,35 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
   const pctColor = (p) => (p == null ? FIRE.textMuted : p >= 90 ? FIRE.greenText : p >= 70 ? FIRE.amberText : FIRE.redText);   // ring + bar: ≥90 green · 70–89 amber · <70 red
   // CREW SPOTLIGHT — three cards from data already on this screen (roster rows + the loaded sessions):
   //  · Service milestone: longest tenure by the join YEAR on file (the roster carries the year, not the month).
-  //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster).
+  //  · Top responder: most sessions attended in the last 90 days (station hours aren't loaded on the roster) — counted by
+  //    shared/attendance.js's topAttender, the same session rule as the rate and the grid (no board / optional / cancelled
+  //    sessions). A tie is shown, never hidden: two → both surnames ("Able · Baker", N each); three or more → the leader by most recent
+  //    attendance + "+N tied". The order never depends on the roster's order.
   //  · Cert leader: highest cert compliance (ties → more certs on file) — and ONLY at 75%+ current (WS-4a H-1, the
   //    high bar). Below that nobody is highlighted: a "leader" at 0% read as a reward. Renamed from "Readiness
   //    leader" because it is cert compliance, not the Readiness verdict (requirements x/y).
   const yrNow = new Date().getFullYear();
-  const since90 = new Date(); since90.setDate(since90.getDate() - 90);
-  const recentDone = (sessions || []).filter((x) => x.done && sessDate(x) >= since90);
   const activeRoster = rosterAll.filter((m) => m.status !== "Inactive");
   const pick = (arr, score) => arr.reduce((best, m) => { const v = score(m); return v != null && (best == null || v > best.v) ? { m, v } : best; }, null);
   const vet = pick(activeRoster, (m) => (m.joined && /^\d{4}$/.test(String(m.joined)) ? yrNow - Number(m.joined) : null));
-  const resp = pick(activeRoster, (m) => { const n = recentDone.filter((x) => (x.attendance || []).includes(m.id)).length; return n > 0 ? n : null; });
+  const top = topAttender(activeRoster, sessions, rolling90());
+  const surname = (name) => { const w = String(name || "").trim().split(/\s+/); return w[w.length - 1] || ""; };
+  const resp = top ? { m: activeRoster.find((m) => m.id === top.tied[0].id), v: top.n, tied: top.tied } : null;
+  const respName = !resp ? null : resp.tied.length === 2 ? resp.tied.map((t) => surname(t.name)).join(" · ") : resp.m.name;
   const CERT_LEADER_FLOOR = 75;
   const lead = pick(activeRoster, (m) => { const c = compliance(m); return c == null || c < CERT_LEADER_FLOOR ? null : c * 1000 + (m.certs || []).length; });
   const initialsOf = (m) => (m.name || "").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const rankOf = (m) => m.role || "Member";   // station rank text (Firefighter, Captain…) — shared by the spotlight and the cards
-  const spot = (key, label, title, hit, big, unit, gold, tone, none = "Not enough data yet") => (
+  const respSub = !resp ? null : resp.tied.length === 2 ? "Tied for most" : resp.tied.length > 2 ? `${rankOf(resp.m)} · +${resp.tied.length - 1} tied` : null;
+  const spot = (key, label, title, hit, big, unit, gold, tone, none = "Not enough data yet", shownName = null, shownSub = null) => (
     <div key={key} style={{ position: "relative", overflow: "hidden", ...FS.cardNoir, borderRadius: 14, padding: "16px 17px", display: "flex", alignItems: "center", gap: 14, minWidth: 0, cursor: hit && onOpen ? "pointer" : "default" }} onClick={hit && onOpen ? () => onOpen(hit.m.id) : undefined}>
       <span aria-hidden="true" style={{ position: "absolute", right: -30, top: -30, width: 130, height: 130, borderRadius: "50%", background: "radial-gradient(circle, rgba(200,50,58,.22), transparent 70%)", pointerEvents: "none" }} />
       <span style={{ position: "absolute", top: 12, right: 14, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: FIRE.textMuted }}>{label}</span>
       <div style={{ width: 52, height: 52, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, color: FIRE.white, background: "linear-gradient(135deg, #1B222C, #11151B)", border: `2px solid ${gold ? "rgba(204,158,82,.6)" : "rgba(255,255,255,.1)"}`, boxShadow: gold ? "0 0 16px rgba(204,158,82,.25)" : "none" }}>{hit ? initialsOf(hit.m) : "—"}</div>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 11, color: FIRE.redText, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>{title}</div>
-        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1.1, marginTop: 3, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hit ? hit.m.name : none}</div>
-        {hit && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{rankOf(hit.m)}</div>}
+        <div style={{ fontFamily: DISPLAY_FONT, fontWeight: 700, fontSize: 18, lineHeight: 1.1, marginTop: 3, color: FIRE.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hit ? (shownName || hit.m.name) : none}</div>
+        {hit && <div style={{ fontSize: 11.5, color: FIRE.textMuted, marginTop: 3 }}>{shownSub || rankOf(hit.m)}</div>}
       </div>
       {hit && (
         <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 10 }}>
@@ -12427,7 +12433,7 @@ function RosterMembers({ S, role, members, setMembers, onOpen, notify, dept, ses
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(250px, 100%), 1fr))", gap: 12, marginBottom: 14 }}>
         {spot("vet", "★ MILESTONE", "Service milestone", vet, vet ? vet.v : null, vet && vet.v === 1 ? "year of service" : "years of service", true)}
-        {spot("resp", "▲ TOP RESPONDER", "Most sessions · 90 days", resp, resp ? resp.v : null, "sessions attended")}
+        {spot("resp", "▲ TOP RESPONDER", "Most sessions · 90 days", resp, resp ? resp.v : null, resp && resp.tied.length === 2 ? "sessions each" : "sessions attended", false, null, undefined, respName, respSub)}
         {spot("lead", "✦ CERT LEADER", "Highest cert compliance", lead, lead ? <>{Math.floor(lead.v / 1000)}<span style={{ fontSize: 14, color: FIRE.textMuted }}>%</span></> : null, "certs current", false, lead ? pctColor(Math.floor(lead.v / 1000)) : null, `No one at ${CERT_LEADER_FLOOR}%+ yet`)}
       </div>
       {canAdd && (adding ? (
