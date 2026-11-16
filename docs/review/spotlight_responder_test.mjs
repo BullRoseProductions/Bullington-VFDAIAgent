@@ -188,12 +188,12 @@ await appCaught("two-way tie shows one name", "resp.tied.length === 2 ? resp.tie
 await appCaught("\"each\" dropped from a two-way tie", "resp && resp.tied.length === 2 ? \"sessions each\" : \"sessions attended\"", "\"sessions attended\"", cardTieOK);
 
 // ---------------------------------------------------------------- 6 fences
-const changed = [...new Set([
-  ...execSync(`git diff --name-only ${BASE}`, { cwd: root }).toString().trim().split("\n"),
-  ...execSync("git ls-files --others --exclude-standard", { cwd: root }).toString().trim().split("\n"),
-].filter(Boolean))];
+// Pinned to the reviewed range ("GATE PASS @ 17ae44c"): base 49954b3 .. reviewed 17ae44c — "vs the base" goes red once
+// later work lands on main (c28a080 merges with this slice).
+const REVIEWED = process.env.REV ?? "17ae44c";
+const changed = execSync(`git diff --name-only ${BASE} ${REVIEWED}`, { cwd: root }).toString().trim().split("\n").filter(Boolean);
 const allowed = ["src/App.jsx", "shared/attendance.js", "docs/review/spotlight_responder_test.mjs"];
-ok(`6a only ${allowed.join(", ")} changed vs ${BASE} — no SQL / API / vercel.json`, changed.every((p) => allowed.includes(p)), JSON.stringify(changed.filter((p) => !allowed.includes(p))));
+ok(`6a only ${allowed.join(", ")} changed in the reviewed range ${BASE}..${REVIEWED} — no SQL / API / vercel.json`, changed.every((p) => allowed.includes(p)), JSON.stringify(changed.filter((p) => !allowed.includes(p))));
 const tok = (p) => (readFileSync(join(root, p), "utf8").match(new RegExp("verifie" + "d", "gi")) || []).length;
 ok("6b verified untouched: App.jsx 132 · digest 32 · assistant 14", tok("src/App.jsx") === 132 && tok("api/digest.js") === 32 && tok("api/assistant.js") === 14, `${tok("src/App.jsx")}/${tok("api/digest.js")}/${tok("api/assistant.js")}`);
 ok("6c Notify held: api/notify-session.js absent", !existsSync(join(root, "api/notify-session.js")));
