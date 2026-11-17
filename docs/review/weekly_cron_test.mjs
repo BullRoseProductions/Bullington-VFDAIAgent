@@ -24,7 +24,7 @@ import { build } from "esbuild";
 const ok = (name, cond, extra = "") => { console.log(cond ? "PASS" : "FAIL", name, extra); if (!cond) process.exitCode = 1; };
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const BASE = "b9faa42";                   // main 027bed8 (slice 6, "GATE PASS @ 027bed8") + its tests-only pin
-const REV = process.env.REV ?? "";        // "" = this working tree; pin to the passed sha at promote time
+const REV = process.env.REV ?? "49954b3";  // pinned to the released range b9faa42..49954b3 ("GATE PASS @ 49954b3", merged 2026-11-14)
 const show = (rev, p) => rev ? execSync(`git show ${rev}:${p}`, { cwd: root, maxBuffer: 1 << 27 }).toString() : readFileSync(join(root, p), "utf8");
 const SECRET = "s3cret-cron-value-0123456789abcdef";
 Object.assign(process.env, { PULSE_ENABLED: "1", RESEND_API_KEY: "re-test", SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: "svc-test-key", CRON_SECRET: SECRET, ANTHROPIC_API_KEY: "sk-test" });
